@@ -110,21 +110,35 @@ def generate(args):
 
     generated_list = []
     human_speech_array_all, _ = librosa.load(args.audio_path, sr=infer_params['sample_rate'], mono=True)
+    human_speech_array_slice_len = slice_len * sample_rate // tgt_fps
+    human_speech_array_frame_num = frame_num * sample_rate // tgt_fps
 
 
     if rank == 0:
         logger.info("Data preparation done. Start to generate video...")
 
     if args.audio_encode_mode == 'once':
+        # pad audio with silence to avoid truncating the last chunk
+        remainder = (len(human_speech_array_all) - human_speech_array_frame_num) % human_speech_array_slice_len
+        if remainder > 0:
+            pad_length = human_speech_array_slice_len - remainder
+            human_speech_array_all = np.concatenate([human_speech_array_all, np.zeros(pad_length, dtype=human_speech_array_all.dtype)])
+
         # encode audio together
         audio_embedding_all = get_audio_embedding(pipeline, human_speech_array_all)
+
+        # split audio embedding into chunks: 33, 28, 28, 28, ...
         audio_embedding_chunks_list = [audio_embedding_all[:, i * slice_len: i * slice_len + frame_num].contiguous() for i in range((audio_embedding_all.shape[1]-frame_num) // slice_len)]
+
         for chunk_idx, audio_embedding_chunk in enumerate(audio_embedding_chunks_list):
             torch.cuda.synchronize()
             start_time = time.time()
 
             # inference
             video = run_pipeline(pipeline, audio_embedding_chunk)
+
+            if chunk_idx != 0:
+                video = video[motion_frames_num:]
 
             torch.cuda.synchronize()
             end_time = time.time()
@@ -140,8 +154,14 @@ def generate(args):
 
         audio_dq = deque([0.0] * cached_audio_length_sum, maxlen=cached_audio_length_sum)
 
-        human_speech_array_slice_len = slice_len * sample_rate // tgt_fps
-        human_speech_array_slices = human_speech_array_all[:(len(human_speech_array_all)//(human_speech_array_slice_len))*human_speech_array_slice_len].reshape(-1, human_speech_array_slice_len)
+        # pad audio with silence to avoid truncating the last chunk
+        remainder = len(human_speech_array_all) % human_speech_array_slice_len
+        if remainder > 0:
+            pad_length = human_speech_array_slice_len - remainder
+            human_speech_array_all = np.concatenate([human_speech_array_all, np.zeros(pad_length, dtype=human_speech_array_all.dtype)])
+
+        # split audio embedding into chunks: 28, 28, 28, 28, ...
+        human_speech_array_slices = human_speech_array_all.reshape(-1, human_speech_array_slice_len)
 
         for chunk_idx, human_speech_array in enumerate(human_speech_array_slices):
             # streaming encode audio chunks
@@ -154,6 +174,7 @@ def generate(args):
 
             # inference
             video = run_pipeline(pipeline, audio_embedding)
+            video = video[motion_frames_num:]
 
             torch.cuda.synchronize()
             end_time = time.time()

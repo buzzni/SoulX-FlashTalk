@@ -4,4 +4,6 @@ __pycache__/
 logs/
 assets/
 sample_results/
+gradio_results/
+gradio_results_multigpu/
 models/

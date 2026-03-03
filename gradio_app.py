@@ -9,7 +9,6 @@ import subprocess
 from datetime import datetime
 from collections import deque
 from loguru import logger
-import argparse
 
 # Import internal modules
 from flash_talk.inference import get_pipeline, get_base_data, get_audio_embedding, run_pipeline, infer_params
@@ -196,10 +195,19 @@ def run_inference(
     except Exception as e:
         raise gr.Error(f"Failed to load audio file: {e}")
 
+    human_speech_array_slice_len = slice_len * sample_rate // tgt_fps
+    human_speech_array_frame_num = frame_num * sample_rate // tgt_fps
+
     logger.info("Data preparation done. Start to generate video...")
 
     # 3. Generation Loop
     if audio_encode_mode == 'once':
+        # pad audio with silence to avoid truncating the last chunk
+        remainder = (len(human_speech_array_all) - human_speech_array_frame_num) % human_speech_array_slice_len
+        if remainder > 0:
+            pad_length = human_speech_array_slice_len - remainder
+            human_speech_array_all = np.concatenate([human_speech_array_all, np.zeros(pad_length, dtype=human_speech_array_all.dtype)])
+
         audio_embedding_all = get_audio_embedding(pipeline, human_speech_array_all)
         audio_embedding_chunks_list = [audio_embedding_all[:, i * slice_len: i * slice_len + frame_num].contiguous() for i in range((audio_embedding_all.shape[1]-frame_num) // slice_len)]
         
@@ -212,6 +220,9 @@ def run_inference(
 
             # inference
             video = run_pipeline(pipeline, audio_embedding_chunk)
+
+            if chunk_idx != 0:
+                video = video[motion_frames_num:]
 
             torch.cuda.synchronize()
             end_time = time.time()
@@ -226,8 +237,14 @@ def run_inference(
 
         audio_dq = deque([0.0] * cached_audio_length_sum, maxlen=cached_audio_length_sum)
 
-        human_speech_array_slice_len = slice_len * sample_rate // tgt_fps
-        human_speech_array_slices = human_speech_array_all[:(len(human_speech_array_all)//(human_speech_array_slice_len))*human_speech_array_slice_len].reshape(-1, human_speech_array_slice_len)
+        # pad audio with silence to avoid truncating the last chunk
+        remainder = len(human_speech_array_all) % human_speech_array_slice_len
+        if remainder > 0:
+            pad_length = human_speech_array_slice_len - remainder
+            human_speech_array_all = np.concatenate([human_speech_array_all, np.zeros(pad_length, dtype=human_speech_array_all.dtype)])
+
+        # split audio embedding into chunks: 28, 28, 28, 28, ...
+        human_speech_array_slices = human_speech_array_all.reshape(-1, human_speech_array_slice_len)
 
         total_chunks = len(human_speech_array_slices)
         for chunk_idx, human_speech_array in enumerate(human_speech_array_slices):
@@ -243,6 +260,7 @@ def run_inference(
 
             # inference
             video = run_pipeline(pipeline, audio_embedding)
+            video = video[motion_frames_num:]
 
             torch.cuda.synchronize()
             end_time = time.time()
@@ -315,7 +333,7 @@ with gr.Blocks(title="SoulX-FlashTalk Video Generator", theme=gr.themes.Soft()) 
                         )
                         cpu_offload_input = gr.Checkbox(
                             label="Enable CPU Offload", 
-                            value=True,
+                            value=False,
                             info="Enable CPU offload for low VRAM(48G) usage (Single GPU only)."
                         )
 
