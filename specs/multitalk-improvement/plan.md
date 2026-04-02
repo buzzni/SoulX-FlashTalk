@@ -108,18 +108,46 @@
 
 ---
 
+## Phase 1.7: 윤곽선 자연스럽게 + 입모양 과장 완화 (2026-04-02)
+
+> **문제 1**: 배경과 쇼호스트 사이 윤곽선이 딱딱하게 보임 (하드 엣지)
+> **문제 2**: 쇼호스트 말하기가 과장되어 보임
+
+### Step 7.1: Alpha Edge Feathering ✅
+- **파일**: `modules/video_matting.py` — `_boost_alpha()` 수정
+- **변경**: alpha boost 후 edge에 Gaussian blur(radius=3) 적용
+- **원리**:
+  - 내부 영역(alpha >= 250): 하드 alpha 유지 (선명한 인물)
+  - 경계 영역(alpha < 250): soft blur alpha 사용 (부드러운 전환)
+- **효과**: 인물 윤곽이 배경에 자연스럽게 녹아드는 feathering 효과
+
+### Step 7.2: 입모양 과장 완화 (Audio LUFS 조절) ✅
+- **파일**: `config.py` — `FLASHTALK_OPTIONS["audio_lufs"]` 추가
+- **파일**: `modules/conversation_generator.py` — 오디오 사전 감쇠 적용
+- **원리**:
+  - FlashTalk은 distilled 모델이라 audio_scale 파라미터 없음
+  - 대신 입력 오디오의 세기를 줄여 lip-sync 강도를 완화
+  - `loudness_norm` 내부는 -23 LUFS로 정규화 → 사전에 audio를 감쇠해서 전달
+  - 기본값: `-28 LUFS` (기존 -23보다 5dB 약함 = ~56% 볼륨)
+- **설정**: `config.py`에서 `audio_lufs` 값 조절 가능
+  - `-23`: 원래 강도 (과장됨)
+  - `-28`: 자연스러운 말하기 (기본)
+  - `-33`: 매우 부드러운 말하기
+
+---
+
 ## Phase 2: 품질 고도화
 
-### Step 7: rembg 대신 비디오 전용 matting 적용
+### Step 8: rembg 대신 비디오 전용 matting 적용
 - **후보**: `RobustVideoMatting` (MIT License, 실시간 가능)
 - **장점**: 프레임 간 시간적 일관성 → 인물 경계 떨림 없음
 - **rembg 문제점**: 프레임별 독립 처리 → 경계가 프레임마다 미세하게 달라 떨림 발생 가능
 
-### Step 8: 배경 동적 효과 (선택)
+### Step 9: 배경 동적 효과 (선택)
 - 정적 배경 이미지 대신 **미세한 움직임** 추가 (카메라 미세 흔들림, 조명 변화)
 - 간단한 affine transform + 노이즈로 구현 가능
 
-### Step 9: 그림자/반사/조명 보정
+### Step 10: 그림자/반사/조명 보정
 - 인물을 배경에 합성할 때 자연스러운 그림자 추가
 - 배경 조명에 맞는 인물 색온도 보정
 

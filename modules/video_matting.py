@@ -24,11 +24,14 @@ def _get_session():
 
 
 def _boost_alpha(rgba: Image.Image) -> Image.Image:
-    """Post-process alpha channel to fix semi-transparent person issue.
+    """Post-process alpha channel: boost opacity + feather edges for natural blending.
 
     rembg often outputs weak alpha (150-200) on AI-generated frames.
-    This boosts weak alpha to fully opaque, and cleans up noise.
+    This boosts weak alpha to fully opaque, cleans noise, and applies
+    Gaussian feathering to edges so the person blends naturally into the background.
     """
+    from PIL import ImageFilter
+
     r, g, b, a = rgba.split()
     a_np = np.array(a, dtype=np.float32)
 
@@ -41,7 +44,21 @@ def _boost_alpha(rgba: Image.Image) -> Image.Image:
     # 3) Strong alpha (>180 after boost) → fully opaque
     a_np[a_np > 180] = 255
 
-    a_boosted = Image.fromarray(a_np.astype(np.uint8), mode="L")
+    # 4) Edge feathering: Gaussian blur on alpha to soften hard edges
+    #    Only blur the edge region, not the interior (preserve sharp person body)
+    a_hard = Image.fromarray(a_np.astype(np.uint8), mode="L")
+    a_soft = a_hard.filter(ImageFilter.GaussianBlur(radius=3))
+
+    # Blend: keep hard alpha in interior (>200), use soft alpha near edges
+    a_hard_np = np.array(a_hard, dtype=np.float32)
+    a_soft_np = np.array(a_soft, dtype=np.float32)
+
+    # Interior mask: where hard alpha is fully opaque
+    interior = a_hard_np >= 250
+    # Use hard alpha for interior, soft alpha for edge region
+    a_final = np.where(interior, a_hard_np, a_soft_np)
+
+    a_boosted = Image.fromarray(a_final.astype(np.uint8), mode="L")
     rgba.putalpha(a_boosted)
     return rgba
 

@@ -93,6 +93,16 @@ def generate_turn_video(
 
     human_speech_array_all, _ = librosa.load(audio_path, sr=sample_rate, mono=True)
 
+    # Reduce audio intensity for more natural mouth movement
+    # FlashTalk uses loudness_norm internally at -23 LUFS; pre-attenuate to target LUFS
+    import config as _cfg
+    target_lufs = _cfg.FLASHTALK_OPTIONS.get("audio_lufs", -23)
+    if target_lufs < -23:
+        attenuation_db = target_lufs - (-23)  # negative value
+        attenuation_linear = 10.0 ** (attenuation_db / 20.0)
+        human_speech_array_all = human_speech_array_all * attenuation_linear
+        logger.info(f"  Audio pre-attenuated by {attenuation_db:.1f}dB (target LUFS: {target_lufs})")
+
     # Stream mode generation
     human_speech_array_slice_len = slice_len * sample_rate // tgt_fps
     cached_audio_length_sum = sample_rate * cached_audio_duration

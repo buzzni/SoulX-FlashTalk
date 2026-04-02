@@ -26,6 +26,7 @@ FLASHTALK_OPTIONS = {
     "audio_encode_mode": "stream",  # "stream" or "once"
     "base_seed": 9999,
     "cpu_offload": True,  # Enable CPU offload for lower VRAM usage (40GB instead of 64GB)
+    "audio_lufs": -28,  # Audio loudness normalization target (default: -23, lower = subtler mouth movement)
 }
 
 # ========================================

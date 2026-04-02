@@ -87,9 +87,31 @@ canvas.paste(person_resized, (paste_x, paste_y), person_resized)
 - rembg의 u2net은 AI 생성 이미지에서 edge 품질이 떨어짐
 - 특히 머리카락, 의복 경계에서 alpha가 급격히 약해짐
 
-### 해결 방향
+### 해결 방향 및 적용 결과
 
-1. **Alpha 후처리 (즉시 적용)**: threshold + boost로 약한 alpha를 255로 강화
-2. **rembg 모델 업그레이드**: `u2net` → `u2net_human_seg` (인체 전용) 또는 `birefnet-general` (최신)
-3. **FlashTalk 입력 배경 단순화**: Gemini 복잡 배경 대신 단색/그라데이션 배경 사용 → 추출 용이
-4. **비디오 전용 matting**: RobustVideoMatting으로 프레임 간 시간적 일관성 확보
+1. ✅ **Alpha 후처리**: threshold + boost로 약한 alpha를 255로 강화 → 반투명 해결
+2. ✅ **rembg 모델 업그레이드**: `u2net` → `u2net_human_seg` (인체 전용) → 정확도 향상
+3. ✅ **FlashTalk 입력 배경 단순화**: 단색 회색(180,180,180) 배경 → rembg 추출 용이
+4. **비디오 전용 matting**: RobustVideoMatting → Phase 2에서 적용 예정
+
+---
+
+## Phase 1.7 결과: 윤곽선 + 입모양 과장 문제 (2026-04-02)
+
+### 현상
+- **배경과 인물 경계**: 하드 엣지로 부자연스러움 (오려붙인 듯한 느낌)
+- **입모양**: 과장되게 말하는 것처럼 보임
+
+### 원인 분석
+
+| 원인 | 심각도 | 설명 |
+|------|--------|------|
+| `_boost_alpha()`에서 alpha > 180 → 255 하드 전환 | **높음** | 경계에서 급격한 alpha 변화 → 딱딱한 윤곽선 |
+| 입력 오디오 정규화 LUFS -23 | **중간** | 표준 방송 레벨이지만 FlashTalk distilled 모델에서 과도한 입움직임 유발 |
+
+### 적용한 해결책
+
+1. ✅ **Edge Feathering**: alpha boost 후 경계에 Gaussian blur(radius=3) 적용
+   - 내부(alpha >= 250): 하드 유지, 경계(alpha < 250): soft blur
+2. ✅ **Audio LUFS 감쇠**: -23 → -28 LUFS (5dB 감쇠, ~56% 볼륨)
+   - `config.py`의 `audio_lufs` 파라미터로 조절 가능
