@@ -2,12 +2,14 @@ import { useState } from 'react'
 import './App.css'
 import VideoGenerator from './components/VideoGenerator'
 import ConversationGenerator from './components/ConversationGenerator'
+import QueueStatus from './components/QueueStatus'
 
 function App() {
   const [mode, setMode] = useState('single')
 
   return (
     <div className="App">
+      <QueueStatus />
       <header className="App-header">
         <h1>I'M SELLER</h1>
         <p>AI 쇼호스트</p>

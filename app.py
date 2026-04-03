@@ -14,13 +14,14 @@ from pathlib import Path
 from typing import Optional, List
 from datetime import datetime
 
-from fastapi import FastAPI, File, UploadFile, Form, HTTPException, BackgroundTasks
+from fastapi import FastAPI, File, UploadFile, Form, HTTPException
 from fastapi.responses import FileResponse, StreamingResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 import uvicorn
 
 import config
+from modules.task_queue import task_queue
 
 # Setup logging
 logging.basicConfig(
@@ -453,7 +454,43 @@ async def generate_video_task(
 async def startup_event():
     global pipeline_lock
     pipeline_lock = asyncio.Lock()
-    logger.info("SoulX-FlashTalk API server started")
+
+    # Register queue handlers and start worker
+    task_queue.register_handler("generate", _queue_generate_handler)
+    task_queue.register_handler("conversation", _queue_conversation_handler)
+    await task_queue.start()
+
+    logger.info("SoulX-FlashTalk API server started (queue worker active)")
+
+
+async def _queue_generate_handler(task_id: str, **params):
+    """Queue handler that delegates to generate_video_task."""
+    await generate_video_task(
+        task_id=task_id,
+        host_image=params["host_image"],
+        audio_path=params["audio_path"],
+        audio_source_label=params["audio_source_label"],
+        prompt=params["prompt"],
+        seed=params["seed"],
+        cpu_offload=params["cpu_offload"],
+        script_text=params.get("script_text", ""),
+        resolution=params.get("resolution", "1280x720"),
+        scene_prompt=params.get("scene_prompt", ""),
+        reference_image_paths=params.get("reference_image_paths"),
+    )
+
+
+async def _queue_conversation_handler(task_id: str, **params):
+    """Queue handler that delegates to generate_conversation_task."""
+    await generate_conversation_task(
+        task_id=task_id,
+        dialog_data=params["dialog_data"],
+        layout=params["layout"],
+        prompt=params["prompt"],
+        seed=params["seed"],
+        cpu_offload=params["cpu_offload"],
+        resolution=params.get("resolution", "1280x720"),
+    )
 
 
 # ========================================
@@ -742,7 +779,6 @@ async def clone_voice(
 
 @app.post("/api/generate")
 async def generate_video(
-    background_tasks: BackgroundTasks,
     audio_source: str = Form("upload"),  # "upload", "elevenlabs"
     host_image_path: Optional[str] = Form(None),
     audio_path: Optional[str] = Form(None),
@@ -809,29 +845,35 @@ async def generate_video(
     if not prompt:
         prompt = config.FLASHTALK_OPTIONS["default_prompt"]
 
-    # Create task
+    # Create task and add to queue
     task_id = uuid.uuid4().hex
     create_task(task_id)
-    update_task(task_id, "queued", 0.0, "작업 대기 중...")
+    update_task(task_id, "queued", 0.0, "큐 대기 중...")
 
     ref_paths = json.loads(reference_image_paths) if reference_image_paths else []
 
-    background_tasks.add_task(
-        generate_video_task,
-        task_id,
-        host_image_path,
-        audio_path,
-        audio_source_label,
-        prompt,
-        seed,
-        cpu_offload,
-        script_text,
-        resolution,
-        scene_prompt,
-        ref_paths,
+    await task_queue.enqueue(
+        task_id=task_id,
+        task_type="generate",
+        params={
+            "host_image": host_image_path,
+            "audio_path": audio_path,
+            "audio_source_label": audio_source_label,
+            "prompt": prompt,
+            "seed": seed,
+            "cpu_offload": cpu_offload,
+            "script_text": script_text,
+            "resolution": resolution,
+            "scene_prompt": scene_prompt,
+            "reference_image_paths": ref_paths,
+        },
+        label=script_text[:50] if script_text else "Video generation",
     )
 
-    return {"task_id": task_id, "message": "Video generation started"}
+    queue_status = await task_queue.get_status()
+    position = queue_status["total_pending"]
+
+    return {"task_id": task_id, "message": "Video generation queued", "queue_position": position}
 
 
 @app.get("/api/progress/{task_id}")
@@ -1135,7 +1177,6 @@ async def generate_conversation_task(
 
 @app.post("/api/generate-conversation")
 async def generate_conversation_endpoint(
-    background_tasks: BackgroundTasks,
     dialog_data: str = Form(...),  # JSON string
     layout: str = Form("split"),
     prompt: Optional[str] = Form(None),
@@ -1163,20 +1204,52 @@ async def generate_conversation_endpoint(
 
     task_id = uuid.uuid4().hex
     create_task(task_id)
-    update_task(task_id, "queued", 0.0, "대화 영상 생성 대기 중...")
+    update_task(task_id, "queued", 0.0, "큐 대기 중...")
 
-    background_tasks.add_task(
-        generate_conversation_task,
-        task_id,
-        parsed_data,
-        layout,
-        prompt,
-        seed,
-        cpu_offload,
-        resolution,
+    # Build label from first dialog turn
+    dialog_turns = parsed_data.get("dialog", [])
+    label = dialog_turns[0]["text"][:50] if dialog_turns else "Conversation"
+
+    await task_queue.enqueue(
+        task_id=task_id,
+        task_type="conversation",
+        params={
+            "dialog_data": parsed_data,
+            "layout": layout,
+            "prompt": prompt,
+            "seed": seed,
+            "cpu_offload": cpu_offload,
+            "resolution": resolution,
+        },
+        label=label,
     )
 
-    return {"task_id": task_id, "message": "Conversation video generation started"}
+    queue_status = await task_queue.get_status()
+    position = queue_status["total_pending"]
+
+    return {"task_id": task_id, "message": "Conversation video generation queued", "queue_position": position}
+
+
+# ========================================
+# Queue Status Endpoints
+# ========================================
+
+@app.get("/api/queue")
+async def get_queue_status():
+    """Get current queue status: running, pending, and recent tasks."""
+    return await task_queue.get_status()
+
+
+@app.delete("/api/queue/{task_id}")
+async def cancel_queued_task(task_id: str):
+    """Cancel a pending task in the queue."""
+    success = await task_queue.cancel_task(task_id)
+    if not success:
+        raise HTTPException(status_code=404, detail="Task not found or not in pending state")
+    # Also update task_states
+    if task_id in task_states:
+        set_task_error(task_id, "사용자가 작업을 취소했습니다")
+    return {"message": "Task cancelled", "task_id": task_id}
 
 
 @app.get("/api/files/{filename:path}")
