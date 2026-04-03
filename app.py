@@ -241,6 +241,8 @@ async def generate_video_task(
     cpu_offload: bool,
     script_text: str = "",
     resolution: str = "1280x720",
+    scene_prompt: str = "",
+    reference_image_paths: list = None,
 ):
     """Run SoulX-FlashTalk video generation in background"""
     global pipeline, pipeline_lock
@@ -252,6 +254,38 @@ async def generate_video_task(
 
         try:
             loop = asyncio.get_event_loop()
+
+            # Stage 0: Gemini background generation (if scene_prompt provided)
+            if scene_prompt and scene_prompt.strip():
+                update_task(task_id, "compositing_bg", 0.02, "배경 생성 중 (Gemini)...")
+                ref_paths = reference_image_paths or []
+
+                res_parts = resolution.split("x")
+                target_h, target_w = int(res_parts[0]), int(res_parts[1])
+
+                from modules.image_compositor import compose_agents_together, release_models
+
+                try:
+                    # compositor expects (width, height) — "1280x720" → h=1280, w=720 → pass (h, w) as (w, h)
+                    results = await loop.run_in_executor(
+                        None,
+                        lambda: compose_agents_together(
+                            host_image_paths=[host_image],
+                            bg_image_path=os.path.join(config.UPLOADS_DIR, "dummy"),
+                            target_size=(target_h, target_w),
+                            layout="single",
+                            scene_prompt=scene_prompt,
+                            reference_image_paths=ref_paths if ref_paths else None,
+                        )
+                    )
+                    # Use the composed image as the host image for FlashTalk
+                    composed_path = results.get("full") or results.get(0)
+                    if composed_path and os.path.exists(composed_path):
+                        host_image = composed_path
+                        logger.info(f"Gemini background applied: {composed_path}")
+                    update_task(task_id, "compositing_bg", 0.08, "배경 생성 완료")
+                finally:
+                    await loop.run_in_executor(None, release_models)
 
             # Stage 1: Load pipeline if needed
             update_task(task_id, "loading", 0.1, "모델 로딩 중...")
@@ -517,11 +551,12 @@ async def preview_composite(
     from modules.image_compositor import compose_agent_image, release_models
 
     try:
+        # compose_agent_image expects (width, height)
         result_path = await loop.run_in_executor(
             None,
             lambda: compose_agent_image(
                 host_image_path, bg_image_path,
-                target_size=(target_w, target_h),
+                target_size=(target_h, target_w),
                 scale=scale, position=position,
             )
         )
@@ -557,12 +592,13 @@ async def preview_composite_together(
     from modules.image_compositor import compose_agents_together, release_models
 
     try:
+        # compositor expects (width, height) — "1280x720" → h=1280, w=720 → pass (h, w) as (w, h)
         results = await loop.run_in_executor(
             None,
             lambda: compose_agents_together(
                 host_image_paths=host_paths,
                 bg_image_path=os.path.join(config.UPLOADS_DIR, "dummy"),
-                target_size=(target_w, target_h),
+                target_size=(target_h, target_w),
                 layout=layout,
                 scene_prompt=scene_prompt,
                 reference_image_paths=ref_paths if ref_paths else None,
@@ -721,6 +757,9 @@ async def generate_video(
     seed: int = Form(9999),
     cpu_offload: bool = Form(True),
     resolution: str = Form("1280x720"),
+    # Gemini background generation
+    scene_prompt: str = Form(""),
+    reference_image_paths: str = Form("[]"),
 ):
     """Generate video from host image + audio"""
 
@@ -775,6 +814,8 @@ async def generate_video(
     create_task(task_id)
     update_task(task_id, "queued", 0.0, "작업 대기 중...")
 
+    ref_paths = json.loads(reference_image_paths) if reference_image_paths else []
+
     background_tasks.add_task(
         generate_video_task,
         task_id,
@@ -786,6 +827,8 @@ async def generate_video(
         cpu_offload,
         script_text,
         resolution,
+        scene_prompt,
+        ref_paths,
     )
 
     return {"task_id": task_id, "message": "Video generation started"}
@@ -912,9 +955,10 @@ async def generate_conversation_task(
                     def gen_alpha_assets():
                         from modules.image_compositor import compose_agent_on_solid_bg
                         # 1) Gemini background-only (no people)
+                        # compositor expects (width, height)
                         path = generate_background_only(
                             scene_prompt=scene_prompt,
-                            target_size=(target_w, target_h),
+                            target_size=(target_h, target_w),
                             reference_image_paths=ref_paths if ref_paths else None,
                         )
                         # 2) Per-agent: solid gray background + person (easy rembg extraction)
@@ -922,7 +966,7 @@ async def generate_conversation_task(
                         for agent in agent_list:
                             solid_path = compose_agent_on_solid_bg(
                                 host_image_path=agent.face_image,
-                                target_size=(target_w, target_h),
+                                target_size=(target_h, target_w),
                                 bg_color=(180, 180, 180),
                             )
                             logger.info(f"Agent {agent.name}: solid bg -> {solid_path}")
@@ -943,7 +987,7 @@ async def generate_conversation_task(
                         composed = compose_agents_together(
                             host_image_paths=host_paths,
                             bg_image_path=os.path.join(config.UPLOADS_DIR, "dummy"),
-                            target_size=(target_w, target_h),
+                            target_size=(target_h, target_w),
                             layout=layout,
                             scene_prompt=scene_prompt,
                             reference_image_paths=ref_paths if ref_paths else None,
@@ -963,7 +1007,7 @@ async def generate_conversation_task(
                         composed = compose_agents_together(
                             host_image_paths=host_paths,
                             bg_image_path=os.path.join(config.UPLOADS_DIR, "dummy"),
-                            target_size=(target_w, target_h),
+                            target_size=(target_h, target_w),
                             layout=layout,
                             scene_prompt=scene_prompt,
                             reference_image_paths=ref_paths if ref_paths else None,

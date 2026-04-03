@@ -60,6 +60,7 @@ ELEVENLABS_OPTIONS = {
 # ========================================
 DEFAULT_HOST_IMAGE_MALE = os.path.join(PROJECT_ROOT, "examples", "man_default.png")
 DEFAULT_HOST_IMAGE_FEMALE = os.path.join(PROJECT_ROOT, "examples", "woman.png")
+DEFAULT_HOST_IMAGE = DEFAULT_HOST_IMAGE_FEMALE  # Single Host 기본: 호스트 A (여성)
 DEFAULT_AUDIO = os.path.join(PROJECT_ROOT, "examples", "cantonese_16k.wav")
 
 # Default ElevenLabs voice names per gender

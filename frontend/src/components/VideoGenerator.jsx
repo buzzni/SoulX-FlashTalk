@@ -37,6 +37,12 @@ function VideoGenerator() {
   const [cpuOffload, setCpuOffload] = useState(true)
   const [resolution, setResolution] = useState('1280x720')
 
+  // Scene prompt (Gemini background generation)
+  const [scenePrompt, setScenePrompt] = useState('')
+  const [refImages, setRefImages] = useState([]) // [{path, preview, name}]
+  const [compositeLoading, setCompositeLoading] = useState(false)
+  const [compositePreview, setCompositePreview] = useState(null)
+
   // Generation state
   const [isGenerating, setIsGenerating] = useState(false)
   const [progress, setProgress] = useState(0)
@@ -64,8 +70,10 @@ function VideoGenerator() {
         setPrompt(data.default_prompt || '')
         setSeed(data.default_seed || 9999)
         setCpuOffload(data.cpu_offload ?? true)
-        if (data.default_host_image) {
-          setHostImagePreview(`${API_BASE_URL}/static/${data.default_host_image}`)
+        // 기본 이미지: Host A (여성) 이미지 사용
+        const defaultImage = data.default_host_image_female || data.default_host_image
+        if (defaultImage) {
+          setHostImagePreview(`${API_BASE_URL}/static/${defaultImage}`)
         }
       })
       .catch(err => console.error('Config load failed:', err))
@@ -91,7 +99,10 @@ function VideoGenerator() {
       const data = await r.json()
       setVoices(data.voices || [])
       if (data.voices?.length > 0 && !selectedVoice) {
-        setSelectedVoice(data.voices[0].voice_id)
+        // 기본 음성: Host A (JiYoung) 사용
+        const defaultVoiceName = appConfig?.default_voice_female || 'JiYoung'
+        const defaultVoice = data.voices.find(v => v.name?.includes(defaultVoiceName.split(' ')[0]))
+        setSelectedVoice(defaultVoice ? defaultVoice.voice_id : data.voices[0].voice_id)
       }
     } catch (err) {
       console.error('Failed to load voices:', err)
@@ -192,6 +203,63 @@ function VideoGenerator() {
     }
   }
 
+  // Reference image upload (for Gemini background)
+  const handleRefImageUpload = async (e) => {
+    const file = e.target.files[0]
+    if (!file) return
+    const preview = URL.createObjectURL(file)
+    const formData = new FormData()
+    formData.append('file', file)
+    try {
+      const r = await fetch(`${API_BASE_URL}/api/upload/reference-image`, { method: 'POST', body: formData })
+      const data = await r.json()
+      setRefImages(prev => [...prev, { path: data.path, preview, name: file.name }])
+    } catch (err) {
+      setError('참조 이미지 업로드 실패')
+    }
+    e.target.value = ''
+  }
+
+  const removeRefImage = (index) => {
+    setRefImages(prev => prev.filter((_, i) => i !== index))
+  }
+
+  // Generate composite preview via Gemini scene generation
+  const generateCompositePreview = async () => {
+    if (!scenePrompt.trim() || (!hostImagePath && !hostImagePreview)) return
+
+    setCompositeLoading(true)
+    setCompositePreview(null)
+
+    try {
+      // Use uploaded host image or default
+      const hostPath = hostImagePath || (appConfig?.default_host_image_female ? `examples/${appConfig.default_host_image_female.split('/').pop()}` : null)
+      if (!hostPath) return
+
+      const refPaths = refImages.map(r => r.path)
+      const formData = new FormData()
+      formData.append('host_image_paths', JSON.stringify([hostPath]))
+      formData.append('resolution', resolution)
+      formData.append('layout', 'single')
+      formData.append('scene_prompt', scenePrompt)
+      formData.append('reference_image_paths', JSON.stringify(refPaths))
+
+      const r = await fetch(`${API_BASE_URL}/api/preview/composite-together`, { method: 'POST', body: formData })
+      if (r.ok) {
+        const data = await r.json()
+        const fullImage = data.full_image || Object.values(data.paths)[0]
+        if (fullImage) {
+          const filename = fullImage.replace(/\\/g, '/').split('/').pop()
+          setCompositePreview(`${API_BASE_URL}/api/files/${filename}?t=${Date.now()}`)
+        }
+      }
+    } catch (err) {
+      console.error('Composite preview failed:', err)
+    } finally {
+      setCompositeLoading(false)
+    }
+  }
+
   // Generate video
   const handleGenerate = async () => {
     if (audioSource === 'upload' && !audioPath && !appConfig?.default_audio) {
@@ -222,6 +290,12 @@ function VideoGenerator() {
     formData.append('resolution', resolution)
 
     if (hostImagePath) formData.append('host_image_path', hostImagePath)
+
+    // Gemini background generation
+    if (scenePrompt.trim()) {
+      formData.append('scene_prompt', scenePrompt)
+      formData.append('reference_image_paths', JSON.stringify(refImages.map(r => r.path)))
+    }
 
     if (audioSource === 'upload') {
       if (audioPath) formData.append('audio_path', audioPath)
@@ -294,7 +368,60 @@ function VideoGenerator() {
               </div>
             )}
             {hostImageFile && <small>업로드됨: {hostImageFile.name}</small>}
-            {!hostImageFile && <small>기본값: examples/man.png</small>}
+            {!hostImageFile && <small>기본값: examples/woman.png (호스트 A)</small>}
+          </div>
+
+          {/* Scene Generation (Gemini) */}
+          <div className="form-group scene-generation-group">
+            <label><strong>배경 생성 (Gemini)</strong> <span className="optional-tag">선택</span></label>
+
+            <textarea
+              className="scene-prompt-input"
+              value={scenePrompt}
+              onChange={(e) => setScenePrompt(e.target.value)}
+              placeholder="예: A modern Samsung Galaxy studio with large screens showing smartphones, professional studio lighting"
+              rows={3}
+              disabled={isGenerating}
+            />
+
+            {/* Reference Images */}
+            <div className="ref-images-section">
+              <label className="ref-label">참조 이미지 <span className="optional-tag">상품, 브랜딩 등</span></label>
+              <input type="file" accept="image/*" onChange={handleRefImageUpload} disabled={isGenerating} />
+              {refImages.length > 0 && (
+                <div className="ref-images-list">
+                  {refImages.map((img, idx) => (
+                    <div key={idx} className="ref-image-item">
+                      <img src={img.preview} alt={img.name} />
+                      <button className="ref-remove-btn" onClick={() => removeRefImage(idx)} disabled={isGenerating}>×</button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Generate Preview Button */}
+            <div className="scene-prompt-actions">
+              <button
+                className="preview-gen-btn"
+                onClick={generateCompositePreview}
+                disabled={isGenerating || compositeLoading || !scenePrompt.trim() || (!hostImagePath && !hostImagePreview)}
+              >
+                {compositeLoading ? '생성 중...' : '프리뷰 생성'}
+              </button>
+              {compositePreview && (
+                <button className="bg-remove-btn" onClick={() => setCompositePreview(null)} disabled={isGenerating}>초기화</button>
+              )}
+            </div>
+
+            {/* Composite Preview */}
+            {compositePreview && (
+              <div className="image-preview composite-preview">
+                <img src={compositePreview} alt="Gemini 배경 프리뷰" />
+              </div>
+            )}
+
+            {!scenePrompt && <small className="bg-hint">배경을 텍스트로 설명하고, 필요시 참조 이미지를 추가하면 Gemini가 배경을 생성합니다</small>}
           </div>
 
           {/* Audio Source Selector */}

@@ -65,6 +65,27 @@ def _resize_for_api(img, max_side=1024):
     return img.resize((int(w * ratio), int(h * ratio)), Image.LANCZOS)
 
 
+def _resize_and_crop(img: Image.Image, target_size: Tuple[int, int]) -> Image.Image:
+    """Resize while preserving aspect ratio, then center-crop to target_size.
+
+    This avoids stretching/squishing that happens with a direct resize.
+    target_size is (width, height).
+    """
+    tw, th = target_size
+    w, h = img.size
+
+    # Scale so image covers target (fill, not fit)
+    scale = max(tw / w, th / h)
+    new_w = int(w * scale)
+    new_h = int(h * scale)
+    img = img.resize((new_w, new_h), Image.LANCZOS)
+
+    # Center crop
+    left = (new_w - tw) // 2
+    top = (new_h - th) // 2
+    return img.crop((left, top, left + tw, top + th))
+
+
 def _apply_edge_fade(img: Image.Image, fade_px: int, side: str = "right") -> Image.Image:
     """Apply a soft gradient fade on one edge to blend with adjacent panel.
 
@@ -154,6 +175,23 @@ def _gemini_generate_scene(
         client = _get_gemini_client()
 
         # Build prompt based on whether reference images are provided
+        # Common lighting/shadow/perspective rules
+        lighting_rules = (
+            "\n\nLIGHTING & SHADOW RULES:\n"
+            "- Determine the main light source direction from the scene description and reference images.\n"
+            "- Cast realistic shadows on the ground/floor beneath each person, consistent with the light source direction and angle.\n"
+            "- Shadow length and softness must match the lighting distance (close light = sharp shadow, distant light = soft shadow).\n"
+            "- Apply subtle ambient occlusion where the person's feet meet the ground (contact shadow).\n"
+            "- Match the color temperature of light hitting the person to the scene's ambient lighting (warm/cool/mixed).\n"
+            "- Add subtle rim lighting or backlighting on the person's edges if the scene has strong directional or back lights.\n"
+            "\nPERSPECTIVE & SPATIAL RULES:\n"
+            "- The person's feet must be firmly grounded on the floor plane, matching the scene's perspective vanishing point.\n"
+            "- The camera angle (eye-level, slightly low, slightly high) must be consistent between the person and the background.\n"
+            "- The person's scale must be realistic relative to nearby objects (desks, screens, furniture) in the scene.\n"
+            "- Ensure correct depth-of-field: if the background has bokeh/blur, apply matching subtle depth cues around the person's edges.\n"
+            "- CRITICAL: Preserve the person's EXACT height-to-width ratio (aspect ratio). Do NOT compress or stretch the person vertically or horizontally.\n"
+        )
+
         if reference_images:
             full_prompt = (
                 "I am providing the following images:\n"
@@ -168,14 +206,14 @@ def _gemini_generate_scene(
                 "STRICT RULES:\n"
                 "- Keep each person's face, body, clothing, and proportions EXACTLY as shown in Image 1.\n"
                 "- Keep the people's positions (left/right) EXACTLY as shown in Image 1.\n"
-                "- Keep the people's SIZE EXACTLY as shown. Do NOT resize or reshape them.\n"
+                "- Keep the people's SIZE and ASPECT RATIO EXACTLY as shown. Do NOT resize, reshape, compress, or stretch them.\n"
                 "- Replace ONLY the white background with the described scene.\n"
                 "- Incorporate elements from the reference images naturally into the scene.\n"
-                "- Add natural lighting, shadows, and reflections matching the scene.\n"
                 "- The result should look like a real photograph.\n"
                 "- Do NOT alter the people in any way.\n"
                 "- Do NOT add any text, letters, words, logos, watermarks, or captions anywhere in the image.\n"
                 "- Keep the background SYMMETRIC left-to-right as much as possible."
+                + lighting_rules
             )
         else:
             full_prompt = (
@@ -185,13 +223,13 @@ def _gemini_generate_scene(
                 "STRICT RULES:\n"
                 "- Keep each person's face, body, clothing, and proportions EXACTLY as shown.\n"
                 "- Keep the people's positions (left/right) EXACTLY as shown.\n"
-                "- Keep the people's SIZE EXACTLY as shown. Do NOT resize or reshape them.\n"
+                "- Keep the people's SIZE and ASPECT RATIO EXACTLY as shown. Do NOT resize, reshape, compress, or stretch them.\n"
                 "- Replace ONLY the white background with the described scene.\n"
-                "- Add natural lighting, shadows, and reflections matching the scene.\n"
                 "- The result should look like a real photograph taken at that location.\n"
                 "- Do NOT alter the people in any way.\n"
                 "- Do NOT add any text, letters, words, logos, watermarks, or captions anywhere in the image.\n"
                 "- Keep the background SYMMETRIC left-to-right as much as possible."
+                + lighting_rules
             )
 
         # Build contents: prompt + people image + reference images
@@ -211,7 +249,7 @@ def _gemini_generate_scene(
         for part in response.candidates[0].content.parts:
             if part.inline_data is not None:
                 result = Image.open(BytesIO(part.inline_data.data)).convert("RGB")
-                result = result.resize(target_size, Image.LANCZOS)
+                result = _resize_and_crop(result, target_size)
                 logger.info("Gemini scene generation successful")
                 return result
 
@@ -317,7 +355,7 @@ def compose_agents_together(
     else:
         for i in range(num_agents):
             out_path = os.path.join(output_dir, f"composed_{uuid.uuid4().hex[:8]}.png")
-            resized = result.resize(target_size, Image.LANCZOS)
+            resized = _resize_and_crop(result, target_size)
             resized.save(out_path, "PNG")
             results[i] = out_path
 
@@ -427,11 +465,13 @@ def generate_background_only(
         "STRICT RULES:\n"
         "- Do NOT include any people, characters, or human figures in the image.\n"
         "- The scene should be an EMPTY background/set with no one in it.\n"
-        "- Include natural studio lighting, appropriate for placing people later.\n"
+        "- Include natural studio lighting with clear directional light sources, appropriate for placing people later.\n"
         "- Make the background look like a professional broadcast environment.\n"
         "- Do NOT add any text, letters, words, logos, or watermarks.\n"
         "- The background should be suitable for two hosts standing side by side.\n"
-        "- Frame the shot as a wide medium shot at waist-to-head level."
+        "- Frame the shot as a wide medium shot at waist-to-head level.\n"
+        "- The floor should be visible and have a clear ground plane with realistic perspective.\n"
+        "- Include subtle light reflections or highlights on the floor to indicate where shadows would naturally fall when people stand there."
     )
 
     try:
@@ -454,7 +494,7 @@ def generate_background_only(
         for part in response.candidates[0].content.parts:
             if part.inline_data is not None:
                 result = Image.open(BytesIO(part.inline_data.data)).convert("RGB")
-                result = result.resize(target_size, Image.LANCZOS)
+                result = _resize_and_crop(result, target_size)
                 out_path = os.path.join(output_dir, f"bg_only_{uuid.uuid4().hex[:8]}.png")
                 result.save(out_path, "PNG")
                 logger.info(f"Background-only image generated: {out_path}")
