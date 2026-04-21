@@ -1550,6 +1550,72 @@ async def composite_generate(
     return result
 
 
+@app.post("/api/composite/generate/stream")
+async def composite_generate_stream(
+    hostImagePath: str = Form(...),
+    productImagePaths: str = Form("[]"),
+    backgroundType: str = Form(...),
+    backgroundPresetId: Optional[str] = Form(None),
+    backgroundPresetLabel: Optional[str] = Form(None),
+    backgroundUploadPath: Optional[str] = Form(None),
+    backgroundPrompt: Optional[str] = Form(None),
+    direction: str = Form(""),
+    shot: str = Form("bust"),
+    angle: str = Form("eye"),
+    n: int = Form(4),
+    rembg: bool = True,
+):
+    """SSE variant of /api/composite/generate. Emits {type: "init"} with
+    translated direction immediately, then one frame per completed candidate,
+    then a terminal {type: "done"}.
+    """
+    from utils.security import safe_upload_path
+    from modules.composite_generator import stream_composite_candidates
+
+    host_resolved = safe_upload_path(hostImagePath)
+
+    try:
+        products_raw = json.loads(productImagePaths)
+        if not isinstance(products_raw, list):
+            raise ValueError("productImagePaths must be a JSON array")
+    except (json.JSONDecodeError, ValueError) as e:
+        raise HTTPException(status_code=400, detail=f"Invalid productImagePaths: {e}")
+
+    products_resolved = [safe_upload_path(p) for p in products_raw]
+    bg_upload_resolved = (
+        safe_upload_path(backgroundUploadPath) if backgroundUploadPath else None
+    )
+
+    async def events():
+        try:
+            async for evt in stream_composite_candidates(
+                host_image_path=host_resolved,
+                product_image_paths=products_resolved,
+                background_type=backgroundType,
+                background_preset_id=backgroundPresetId,
+                background_preset_label=backgroundPresetLabel,
+                background_upload_path=bg_upload_resolved,
+                background_prompt=backgroundPrompt,
+                direction_ko=direction,
+                shot=shot,
+                angle=angle,
+                n=n,
+                rembg_products=rembg,
+            ):
+                yield f"data: {json.dumps(evt)}\n\n"
+        except ValueError as e:
+            yield f"data: {json.dumps({'type': 'fatal', 'error': str(e), 'status': 400})}\n\n"
+        except Exception as e:
+            logger.error("composite stream failed: %s", e)
+            yield f"data: {json.dumps({'type': 'fatal', 'error': str(e), 'status': 500})}\n\n"
+
+    return StreamingResponse(
+        events(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
 # ========================================
 # HostStudio Phase 1 — Saved Hosts CRUD
 # ========================================

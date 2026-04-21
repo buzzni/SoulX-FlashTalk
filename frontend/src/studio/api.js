@@ -325,6 +325,38 @@ export async function generateComposite({ host, products, background, compositio
   return jsonOrThrow(res, '합성 이미지 생성');
 }
 
+// Streaming twin — same fetch + SSE parse pattern as streamHost.
+export async function* streamComposite({ host, products, background, composition, rembg = true }) {
+  const body = buildCompositeBody({ host, products, background, composition });
+  const url = `${API_BASE}/api/composite/generate/stream${rembg ? '' : '?rembg=false'}`;
+  const res = await fetch(url, { method: 'POST', body });
+  if (!res.ok) {
+    const err = new Error(`합성 생성 시작 실패 (${res.status})`);
+    err.status = res.status;
+    try { err.detail = (await res.json()).detail; } catch { /* ignore */ }
+    throw err;
+  }
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    let sep;
+    while ((sep = buffer.indexOf('\n\n')) !== -1) {
+      const frame = buffer.slice(0, sep);
+      buffer = buffer.slice(sep + 2);
+      for (const line of frame.split('\n')) {
+        if (line.startsWith('data: ')) {
+          try { yield JSON.parse(line.slice(6)); }
+          catch { /* malformed frame — skip */ }
+        }
+      }
+    }
+  }
+}
+
 // ============================================================
 // Step 3 — POST /api/elevenlabs/generate (voice) + final /api/generate
 // ============================================================

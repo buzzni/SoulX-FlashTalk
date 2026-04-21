@@ -20,7 +20,7 @@ import logging
 import os
 import uuid
 from io import BytesIO
-from typing import Dict, List, Literal, Optional, Tuple
+from typing import AsyncIterator, Dict, List, Literal, Optional, Tuple
 
 from PIL import Image
 
@@ -266,6 +266,120 @@ async def generate_composite_candidates(
         "candidates": candidates,
         "partial": len(candidates) < n,
         "errors": errors if errors else None,
+        "direction_ko": direction_ko,
+        "direction_en": direction_en,
+    }
+
+
+async def stream_composite_candidates(
+    host_image_path: str,
+    product_image_paths: List[str],
+    background_type: str,
+    background_preset_id: Optional[str] = None,
+    background_preset_label: Optional[str] = None,
+    background_upload_path: Optional[str] = None,
+    background_prompt: Optional[str] = None,
+    direction_ko: str = "",
+    shot: str = "bust",
+    angle: str = "eye",
+    n: int = 4,
+    rembg_products: bool = True,
+    timeout_per_call: float = 45.0,
+    min_success: int = 2,
+    output_dir: Optional[str] = None,
+    target_size: Tuple[int, int] = (720, 1280),
+) -> AsyncIterator[Dict]:
+    """Async generator twin of generate_composite_candidates.
+
+    Yields:
+      {"type": "init",      "direction_ko", "direction_en"}
+      {"type": "candidate", "seed", "path", "url", "done", "total"}
+      {"type": "error",     "seed", "error", "done", "total"}
+      {"type": "done",      "success_count", "total", "partial", "min_success_met",
+                            "direction_ko", "direction_en"}
+    """
+    _validate_enums(shot, angle, background_type)
+
+    if not host_image_path:
+        raise ValueError("host_image_path is required")
+    if background_type == "upload" and not background_upload_path:
+        raise ValueError("backgroundType='upload' requires backgroundUploadPath")
+    if background_type == "preset" and not background_preset_id:
+        raise ValueError("backgroundType='preset' requires backgroundPresetId")
+
+    out_dir = output_dir or os.path.join(config.OUTPUTS_DIR, "composites")
+    os.makedirs(out_dir, exist_ok=True)
+    tmp_dir = os.path.join(out_dir, "_tmp")
+
+    loop = asyncio.get_running_loop()
+    processed_products: List[str] = []
+    if product_image_paths:
+        processed_products = await loop.run_in_executor(
+            None,
+            lambda: [
+                _preprocess_product(p, tmp_dir, apply_rembg=rembg_products)
+                for p in product_image_paths
+            ],
+        )
+
+    direction_en = await loop.run_in_executor(
+        None, translate_direction_ko_to_en, direction_ko
+    )
+    yield {"type": "init", "direction_ko": direction_ko, "direction_en": direction_en}
+
+    scene_prompt = _build_scene_prompt(
+        direction_en=direction_en,
+        shot=shot,
+        angle=angle,
+        background_type=background_type,
+        background_prompt=background_prompt,
+        background_preset_label=background_preset_label,
+    )
+
+    seeds = [10, 42, 77, 128, 256, 512, 1024, 2048][:n]
+
+    async def _run_tagged(seed: int):
+        try:
+            path = await _generate_one(
+                seed=seed,
+                host_image_path=host_image_path,
+                product_image_paths=processed_products,
+                background_upload_path=background_upload_path,
+                scene_prompt=scene_prompt,
+                target_size=target_size,
+                output_dir=out_dir,
+                timeout=timeout_per_call,
+            )
+            return (seed, path, None)
+        except Exception as e:
+            return (seed, None, f"{type(e).__name__}: {e}")
+
+    pending = [_run_tagged(s) for s in seeds]
+    done_count = 0
+    success_count = 0
+    for coro in asyncio.as_completed(pending):
+        seed, path, err = await coro
+        done_count += 1
+        if err:
+            logger.warning("Composite candidate seed=%s failed: %s", seed, err)
+            yield {"type": "error", "seed": seed, "error": err, "done": done_count, "total": n}
+        elif path:
+            success_count += 1
+            yield {
+                "type": "candidate",
+                "seed": seed,
+                "path": path,
+                "url": f"/api/files/{os.path.relpath(path, config.OUTPUTS_DIR)}",
+                "done": done_count,
+                "total": n,
+            }
+
+    yield {
+        "type": "done",
+        "success_count": success_count,
+        "total": n,
+        "partial": success_count < n,
+        "min_success_met": success_count >= min_success,
         "direction_ko": direction_ko,
         "direction_en": direction_en,
     }

@@ -2,8 +2,8 @@ import { useState, useRef, useEffect } from 'react';
 import Icon from './Icon.jsx';
 import { Badge, Button, Card, Chip, Field, Segmented, UploadTile } from './primitives.jsx';
 import {
-  generateComposite as apiGenerateComposite,
   humanizeError,
+  streamComposite,
   uploadBackgroundImage,
   uploadReferenceImage,
 } from './api.js';
@@ -149,24 +149,40 @@ const Step2Composite = ({ state, update }) => {
         bgWithPath = { ...bgWithPath, preset: found || { id: background.preset } };
       }
 
-      const result = await apiGenerateComposite({
+      let successCount = 0;
+      let errorCount = 0;
+      const errs = [];
+      for await (const evt of streamComposite({
         host: { selectedPath: state.host?.selectedPath },
         products: uploadedProducts.filter(p => p.path),
         background: bgWithPath,
         composition,
         rembg: composition.rembg !== false,
-      });
-      const vs = (result.candidates || []).map(c => ({
-        seed: c.seed,
-        id: `c${c.seed}`,
-        url: c.url,
-        path: c.path,
-      }));
-      setVariants(vs);
-      update(s => ({
-        ...s,
-        composition: { ...s.composition, direction_en: result.direction_en },
-      }));
+      })) {
+        if (evt.type === 'init') {
+          update(s => ({
+            ...s,
+            composition: { ...s.composition, direction_en: evt.direction_en },
+          }));
+        } else if (evt.type === 'candidate') {
+          successCount += 1;
+          setVariants(vs => [...vs, { seed: evt.seed, id: `c${evt.seed}`, url: evt.url, path: evt.path }]);
+        } else if (evt.type === 'error') {
+          errorCount += 1;
+          errs.push(`seed ${evt.seed}: ${evt.error}`);
+        } else if (evt.type === 'fatal') {
+          const e = new Error(evt.error || '알 수 없는 오류');
+          e.status = evt.status;
+          throw e;
+        } else if (evt.type === 'done') {
+          if (!evt.min_success_met) {
+            const e = new Error(`합성 후보가 부족해요 (${successCount}/${evt.total})`);
+            e.status = 503;
+            throw e;
+          }
+          if (errorCount > 0) console.warn('composite had partial errors:', errs);
+        }
+      }
     } catch (err) {
       console.error('composite generate failed', err);
       setErrorMsg(humanizeError(err));
@@ -470,7 +486,7 @@ const Step2Composite = ({ state, update }) => {
             subtitle={generating ? '배경·제품·쇼호스트를 합성하는 중이에요. 잠시만 기다려주세요.' : '마음에 드는 후보를 클릭하면 선택돼요.'}
           >
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10 }}>
-              {generating && variants.length === 0 && Array.from({ length: 4 }).map((_, i) => (
+              {generating && Array.from({ length: Math.max(0, 4 - variants.length) }).map((_, i) => (
                 <div key={i} className="preset-tile" style={{ padding: 0, cursor: 'default' }}>
                   <div className="swatch skeleton-shimmer" style={{ aspectRatio: '9/16', position: 'relative', display: 'grid', placeItems: 'center' }}>
                     <span className="spinner" style={{ width: 18, height: 18 }} />
