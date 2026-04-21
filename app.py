@@ -755,10 +755,19 @@ async def generate_elevenlabs_speech(
     stability: float = Form(0.5),
     similarity_boost: float = Form(0.75),
     style: float = Form(0.0),
+    speed: float = Form(1.0),
 ):
-    """Generate speech using ElevenLabs TTS"""
+    """Generate speech using ElevenLabs TTS.
+
+    speed: 0.5-1.8 multiplier (v3 voice_settings.speed). Previously the endpoint
+    hardcoded this from config; now passed through so the Step 3 UI slider
+    actually controls playback rate.
+    """
     if not config.ELEVENLABS_API_KEY:
         raise HTTPException(status_code=400, detail="ElevenLabs API key not configured")
+
+    if not 0.5 <= speed <= 1.8:
+        raise HTTPException(status_code=400, detail=f"speed must be in [0.5, 1.8], got {speed}")
 
     try:
         from modules.elevenlabs_tts import ElevenLabsTTS
@@ -780,6 +789,9 @@ async def generate_elevenlabs_speech(
                 stability=stability,
                 similarity_boost=similarity_boost,
                 style=style,
+                speed=speed,
+                use_speaker_boost=config.ELEVENLABS_OPTIONS.get("use_speaker_boost", True),
+                language_code=config.ELEVENLABS_OPTIONS.get("language_code", "ko"),
             ),
         )
 

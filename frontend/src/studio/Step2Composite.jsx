@@ -262,6 +262,22 @@ const Step2Composite = ({ state, update }) => {
             ))}
           </div>
         )}
+
+        {products.length > 0 && (
+          <Field
+            label="제품 배경 처리"
+            hint="화장품·패션처럼 제품만 보여주고 싶으면 '제거', 음식·가구처럼 배경까지 자연스러운 쪽이 나으면 '유지'"
+          >
+            <Segmented
+              value={composition.rembg === false ? 'keep' : 'remove'}
+              onChange={v => setComp({ rembg: v === 'remove' })}
+              options={[
+                { value: 'remove', label: '배경 제거 (기본)', icon: 'image' },
+                { value: 'keep', label: '배경 유지', icon: 'bg' },
+              ]}
+            />
+          </Field>
+        )}
       </Card>
 
       <Card title="배경" subtitle="어디서 촬영한 느낌으로 보이게 할지 골라주세요">

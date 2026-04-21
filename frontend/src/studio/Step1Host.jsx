@@ -54,55 +54,20 @@ const EXAMPLE_PROMPTS = [
   '40대 남성, 차분하고 신뢰감 있는 표정, 네이비 셔츠',
 ];
 
-const FACE_TEXT_EXAMPLES = [
-  '30대 여성, 부드러운 인상, 긴 생머리',
-  '20대 여성, 짧은 단발, 맑은 눈매',
-  '40대 남성, 짧은 머리, 각진 턱선, 안경',
-];
-const OUTFIT_TEXT_EXAMPLES = [
-  '베이지 오버사이즈 니트, 화이트 블라우스',
-  '네이비 정장 재킷, 실크 셔츠',
-  '파스텔 핑크 원피스, 단정한 스타일',
-];
-
-// 얼굴/의상 입력: 사진 또는 텍스트
-const RefInput = ({ kind, file, onFile, onRemove, text, onText, label, sub, examples, required }) => {
-  const [mode, setMode] = useState(file ? 'photo' : (text ? 'text' : 'photo'));
+// Backend only accepts image paths for face/outfit references (faceRefPath /
+// outfitRefPath). A text-only mode stored strings the backend had no way to
+// consume. Users who want to describe a look in words use the "추가로 바라는 점"
+// (extraPrompt) field instead — Gemini sees that on every call.
+const RefInput = ({ file, onFile, onRemove, label, sub }) => {
   return (
     <div className="flex-col gap-2">
-      <Segmented
-        value={mode}
-        onChange={setMode}
-        options={[
-          { value: 'photo', label: '사진 올리기', icon: 'upload' },
-          { value: 'text', label: '설명으로 적기', icon: 'wand' },
-        ]}
+      <UploadTile
+        file={file}
+        onFile={onFile}
+        onRemove={onRemove}
+        label={label}
+        sub={sub}
       />
-      {mode === 'photo' ? (
-        <UploadTile
-          file={file}
-          onFile={f => { onFile(f); if (text) onText(''); }}
-          onRemove={onRemove}
-          label={label}
-          sub={sub}
-        />
-      ) : (
-        <div className="flex-col gap-2">
-          <textarea
-            className="textarea"
-            style={{ minHeight: 70 }}
-            placeholder={`예) ${examples[0]}`}
-            value={text || ''}
-            onChange={e => { onText(e.target.value); if (file) onRemove(); }}
-          />
-          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-            <span className="text-xs text-tertiary" style={{ alignSelf: 'center' }}>예시 →</span>
-            {examples.map(ex => (
-              <Chip key={ex} onClick={() => { onText(ex); if (file) onRemove(); }}>{ex.split(',')[0]}</Chip>
-            ))}
-          </div>
-        </div>
-      )}
     </div>
   );
 };
@@ -172,7 +137,8 @@ const Step1Host = ({ state, update }) => {
   };
 
   // image 모드에서 "얼굴" 한 가지는 꼭 입력되어야 생성 가능
-  const faceReady = !!host.faceRef || !!(host.faceText && host.faceText.trim().length >= 5);
+  // Face photo is required in image mode — text-only fallback removed.
+  const faceReady = !!host.faceRef;
 
   return (
     <div className="step-page">
@@ -240,33 +206,25 @@ const Step1Host = ({ state, update }) => {
           <div className="flex-col gap-3">
             <div style={{ padding: 12, background: 'var(--accent-soft)', borderRadius: 'var(--r-sm)', border: '1px solid var(--accent-soft-border)', fontSize: 12, color: 'var(--accent-text)', display: 'flex', gap: 8, alignItems: 'flex-start' }}>
               <Icon name="info" size={14} />
-              <div>얼굴과 의상 각각 <b>사진</b>을 올리거나 <b>글</b>로 설명할 수 있어요. 편한 방법을 골라주세요.</div>
+              <div>얼굴 사진이 필요해요. 의상은 비워둬도 됩니다. 원하는 느낌을 더 적으려면 아래 <b>추가로 바라는 점</b> 필드를 쓰세요.</div>
             </div>
             <div className="field-row">
               <Field label="얼굴" hint="꼭 필요해요">
                 <RefInput
-                  kind="face"
                   file={host.faceRef}
                   onFile={f => setField('faceRef', f)}
                   onRemove={() => setField('faceRef', null)}
-                  text={host.faceText}
-                  onText={v => setField('faceText', v)}
                   label="얼굴이 나온 사진 올리기"
                   sub="정면·밝은 사진 추천"
-                  examples={FACE_TEXT_EXAMPLES}
                 />
               </Field>
               <Field label="의상" hint="없어도 돼요">
                 <RefInput
-                  kind="outfit"
                   file={host.outfitRef}
                   onFile={f => setField('outfitRef', f)}
                   onRemove={() => setField('outfitRef', null)}
-                  text={host.outfitText}
-                  onText={v => setField('outfitText', v)}
                   label="입힐 옷 사진 올리기"
                   sub="원하는 옷차림이 있을 때"
-                  examples={OUTFIT_TEXT_EXAMPLES}
                 />
               </Field>
             </div>
