@@ -1410,6 +1410,70 @@ async def host_generate(
 
 
 # ========================================
+# HostStudio Phase 2 — POST /api/composite/generate
+# ========================================
+
+
+@app.post("/api/composite/generate")
+async def composite_generate(
+    hostImagePath: str = Form(...),
+    productImagePaths: str = Form("[]"),  # JSON array of paths
+    backgroundType: str = Form(...),  # "preset"|"upload"|"prompt"
+    backgroundPresetId: Optional[str] = Form(None),
+    backgroundPresetLabel: Optional[str] = Form(None),
+    backgroundUploadPath: Optional[str] = Form(None),
+    backgroundPrompt: Optional[str] = Form(None),
+    direction: str = Form(""),
+    shot: str = Form("bust"),
+    angle: str = Form("eye"),
+    n: int = Form(4),
+    rembg: bool = True,  # query param: ?rembg=false to skip
+):
+    """Generate N=4 composite candidates (host + products + background scene) via Gemini.
+
+    Phase 2 — pipeline-v2 Stage 2. See specs/hoststudio-migration/plan.md §248.
+    """
+    from utils.security import safe_upload_path
+    from modules.composite_generator import generate_composite_candidates
+
+    # Path-traversal guards (all body-field paths)
+    host_resolved = safe_upload_path(hostImagePath)
+
+    try:
+        products_raw = json.loads(productImagePaths)
+        if not isinstance(products_raw, list):
+            raise ValueError("productImagePaths must be a JSON array")
+    except (json.JSONDecodeError, ValueError) as e:
+        raise HTTPException(status_code=400, detail=f"Invalid productImagePaths: {e}")
+
+    products_resolved = [safe_upload_path(p) for p in products_raw]
+    bg_upload_resolved = (
+        safe_upload_path(backgroundUploadPath) if backgroundUploadPath else None
+    )
+
+    try:
+        result = await generate_composite_candidates(
+            host_image_path=host_resolved,
+            product_image_paths=products_resolved,
+            background_type=backgroundType,
+            background_preset_id=backgroundPresetId,
+            background_preset_label=backgroundPresetLabel,
+            background_upload_path=bg_upload_resolved,
+            background_prompt=backgroundPrompt,
+            direction_ko=direction,
+            shot=shot,
+            angle=angle,
+            n=n,
+            rembg_products=rembg,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except RuntimeError as e:
+        raise HTTPException(status_code=503, detail=str(e))
+    return result
+
+
+# ========================================
 # HostStudio Phase 1 — Saved Hosts CRUD
 # ========================================
 
