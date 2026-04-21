@@ -1,6 +1,12 @@
 import { useState, useRef, useEffect } from 'react';
 import Icon from './Icon.jsx';
 import { Badge, Button, Card, Chip, Field, Segmented, UploadTile } from './primitives.jsx';
+import {
+  generateComposite as apiGenerateComposite,
+  humanizeError,
+  uploadBackgroundImage,
+  uploadReferenceImage,
+} from './api.js';
 
 // Step 2 — 제품 + 배경 + 구도 지시 → 합성 스틸 한 장
 const BG_PRESETS = [
@@ -115,25 +121,58 @@ const Step2Composite = ({ state, update }) => {
   const productsReady = products.length > 0 && products.some(p => p.url || p.urlInput);
   const canGenerate = bgReady && productsReady;
 
-  const generateComposite = () => {
+  const [errorMsg, setErrorMsg] = useState(null);
+
+  const generateComposite = async () => {
     setGenerating(true);
     setVariants([]);
-    setTimeout(() => {
-      const seeds = [11, 29, 51, 93];
-      const hostGrad = state.host?._gradient || 'linear-gradient(160deg, oklch(0.6 0.08 30), oklch(0.3 0.05 40))';
-      const bgGrad = background._gradient || BG_PRESETS.find(p => p.id === background.preset)?.gradient || 'linear-gradient(180deg, oklch(0.9 0.01 90), oklch(0.7 0.02 90))';
-      const vs = seeds.map((seed, i) => ({
-        seed,
-        id: `c${seed}`,
-        _bg: bgGrad,
-        _host: hostGrad,
-        _hostX: [28, 62, 35, 58][i],
-        _hostScale: [0.82, 0.78, 0.9, 0.74][i],
-        _productY: [72, 68, 78, 66][i],
+    setErrorMsg(null);
+    try {
+      const uploadedProducts = await Promise.all((products || []).map(async (p) => {
+        if (p.path) return p;
+        if (p._file) {
+          const r = await uploadReferenceImage(p._file);
+          return { ...p, path: r.path };
+        }
+        return p;
+      }));
+      update(s => ({ ...s, products: uploadedProducts }));
+
+      let bgWithPath = background;
+      if (background.source === 'upload' && background._file && !background.uploadPath) {
+        const r = await uploadBackgroundImage(background._file);
+        bgWithPath = { ...background, uploadPath: r.path };
+        setBg(bgWithPath);
+      }
+      if (background.source === 'preset' && typeof background.preset === 'string') {
+        const found = BG_PRESETS.find(p => p.id === background.preset);
+        bgWithPath = { ...bgWithPath, preset: found || { id: background.preset } };
+      }
+
+      const result = await apiGenerateComposite({
+        host: { selectedPath: state.host?.selectedPath },
+        products: uploadedProducts.filter(p => p.path),
+        background: bgWithPath,
+        composition,
+        rembg: composition.rembg !== false,
+      });
+      const vs = (result.candidates || []).map(c => ({
+        seed: c.seed,
+        id: `c${c.seed}`,
+        url: c.url,
+        path: c.path,
       }));
       setVariants(vs);
+      update(s => ({
+        ...s,
+        composition: { ...s.composition, direction_en: result.direction_en },
+      }));
+    } catch (err) {
+      console.error('composite generate failed', err);
+      setErrorMsg(humanizeError(err));
+    } finally {
       setGenerating(false);
-    }, 1500);
+    }
   };
 
   const selectComposite = (v) => {
@@ -143,11 +182,8 @@ const Step2Composite = ({ state, update }) => {
         ...s.composition,
         generated: true,
         selectedSeed: v.seed,
-        _previewBg: v._bg,
-        _previewHost: v._host,
-        _hostX: v._hostX,
-        _hostScale: v._hostScale,
-        _productY: v._productY,
+        selectedPath: v.path || null,
+        selectedUrl: v.url || null,
       },
     }));
   };
@@ -432,32 +468,10 @@ const Step2Composite = ({ state, update }) => {
                   onClick={() => selectComposite(v)}
                   style={{ padding: 0 }}
                 >
-                  <div className="swatch" style={{ aspectRatio: '9/16', background: v._bg, position: 'relative', overflow: 'hidden' }}>
-                    {/* 쇼호스트 실루엣 */}
-                    <div style={{
-                      position: 'absolute',
-                      bottom: 0,
-                      left: `${v._hostX}%`,
-                      transform: `translateX(-50%) scale(${v._hostScale})`,
-                      transformOrigin: 'bottom center',
-                      width: '55%',
-                      height: '88%',
-                      background: v._host,
-                      borderRadius: '40% 40% 10% 10% / 50% 50% 10% 10%',
-                      opacity: 0.92,
-                    }} />
-                    {/* 제품 점 표시 */}
-                    <div style={{
-                      position: 'absolute',
-                      left: `${v._hostX > 50 ? 22 : 72}%`,
-                      top: `${v._productY}%`,
-                      width: 14,
-                      height: 14,
-                      borderRadius: 3,
-                      background: 'oklch(0.85 0.1 60)',
-                      border: '1.5px solid oklch(0.3 0.05 60)',
-                      transform: 'translate(-50%, -50%)',
-                    }} />
+                  <div className="swatch" style={{ aspectRatio: '9/16', background: '#0b0d12', position: 'relative', overflow: 'hidden' }}>
+                    {v.url ? (
+                      <img src={v.url} alt={`합성 후보 ${i + 1}`} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                    ) : null}
                     {composition.selectedSeed === v.seed && (
                       <div style={{ position: 'absolute', top: 6, right: 6, background: 'var(--accent)', color: '#fff', borderRadius: 99, width: 20, height: 20, display: 'grid', placeItems: 'center' }}>
                         <Icon name="check" size={12} />
@@ -468,6 +482,12 @@ const Step2Composite = ({ state, update }) => {
                 </button>
               ))}
             </div>
+            {errorMsg && (
+              <div style={{ marginTop: 10, padding: '10px 12px', background: 'var(--danger-soft)', border: '1px solid var(--danger)', borderRadius: 'var(--r-sm)', color: 'var(--danger)', fontSize: 12 }}>
+                <Icon name="alert_circle" size={13} style={{ marginRight: 6 }} />
+                {errorMsg}
+              </div>
+            )}
             {composition.generated && (
               <div className="mt-3 flex justify-between items-center">
                 <Badge variant="success" icon="check_circle">합성 완료 · 다음 단계로 진행하세요</Badge>

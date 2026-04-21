@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import Icon from './Icon.jsx';
 import { Badge, Button, Card, Chip, Field, Segmented, Slider, UploadTile } from './primitives.jsx';
+import { generateHost, humanizeError, uploadReferenceImage } from './api.js';
 
 // Step 1 — 쇼호스트 만들기 (비개발자 친화)
 const HOST_PRESETS = {
@@ -91,6 +92,7 @@ const Step1Host = ({ state, update }) => {
   const { host } = state;
   const [generating, setGenerating] = useState(false);
   const [variants, setVariants] = useState([]);
+  const [errorMsg, setErrorMsg] = useState(null);
   const resultsRef = useRef(null);
 
   const setField = (k, v) => update(s => ({ ...s, host: { ...s.host, [k]: v } }));
@@ -105,26 +107,49 @@ const Step1Host = ({ state, update }) => {
     }
   }, [generating, variants.length]);
 
-  const generate = () => {
+  const generate = async () => {
     setGenerating(true);
     setVariants([]);
-    setTimeout(() => {
-      const seeds = [10, 42, 77, 128];
-      const vs = seeds.map((seed, i) => ({
-        seed,
-        id: `v${seed}`,
-        _gradient: `linear-gradient(${160 + i * 20}deg, oklch(0.6 0.1 ${20 + i * 80}), oklch(0.3 0.05 ${40 + i * 80}))`,
+    setErrorMsg(null);
+    try {
+      // Upload face/outfit files if image mode and a File is attached.
+      let faceRefPath = host.faceRefPath || null;
+      let outfitRefPath = host.outfitRefPath || null;
+      if (host.mode !== 'text') {
+        if (host.faceRef?._file && !faceRefPath) {
+          const r = await uploadReferenceImage(host.faceRef._file);
+          faceRefPath = r.path;
+          setField('faceRefPath', r.path);
+        }
+        if (host.outfitRef?._file && !outfitRefPath) {
+          const r = await uploadReferenceImage(host.outfitRef._file);
+          outfitRefPath = r.path;
+          setField('outfitRefPath', r.path);
+        }
+      }
+      const req = { ...host, faceRefPath, outfitRefPath };
+      const result = await generateHost(req);
+      const vs = (result.candidates || []).map(c => ({
+        seed: c.seed,
+        id: `v${c.seed}`,
+        url: c.url,
+        path: c.path,
       }));
       setVariants(vs);
+    } catch (err) {
+      console.error('host generate failed', err);
+      setErrorMsg(humanizeError(err));
+    } finally {
       setGenerating(false);
-    }, 1400);
+    }
   };
 
   const selectVariant = (v) => {
     setField('generated', true);
-    setField('imageUrl', null);
+    setField('imageUrl', v.url || null);
+    setField('selectedPath', v.path || null);
     setField('selectedSeed', v.seed);
-    setField('_gradient', v._gradient);
+    setField('_gradient', v._gradient || null);
   };
 
   // image 모드에서 "얼굴" 한 가지는 꼭 입력되어야 생성 가능
@@ -247,6 +272,13 @@ const Step1Host = ({ state, update }) => {
 
         <hr className="hr" />
 
+        {errorMsg && (
+          <div style={{ padding: '10px 12px', marginBottom: 10, background: 'var(--danger-soft)', border: '1px solid var(--danger)', borderRadius: 'var(--r-sm)', color: 'var(--danger)', fontSize: 12 }}>
+            <Icon name="alert_circle" size={13} style={{ marginRight: 6 }} />
+            {errorMsg}
+          </div>
+        )}
+
         <div className="flex justify-between items-center">
           <div className="text-xs text-tertiary">
             버튼을 누르면 아래에 4개의 후보가 나타나요. 마음에 드는 걸 하나 고르세요.
@@ -275,8 +307,12 @@ const Step1Host = ({ state, update }) => {
                   onClick={() => selectVariant(v)}
                   style={{ padding: 0 }}
                 >
-                  <div className="swatch" style={{ aspectRatio: '9/16', background: v._gradient, position: 'relative' }}>
-                    <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: '60%', background: `radial-gradient(ellipse 60% 80% at 50% 100%, oklch(0.85 0.03 60 / 0.8), transparent 70%)` }} />
+                  <div className="swatch" style={{ aspectRatio: '9/16', background: v.url ? '#0b0d12' : v._gradient, position: 'relative', overflow: 'hidden' }}>
+                    {v.url ? (
+                      <img src={v.url} alt={`후보 ${i + 1}`} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                    ) : (
+                      <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: '60%', background: `radial-gradient(ellipse 60% 80% at 50% 100%, oklch(0.85 0.03 60 / 0.8), transparent 70%)` }} />
+                    )}
                     {host.selectedSeed === v.seed && (
                       <div style={{ position: 'absolute', top: 6, right: 6, background: 'var(--accent)', color: '#fff', borderRadius: 99, width: 20, height: 20, display: 'grid', placeItems: 'center' }}>
                         <Icon name="check" size={12} />

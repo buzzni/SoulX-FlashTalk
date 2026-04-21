@@ -1,31 +1,74 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import Icon from './Icon.jsx';
 import { Badge, Button } from './primitives.jsx';
+import { generateVideo, humanizeError, subscribeProgress } from './api.js';
 
-// Render dashboard — final step after going through wizard
+// Render dashboard — final step after going through wizard.
+// Dispatches /api/generate, then subscribes to /api/progress/{task_id} SSE.
 const RenderDashboard = ({ state, onBack, onReset }) => {
   const [jobs, setJobs] = useState(() => [{
     id: 'job_' + Date.now(),
     status: 'rendering',
     progress: 0,
+    stage: 'queued',
+    message: '대기열에 등록 중…',
+    taskId: null,
+    videoUrl: null,
     startedAt: Date.now(),
     snapshot: state,
+    error: null,
   }]);
   const [playing, setPlaying] = useState(false);
+  const unsubRef = useRef(null);
+  const dispatchedRef = useRef(false);
 
   const activeJob = jobs[0];
 
+  const patchJob = (patch) => setJobs(js => js.map((j, i) => (i === 0 ? { ...j, ...patch } : j)));
+
   useEffect(() => {
-    if (activeJob.status !== 'rendering') return;
-    const t = setInterval(() => {
-      setJobs(js => js.map((j, i) => {
-        if (i !== 0) return j;
-        const p = Math.min(100, j.progress + Math.random() * 8 + 2);
-        return { ...j, progress: p, status: p >= 100 ? 'done' : 'rendering' };
-      }));
-    }, 350);
-    return () => clearInterval(t);
-  }, [activeJob.status]);
+    if (dispatchedRef.current) return;
+    dispatchedRef.current = true;
+    (async () => {
+      try {
+        const audio = {
+          audio_path: state.voice.generatedAudioPath
+            || state.voice.uploadedAudio?.path
+            || '',
+        };
+        if (!audio.audio_path) throw new Error('음성 파일 경로를 찾을 수 없어요 (3단계에서 다시 만들기)');
+        const res = await generateVideo({ state, audio });
+        patchJob({ taskId: res.task_id || res.id || null });
+        if (!res.task_id) {
+          patchJob({ status: 'done', progress: 100, videoUrl: res.video_url || res.path });
+          return;
+        }
+        const unsub = subscribeProgress(res.task_id, (evt) => {
+          if (evt.error) {
+            patchJob({ status: 'error', error: '진행 상황 구독이 끊겼어요' });
+            return;
+          }
+          const progress = Math.round((evt.progress || 0) * (evt.progress > 1 ? 1 : 100));
+          patchJob({
+            progress: isNaN(progress) ? activeJob.progress : progress,
+            stage: evt.stage || activeJob.stage,
+            message: evt.message || activeJob.message,
+            status: evt.status === 'completed' ? 'done' : (evt.status === 'error' ? 'error' : 'rendering'),
+            videoUrl: evt.video_url || evt.path || null,
+            error: evt.status === 'error' ? (evt.message || '영상 생성 중 오류가 발생했어요') : null,
+          });
+        });
+        unsubRef.current = unsub;
+      } catch (err) {
+        console.error('render dispatch failed', err);
+        patchJob({ status: 'error', error: humanizeError(err) });
+      }
+    })();
+    return () => {
+      if (unsubRef.current) unsubRef.current();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const stages = [
     { key: 'host', label: '쇼호스트 움직임 만드는 중', done: activeJob.progress > 15 },
@@ -54,23 +97,27 @@ const RenderDashboard = ({ state, onBack, onReset }) => {
           <div style={{ display: 'grid', gridTemplateColumns: '180px 1fr', gap: 28, alignItems: 'stretch' }}>
             {/* Preview */}
             <div style={{ borderRadius: 12, overflow: 'hidden', background: '#0b0d12', aspectRatio: '9/16', position: 'relative', border: '1px solid var(--border)' }}>
-              {activeJob.status === 'done' ? (
-                <>
-                  <div style={{ position: 'absolute', inset: 0, background: state.host._gradient || 'linear-gradient(180deg, oklch(0.5 0.08 30), oklch(0.3 0.05 260))' }} />
-                  <button onClick={() => setPlaying(p => !p)} style={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center', background: 'oklch(0 0 0 / 0.25)', border: 0, cursor: 'pointer', color: '#fff' }}>
-                    <div style={{ width: 48, height: 48, borderRadius: 99, background: 'oklch(1 0 0 / 0.9)', display: 'grid', placeItems: 'center', color: 'var(--text)' }}>
-                      <Icon name={playing ? 'pause' : 'play'} size={18} />
-                    </div>
-                  </button>
-                  <div style={{ position: 'absolute', bottom: 8, left: 8, right: 8, height: 3, background: 'oklch(1 0 0 / 0.3)', borderRadius: 99 }}>
-                    <div style={{ height: '100%', width: playing ? '62%' : '0%', background: '#fff', borderRadius: 99, transition: 'width 2s linear' }} />
+              {activeJob.status === 'done' && activeJob.videoUrl ? (
+                <video
+                  src={activeJob.videoUrl}
+                  controls
+                  autoPlay={playing}
+                  onPlay={() => setPlaying(true)}
+                  onPause={() => setPlaying(false)}
+                  style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                />
+              ) : activeJob.status === 'error' ? (
+                <div style={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center', color: '#fff', textAlign: 'center', padding: 16 }}>
+                  <div>
+                    <Icon name="alert_circle" size={24} />
+                    <div style={{ fontSize: 12, marginTop: 8, opacity: 0.9 }}>{activeJob.error}</div>
                   </div>
-                </>
+                </div>
               ) : (
                 <div style={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center', color: '#fff' }}>
                   <div style={{ textAlign: 'center' }}>
                     <div className="spinner" style={{ width: 24, height: 24, margin: '0 auto 10px', borderColor: 'oklch(1 0 0 / 0.2)', borderTopColor: '#fff' }} />
-                    <div style={{ fontSize: 11, opacity: 0.8 }}>영상을 만드는 중이에요…</div>
+                    <div style={{ fontSize: 11, opacity: 0.8 }}>{activeJob.message || '영상을 만드는 중이에요…'}</div>
                   </div>
                 </div>
               )}

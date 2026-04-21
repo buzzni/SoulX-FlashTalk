@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import Icon from './Icon.jsx';
 import { Badge, Button, Card, Field, Slider, UploadTile } from './primitives.jsx';
+import { cloneVoice, generateVoice, humanizeError, uploadAudio } from './api.js';
 
 // Step 3 — 목소리 (비개발자 친화)
 const VOICE_PRESETS = [
@@ -86,9 +87,51 @@ const Step3Audio = ({ state, update }) => {
     { id: 'upload', label: '녹음 파일 업로드', icon: 'upload' },
   ];
 
-  const generate = () => {
+  const [errorMsg, setErrorMsg] = useState(null);
+
+  const generate = async () => {
     setGenerating(true);
-    setTimeout(() => { setV({ generated: true, uploadedAudio: null }); setGenerating(false); }, 1400);
+    setErrorMsg(null);
+    try {
+      // Three source paths:
+      //  - tts: call /api/elevenlabs/generate with voice.voiceId + script
+      //  - clone: upload sample → clone-voice → voice_id → generate
+      //  - upload: user uploaded raw audio; upload it and keep the path
+      let voiceIdForGen = voice.voiceId;
+      if (voice.source === 'clone') {
+        if (!voice.cloneSample?._file && !voice.cloneSample?.voiceId) {
+          throw new Error('클론용 샘플 음성을 올려주세요');
+        }
+        if (!voice.cloneSample?.voiceId) {
+          const cloneResult = await cloneVoice(voice.cloneSample._file);
+          voiceIdForGen = cloneResult.voice_id;
+          setV({ cloneSample: { ...voice.cloneSample, voiceId: cloneResult.voice_id } });
+        } else {
+          voiceIdForGen = voice.cloneSample.voiceId;
+        }
+      }
+      if (voice.source === 'upload') {
+        if (!voice.uploadedAudio?._file && !voice.uploadedAudio?.path) {
+          throw new Error('음성 파일을 업로드해주세요');
+        }
+        if (voice.uploadedAudio._file && !voice.uploadedAudio.path) {
+          const r = await uploadAudio(voice.uploadedAudio._file);
+          setV({ uploadedAudio: { ...voice.uploadedAudio, path: r.path }, generated: true });
+        } else {
+          setV({ generated: true });
+        }
+        return;
+      }
+
+      const voiceForGen = { ...voice, voiceId: voiceIdForGen };
+      const result = await generateVoice({ voice: voiceForGen });
+      setV({ generated: true, generatedAudioPath: result.path || result.audio_path, voiceId: voiceIdForGen });
+    } catch (err) {
+      console.error('voice generate failed', err);
+      setErrorMsg(humanizeError(err));
+    } finally {
+      setGenerating(false);
+    }
   };
 
   const canAddParagraph = remaining >= BREATH_TAG.length + 1;
@@ -241,6 +284,13 @@ const Step3Audio = ({ state, update }) => {
                 </Field>
               </div>
             </details>
+
+            {errorMsg && (
+              <div style={{ marginTop: 10, padding: '10px 12px', background: 'var(--danger-soft)', border: '1px solid var(--danger)', borderRadius: 'var(--r-sm)', color: 'var(--danger)', fontSize: 12 }}>
+                <Icon name="alert_circle" size={13} style={{ marginRight: 6 }} />
+                {errorMsg}
+              </div>
+            )}
 
             <div className="flex justify-between items-center mt-3">
               <div className="text-xs text-tertiary">
