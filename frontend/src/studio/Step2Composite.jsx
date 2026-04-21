@@ -226,7 +226,7 @@ const Step2Composite = ({ state, update }) => {
       }>
         {products.length === 0 ? (
           <UploadTile
-            onFile={f => setProducts([{ id: Date.now().toString(36), url: f.url, source: 'upload', _file: f }])}
+            onFile={f => setProducts([{ id: Date.now().toString(36), url: f.url, name: f.name, source: 'upload', _file: f._file }])}
             label="제품 사진 올리기"
             sub="배경이 없는 PNG가 제일 깔끔해요"
           />
@@ -268,7 +268,7 @@ const Step2Composite = ({ state, update }) => {
                       <Icon name={p.url ? 'swap' : 'upload'} size={12} />
                       {p.url ? '사진 교체' : '사진 올리기'}
                       <input type="file" accept="image/*" style={{ display: 'none' }}
-                        onChange={e => { const f = e.target.files[0]; if (f) updateProduct(p.id, { url: URL.createObjectURL(f) }); }}
+                        onChange={e => { const f = e.target.files[0]; if (f) updateProduct(p.id, { url: URL.createObjectURL(f), name: f.name, _file: f, path: null }); }}
                       />
                     </label>
                   )}
@@ -327,7 +327,7 @@ const Step2Composite = ({ state, update }) => {
           {bgSource === 'upload' && (
             <UploadTile
               file={background._file}
-              onFile={f => setBg({ _file: f, imageUrl: f.url, preset: null, prompt: '', url: '' })}
+              onFile={f => setBg({ _file: f._file, imageUrl: f.url, preset: null, prompt: '', url: '' })}
               onRemove={() => setBg({ _file: null, imageUrl: null })}
               label="배경 사진 올리기"
               sub="촬영한 매장 사진 등"
