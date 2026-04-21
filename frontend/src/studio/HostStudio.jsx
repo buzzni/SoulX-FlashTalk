@@ -39,15 +39,38 @@ const INITIAL_STATE = {
 
 const DENSITY_KEY = 'showhost_density';
 
+// Defensive hydrator — previous localStorage can have partial or missing sub-objects
+// (e.g., an older version of the app shipped without composition.shot). Shallow-
+// merge each top-level key with INITIAL_STATE so .host, .voice, etc. always have
+// the full shape their Step components assume.
+function hydrateState(raw) {
+  if (!raw || typeof raw !== 'object') return INITIAL_STATE;
+  const merged = { ...INITIAL_STATE };
+  for (const k of Object.keys(INITIAL_STATE)) {
+    const defaults = INITIAL_STATE[k];
+    const incoming = raw[k];
+    if (defaults && typeof defaults === 'object' && !Array.isArray(defaults)) {
+      merged[k] = { ...defaults, ...(incoming && typeof incoming === 'object' ? incoming : {}) };
+    } else if (incoming !== undefined) {
+      merged[k] = incoming;
+    }
+  }
+  return merged;
+}
+
 const HostStudio = () => {
   const [state, setState] = useState(() => {
     try {
       const saved = localStorage.getItem('showhost_state');
-      if (saved) return { ...INITIAL_STATE, ...JSON.parse(saved) };
+      if (saved) return hydrateState(JSON.parse(saved));
     } catch (e) { /* ignore */ }
     return INITIAL_STATE;
   });
-  const [step, setStep] = useState(() => Math.min(3, Number(localStorage.getItem('showhost_step') || 1)));
+  const [step, setStep] = useState(() => {
+    const raw = Number(localStorage.getItem('showhost_step'));
+    if (!Number.isFinite(raw) || raw < 1) return 1;
+    return Math.min(3, Math.max(1, Math.floor(raw)));
+  });
   const [rendering, setRendering] = useState(false);
   const [tweaksOpen, setTweaksOpen] = useState(false);
 
