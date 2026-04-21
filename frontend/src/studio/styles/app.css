@@ -709,3 +709,19 @@
   border-radius: 4px;
 }
 }
+
+/* @keyframes hoisted to top-level — native CSS nesting does not guarantee
+   keyframe name resolution from inside a nested block across all browsers. */
+@keyframes studio-shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+@keyframes studio-fadein { from { opacity: 0 } to { opacity: 1 } }
+@keyframes studio-spin { to { transform: rotate(360deg) } }
+
+.studio-root .skeleton-shimmer { animation-name: studio-shimmer; }
+.studio-root .modal-backdrop { animation-name: studio-fadein; }
+.studio-root .spinner {
+  width: 14px; height: 14px;
+  border: 2px solid var(--bg-subtle);
+  border-top-color: var(--accent);
+  border-radius: 99px;
+  animation: studio-spin .7s linear infinite;
+}

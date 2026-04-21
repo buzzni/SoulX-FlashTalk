@@ -93,8 +93,11 @@ const Step1Host = ({ state, update }) => {
 
   const generate = async () => {
     setGenerating(true);
-    setVariants([]);
     setErrorMsg(null);
+    // Fixed slot order matches backend seed order so tiles fill left→right
+    // consistently regardless of Gemini completion order.
+    const SEEDS = [10, 42, 77, 128];
+    setVariants(SEEDS.map(s => ({ seed: s, id: `v${s}`, placeholder: true })));
     try {
       let faceRefPath = host.faceRefPath || null;
       let outfitRefPath = host.outfitRefPath || null;
@@ -118,10 +121,17 @@ const Step1Host = ({ state, update }) => {
       for await (const evt of streamHost(req)) {
         if (evt.type === 'candidate') {
           successCount += 1;
-          setVariants(vs => [...vs, { seed: evt.seed, id: `v${evt.seed}`, url: evt.url, path: evt.path }]);
+          setVariants(vs => vs.map(v =>
+            v.seed === evt.seed
+              ? { ...v, url: evt.url, path: evt.path, placeholder: false }
+              : v
+          ));
         } else if (evt.type === 'error') {
           errorCount += 1;
           errs.push(`seed ${evt.seed}: ${evt.error}`);
+          setVariants(vs => vs.map(v =>
+            v.seed === evt.seed ? { ...v, error: evt.error, placeholder: false } : v
+          ));
         } else if (evt.type === 'fatal') {
           const e = new Error(evt.error || '알 수 없는 오류');
           e.status = evt.status;
@@ -295,15 +305,31 @@ const Step1Host = ({ state, update }) => {
         <div ref={resultsRef}>
           <Card title="↓ 이 중에서 골라주세요" subtitle={generating ? '후보를 만드는 중이에요. 잠시면 나타나요.' : '마음에 드는 후보를 클릭하면 선택돼요.'}>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10 }}>
-              {generating && Array.from({ length: Math.max(0, 4 - variants.length) }).map((_, i) => (
-                <div key={i} className="preset-tile" style={{ padding: 0, cursor: 'default' }}>
-                  <div className="swatch skeleton-shimmer" style={{ aspectRatio: '9/16', position: 'relative', display: 'grid', placeItems: 'center', color: 'var(--text-tertiary)', fontSize: 11 }}>
-                    <span className="spinner" style={{ width: 18, height: 18 }} />
-                  </div>
-                  <div className="name text-tertiary">후보 {i + 1}</div>
-                </div>
-              ))}
-              {variants.map((v, i) => (
+              {variants.map((v, i) => {
+                if (v.placeholder) {
+                  return (
+                    <div key={v.id} className="preset-tile" style={{ padding: 0, cursor: 'default' }}>
+                      <div className="swatch skeleton-shimmer" style={{ aspectRatio: '9/16', position: 'relative', display: 'grid', placeItems: 'center', color: 'var(--text-tertiary)', fontSize: 11 }}>
+                        <span className="spinner" style={{ width: 18, height: 18 }} />
+                      </div>
+                      <div className="name text-tertiary">후보 {i + 1}</div>
+                    </div>
+                  );
+                }
+                if (v.error) {
+                  return (
+                    <div key={v.id} className="preset-tile" style={{ padding: 0, cursor: 'default', borderColor: 'var(--danger)' }}>
+                      <div className="swatch" style={{ aspectRatio: '9/16', display: 'grid', placeItems: 'center', color: 'var(--danger)', fontSize: 10, textAlign: 'center', padding: 6, background: 'var(--danger-soft)' }}>
+                        <div>
+                          <Icon name="alert_circle" size={16} />
+                          <div style={{ marginTop: 4 }}>실패</div>
+                        </div>
+                      </div>
+                      <div className="name text-tertiary">후보 {i + 1}</div>
+                    </div>
+                  );
+                }
+                return (
                 <button key={v.id}
                   className={`preset-tile ${host.selectedSeed === v.seed ? 'on' : ''}`}
                   onClick={() => selectVariant(v)}
@@ -323,7 +349,8 @@ const Step1Host = ({ state, update }) => {
                   </div>
                   <div className="name">후보 {i + 1}</div>
                 </button>
-              ))}
+                );
+              })}
             </div>
             {host.generated && (
               <div className="mt-3 flex justify-between items-center">

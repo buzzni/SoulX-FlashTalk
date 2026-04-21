@@ -125,8 +125,10 @@ const Step2Composite = ({ state, update }) => {
 
   const generateComposite = async () => {
     setGenerating(true);
-    setVariants([]);
     setErrorMsg(null);
+    // Fixed slot order matches backend seed order — tiles fill left→right.
+    const SEEDS = [10, 42, 77, 128];
+    setVariants(SEEDS.map(s => ({ seed: s, id: `c${s}`, placeholder: true })));
     try {
       const uploadedProducts = await Promise.all((products || []).map(async (p) => {
         if (p.path) return p;
@@ -168,10 +170,17 @@ const Step2Composite = ({ state, update }) => {
           }));
         } else if (evt.type === 'candidate') {
           successCount += 1;
-          setVariants(vs => [...vs, { seed: evt.seed, id: `c${evt.seed}`, url: evt.url, path: evt.path }]);
+          setVariants(vs => vs.map(v =>
+            v.seed === evt.seed
+              ? { ...v, url: evt.url, path: evt.path, placeholder: false }
+              : v
+          ));
         } else if (evt.type === 'error') {
           errorCount += 1;
           errs.push(`seed ${evt.seed}: ${evt.error}`);
+          setVariants(vs => vs.map(v =>
+            v.seed === evt.seed ? { ...v, error: evt.error, placeholder: false } : v
+          ));
         } else if (evt.type === 'fatal') {
           const e = new Error(evt.error || '알 수 없는 오류');
           e.status = evt.status;
@@ -488,15 +497,31 @@ const Step2Composite = ({ state, update }) => {
             subtitle={generating ? '배경·제품·쇼호스트를 합성하는 중이에요. 잠시만 기다려주세요.' : '마음에 드는 후보를 클릭하면 선택돼요.'}
           >
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10 }}>
-              {generating && Array.from({ length: Math.max(0, 4 - variants.length) }).map((_, i) => (
-                <div key={i} className="preset-tile" style={{ padding: 0, cursor: 'default' }}>
-                  <div className="swatch skeleton-shimmer" style={{ aspectRatio: '9/16', position: 'relative', display: 'grid', placeItems: 'center' }}>
-                    <span className="spinner" style={{ width: 18, height: 18 }} />
-                  </div>
-                  <div className="name text-tertiary">합성 {i + 1}</div>
-                </div>
-              ))}
-              {variants.map((v, i) => (
+              {variants.map((v, i) => {
+                if (v.placeholder) {
+                  return (
+                    <div key={v.id} className="preset-tile" style={{ padding: 0, cursor: 'default' }}>
+                      <div className="swatch skeleton-shimmer" style={{ aspectRatio: '9/16', position: 'relative', display: 'grid', placeItems: 'center' }}>
+                        <span className="spinner" style={{ width: 18, height: 18 }} />
+                      </div>
+                      <div className="name text-tertiary">합성 {i + 1}</div>
+                    </div>
+                  );
+                }
+                if (v.error) {
+                  return (
+                    <div key={v.id} className="preset-tile" style={{ padding: 0, cursor: 'default', borderColor: 'var(--danger)' }}>
+                      <div className="swatch" style={{ aspectRatio: '9/16', display: 'grid', placeItems: 'center', color: 'var(--danger)', fontSize: 10, textAlign: 'center', padding: 6, background: 'var(--danger-soft)' }}>
+                        <div>
+                          <Icon name="alert_circle" size={16} />
+                          <div style={{ marginTop: 4 }}>실패</div>
+                        </div>
+                      </div>
+                      <div className="name text-tertiary">합성 {i + 1}</div>
+                    </div>
+                  );
+                }
+                return (
                 <button key={v.id}
                   className={`preset-tile ${composition.selectedSeed === v.seed ? 'on' : ''}`}
                   onClick={() => selectComposite(v)}
@@ -514,7 +539,8 @@ const Step2Composite = ({ state, update }) => {
                   </div>
                   <div className="name">합성 {i + 1}</div>
                 </button>
-              ))}
+                );
+              })}
             </div>
             {errorMsg && (
               <div style={{ marginTop: 10, padding: '10px 12px', background: 'var(--danger-soft)', border: '1px solid var(--danger)', borderRadius: 'var(--r-sm)', color: 'var(--danger)', fontSize: 12 }}>
