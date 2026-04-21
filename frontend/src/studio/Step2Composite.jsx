@@ -140,7 +140,9 @@ const Step2Composite = ({ state, update }) => {
 
       let bgWithPath = background;
       if (background.source === 'upload' && background._file && !background.uploadPath) {
-        const r = await uploadBackgroundImage(background._file);
+        // background._file holds the UploadTile wrapper; drill to the raw File.
+        const rawFile = background._file._file || background._file;
+        const r = await uploadBackgroundImage(rawFile);
         bgWithPath = { ...background, uploadPath: r.path };
         setBg(bgWithPath);
       }
@@ -327,7 +329,7 @@ const Step2Composite = ({ state, update }) => {
           {bgSource === 'upload' && (
             <UploadTile
               file={background._file}
-              onFile={f => setBg({ _file: f._file, imageUrl: f.url, preset: null, prompt: '', url: '' })}
+              onFile={f => setBg({ _file: f, imageUrl: f.url, preset: null, prompt: '', url: '' })}
               onRemove={() => setBg({ _file: null, imageUrl: null })}
               label="배경 사진 올리기"
               sub="촬영한 매장 사진 등"
