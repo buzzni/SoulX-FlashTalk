@@ -1,7 +1,26 @@
 import { useState, useRef, useEffect } from 'react';
 import Icon from './Icon.jsx';
-import { Badge, Button, Card, Chip, Field, Segmented, Slider, UploadTile } from './primitives.jsx';
+import { Badge, Button, Card, Chip, Field, Segmented, UploadTile } from './primitives.jsx';
 import { generateHost, humanizeError, uploadReferenceImage } from './api.js';
+
+// Face/outfit strength is not a real Gemini parameter — the mapping layer (§5.1.2)
+// collapses 0–1 into one of four English prompt clauses. A slider pretends to be
+// continuous; a 4-button Segmented matches reality. Each option stores the bucket
+// midpoint so the threshold lookup still produces the same clause.
+const STRENGTH_STEPS = [
+  { value: 0.15, label: '느슨하게', hint: '참고 정도' },
+  { value: 0.45, label: '참고만', hint: '스타일 힌트' },
+  { value: 0.70, label: '가깝게', hint: '핵심 특징 보존' },
+  { value: 0.95, label: '똑같이', hint: '최대한 일치' },
+];
+
+function strengthValueToStep(v) {
+  if (v == null) return 0.70;
+  if (v < 0.30) return 0.15;
+  if (v < 0.60) return 0.45;
+  if (v < 0.85) return 0.70;
+  return 0.95;
+}
 
 // Step 1 — 쇼호스트 만들기 (비개발자 친화)
 const HOST_PRESETS = {
@@ -253,14 +272,22 @@ const Step1Host = ({ state, update }) => {
             </div>
 
             {host.faceRef && (
-              <Field label={`얼굴을 얼마나 비슷하게? · ${Math.round((host.faceStrength ?? 0.7) * 100)}%`} hint="오른쪽일수록 올린 사진과 비슷해져요">
-                <Slider value={host.faceStrength ?? 0.7} onChange={v => setField('faceStrength', v)} min={0} max={1} step={0.01} formatValue={v => `${Math.round(v * 100)}%`} />
+              <Field label="얼굴을 얼마나 비슷하게?" hint="프롬프트 문구에 반영돼요 (연속 수치가 아님)">
+                <Segmented
+                  value={strengthValueToStep(host.faceStrength)}
+                  onChange={v => setField('faceStrength', v)}
+                  options={STRENGTH_STEPS.map(s => ({ value: s.value, label: s.label }))}
+                />
               </Field>
             )}
 
             {host.outfitRef && (
-              <Field label={`옷을 얼마나 비슷하게? · ${Math.round((host.outfitStrength ?? 0.5) * 100)}%`}>
-                <Slider value={host.outfitStrength ?? 0.5} onChange={v => setField('outfitStrength', v)} min={0} max={1} step={0.01} formatValue={v => `${Math.round(v * 100)}%`} />
+              <Field label="옷을 얼마나 비슷하게?" hint="프롬프트 문구에 반영돼요 (연속 수치가 아님)">
+                <Segmented
+                  value={strengthValueToStep(host.outfitStrength ?? 0.5)}
+                  onChange={v => setField('outfitStrength', v)}
+                  options={STRENGTH_STEPS.map(s => ({ value: s.value, label: s.label }))}
+                />
               </Field>
             )}
 

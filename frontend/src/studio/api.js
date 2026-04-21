@@ -313,15 +313,20 @@ export async function generateVoice({ voice }) {
 }
 
 export async function generateVideo({ state, audio }) {
+  // /api/generate accepts: audio_source, host_image_path, audio_path, script_text,
+  // voice_id, stability/similarity_boost/style, prompt, seed, cpu_offload, resolution,
+  // scene_prompt, reference_image_paths. Anything else is silently dropped by the
+  // endpoint — we used to send background_image_path / subtitles / pitch_semitones
+  // and none of those exist on the backend, so they've been removed.
+  //
+  // host_image_path here is the FINAL composite frame (Step 2 selection) — that's
+  // the single frame FlashTalk animates. The Step 1 host-only image is not sent.
   const body = new FormData();
-  body.append('host_image_path', state.host.selectedPath);
-  body.append('background_image_path', state.composition.selectedPath || '');
+  const composite = state.composition?.selectedPath || state.host?.selectedPath;
+  if (composite) body.append('host_image_path', composite);
   body.append('audio_path', audio.audio_path);
+  body.append('audio_source', 'upload');
   body.append('resolution', stringifyResolution(state.resolution));
-  body.append('subtitles', state.subtitles || 'on');
-  if (typeof state.voice?.pitch === 'number' && state.voice.pitch !== 0) {
-    body.append('pitch_semitones', String(state.voice.pitch));
-  }
   const res = await fetch(`${API_BASE}/api/generate`, { method: 'POST', body });
   return jsonOrThrow(res, '영상 생성');
 }

@@ -329,9 +329,9 @@ const Step3Audio = ({ state, update }) => {
               <Field label={`읽는 속도 · ${(voice.speed ?? 1).toFixed(2)}배`} hint="0.5배 ~ 1.8배">
                 <Slider value={voice.speed ?? 1} onChange={v => setV({ speed: v })} min={0.5} max={1.8} step={0.05} formatValue={v => `${v.toFixed(2)}x`} />
               </Field>
-              <Field label={`목소리 높낮이 · ${voice.pitch > 0 ? '+' : ''}${voice.pitch ?? 0}`} hint="−6 낮게 ~ +6 높게">
-                <Slider value={voice.pitch ?? 0} onChange={v => setV({ pitch: v })} min={-6} max={6} step={1} formatValue={v => (v > 0 ? `+${v}` : v)} />
-              </Field>
+              {/* voice.pitch slider removed — not an ElevenLabs v3 param and backend
+                  ffmpeg rubberband post-processing isn't implemented. Bring this back
+                  once modules/video_postprocess.py lands (plan §5.3.1). */}
             </div>
 
             <details style={{ marginTop: 12 }} open={advancedOpen} onToggle={e => setAdvancedOpen(e.target.open)}>

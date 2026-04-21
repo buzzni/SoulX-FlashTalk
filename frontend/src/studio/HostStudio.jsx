@@ -25,16 +25,20 @@ const STEPS = [
   { key: 3, name: '목소리·영상', short: '3', full: '목소리와 영상 뽑기' },
 ];
 
+// State fields intentionally cut vs the prototype designer's original shape:
+//   - voice.pitch: no ElevenLabs pitch param; ffmpeg rubberband post-processing not built.
+//   - voice.bgm / voice.bgmVolume: no BGM mix pipeline in backend.
+//   - subtitles / productTag: no captioning / overlay pipeline in backend.
+// The prototype's sliders for those widgets were cargo-culted from mockups that
+// didn't consider the actual Gemini / ElevenLabs / FlashTalk model capabilities.
 const INITIAL_STATE = {
   host: { mode: 'text', prompt: '', negativePrompt: '', builder: {}, generated: false, selectedSeed: null, _gradient: null, faceRef: null, outfitRef: null, faceStrength: 0.7, outfitStrength: 0.5 },
   products: [],
   background: { source: 'preset', preset: null, url: '', prompt: '', imageUrl: null, _gradient: null, _file: null },
   composition: { direction: '', shot: 'medium', angle: 'eye', generated: false, selectedSeed: null },
-  voice: { source: 'tts', voiceId: null, voiceName: null, paragraphs: [''], script: '', stability: 0.5, style: 0.3, similarity: 0.75, speed: 1, pitch: 0, generated: false, uploadedAudio: null, cloneSample: null, bgm: '없음', bgmVolume: 0.2 },
+  voice: { source: 'tts', voiceId: null, voiceName: null, paragraphs: [''], script: '', stability: 0.5, style: 0.3, similarity: 0.75, speed: 1, generated: false, uploadedAudio: null, cloneSample: null },
   script: '',
   resolution: { key: '448p', label: '448p', width: 448, height: 768, size: '~8MB', speed: '빠름', default: true },
-  subtitles: 'on',
-  productTag: 'on',
 };
 
 const DENSITY_KEY = 'showhost_density';
