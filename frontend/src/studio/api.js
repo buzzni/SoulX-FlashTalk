@@ -133,7 +133,14 @@ export function humanizeError(err) {
 const MAX_UPLOAD_BYTES = 20 * 1024 * 1024;
 
 function assertSize(file) {
-  if (file && file.size > MAX_UPLOAD_BYTES) {
+  // Catches the "we deserialized a File wrapper but the actual Blob is gone"
+  // case — File must expose the Blob API, not be a plain JSON remnant.
+  if (!file || typeof file !== 'object' || !(file instanceof Blob)) {
+    const err = new Error('파일이 사라졌어요. 페이지를 새로고침한 뒤 다시 업로드해주세요.');
+    err.status = 400;
+    throw err;
+  }
+  if (file.size > MAX_UPLOAD_BYTES) {
     const err = new Error('파일이 너무 커요 (최대 20MB)');
     err.status = 413;
     throw err;

@@ -43,6 +43,33 @@ const INITIAL_STATE = {
 
 const DENSITY_KEY = 'showhost_density';
 
+// Drop File handles and blob: URLs before localStorage. Server-side path
+// strings (host.selectedPath, products[].path, background.uploadPath) and
+// everything else stays so step navigation + validation still work after
+// refresh — users just need to re-attach files if they want to re-upload.
+function sanitizeForPersist(s) {
+  const isBlob = (u) => typeof u === 'string' && u.startsWith('blob:');
+  const cleanHost = { ...s.host, faceRef: null, outfitRef: null, _file: undefined };
+  const cleanBg = { ...s.background, _file: null, imageUrl: isBlob(s.background?.imageUrl) ? null : s.background?.imageUrl };
+  const cleanProducts = (s.products || []).map(p => ({
+    ...p,
+    _file: undefined,
+    url: isBlob(p.url) ? null : p.url,
+  }));
+  const cleanVoice = {
+    ...s.voice,
+    uploadedAudio: s.voice?.uploadedAudio?.path ? { path: s.voice.uploadedAudio.path, name: s.voice.uploadedAudio.name } : null,
+    cloneSample: s.voice?.cloneSample?.voiceId ? { voiceId: s.voice.cloneSample.voiceId, name: s.voice.cloneSample.name } : null,
+  };
+  return {
+    ...s,
+    host: cleanHost,
+    background: cleanBg,
+    products: cleanProducts,
+    voice: cleanVoice,
+  };
+}
+
 // Defensive hydrator — previous localStorage can have partial or missing sub-objects
 // (e.g., an older version of the app shipped without composition.shot). Shallow-
 // merge each top-level key with INITIAL_STATE so .host, .voice, etc. always have
@@ -91,7 +118,15 @@ const HostStudio = () => {
   }, [density]);
 
   useEffect(() => {
-    try { localStorage.setItem('showhost_state', JSON.stringify(state)); } catch (e) { /* ignore */ }
+    // Strip transient fields that can't survive a page refresh:
+    //   - blob URLs (URL.createObjectURL is session-scoped)
+    //   - File objects (JSON.stringify drops them to {} which then looks like
+    //     "a File is still here" but all real handles are gone — causing the
+    //     upload call to FormData.append a plain {} and produce "[object Object]")
+    try {
+      const sanitized = sanitizeForPersist(state);
+      localStorage.setItem('showhost_state', JSON.stringify(sanitized));
+    } catch (e) { /* ignore */ }
   }, [state]);
   useEffect(() => {
     localStorage.setItem('showhost_step', String(step));
