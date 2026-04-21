@@ -1,0 +1,101 @@
+/* ============ HostStudio design tokens ============
+ * Scoped to .studio-root so other app sections retain their own styling.
+ * Global resets (* / html / body) are deliberately omitted; the prototype
+ * ran on its own HTML page so it owned those, but in Vite we must not
+ * leak them into the rest of the frontend.
+ */
+.studio-root {
+  /* Neutrals — warm, low-chroma */
+  --bg: oklch(0.985 0.003 95);
+  --bg-elev: oklch(1 0 0);
+  --bg-sunken: oklch(0.965 0.004 95);
+  --bg-subtle: oklch(0.955 0.005 95);
+  --border: oklch(0.912 0.006 95);
+  --border-strong: oklch(0.86 0.008 95);
+  --text: oklch(0.22 0.01 260);
+  --text-secondary: oklch(0.45 0.012 260);
+  --text-tertiary: oklch(0.58 0.012 260);
+  --text-placeholder: oklch(0.7 0.01 260);
+
+  /* Accent — single blue */
+  --accent: oklch(0.55 0.15 255);
+  --accent-hover: oklch(0.5 0.16 255);
+  --accent-soft: oklch(0.95 0.03 255);
+  --accent-soft-border: oklch(0.88 0.06 255);
+  --accent-text: oklch(0.4 0.15 255);
+
+  /* Semantic */
+  --success: oklch(0.6 0.14 160);
+  --success-soft: oklch(0.95 0.03 160);
+  --warn: oklch(0.7 0.14 75);
+  --warn-soft: oklch(0.96 0.04 75);
+  --danger: oklch(0.58 0.18 25);
+  --danger-soft: oklch(0.96 0.03 25);
+
+  /* Radii */
+  --r-xs: 4px;
+  --r-sm: 6px;
+  --r-md: 8px;
+  --r-lg: 12px;
+  --r-xl: 16px;
+
+  /* Shadow */
+  --shadow-xs: 0 1px 0 oklch(0.22 0.01 260 / 0.04);
+  --shadow-sm: 0 1px 2px oklch(0.22 0.01 260 / 0.06), 0 1px 3px oklch(0.22 0.01 260 / 0.04);
+  --shadow-md: 0 4px 10px oklch(0.22 0.01 260 / 0.06), 0 2px 4px oklch(0.22 0.01 260 / 0.04);
+  --shadow-lg: 0 20px 40px oklch(0.22 0.01 260 / 0.08), 0 8px 16px oklch(0.22 0.01 260 / 0.05);
+
+  /* Density — Comfortable (default) */
+  --pad-card: 20px;
+  --pad-field: 10px 12px;
+  --gap-row: 14px;
+  --gap-stack: 16px;
+  --row-h: 36px;
+  --label-mt: 8px;
+  --section-gap: 28px;
+  --font-size-base: 14px;
+  --font-size-label: 12px;
+  --font-size-micro: 11px;
+
+  font-family: 'Pretendard', 'Pretendard Variable', -apple-system, BlinkMacSystemFont, 'Apple SD Gothic Neo', 'Noto Sans KR', sans-serif;
+  font-size: var(--font-size-base);
+  color: var(--text);
+  background: var(--bg);
+  -webkit-font-smoothing: antialiased;
+  line-height: 1.5;
+  letter-spacing: -0.005em;
+}
+
+.studio-root[data-density="compact"] {
+  --pad-card: 14px;
+  --pad-field: 7px 10px;
+  --gap-row: 10px;
+  --gap-stack: 12px;
+  --row-h: 30px;
+  --label-mt: 6px;
+  --section-gap: 20px;
+  --font-size-base: 13px;
+  --font-size-label: 11px;
+  --font-size-micro: 10px;
+}
+
+.studio-root *,
+.studio-root *::before,
+.studio-root *::after { box-sizing: border-box; }
+
+.studio-root .mono { font-family: 'JetBrains Mono', 'SF Mono', Menlo, monospace; font-feature-settings: 'tnum'; }
+.studio-root .num { font-variant-numeric: tabular-nums; }
+
+.studio-root button { font-family: inherit; }
+.studio-root input,
+.studio-root textarea,
+.studio-root select { font-family: inherit; color: inherit; }
+.studio-root input:focus,
+.studio-root textarea:focus,
+.studio-root select:focus { outline: none; }
+
+/* scrollbar — scoped */
+.studio-root *::-webkit-scrollbar { width: 10px; height: 10px; }
+.studio-root *::-webkit-scrollbar-thumb { background: oklch(0.85 0.006 95); border-radius: 99px; border: 2px solid var(--bg); }
+.studio-root *::-webkit-scrollbar-thumb:hover { background: oklch(0.75 0.008 95); }
+.studio-root *::-webkit-scrollbar-track { background: transparent; }
