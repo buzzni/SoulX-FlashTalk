@@ -11,7 +11,7 @@ import asyncio
 import logging
 import os
 import uuid
-from typing import Dict, List, Literal, Optional
+from typing import AsyncIterator, Dict, List, Literal, Optional
 
 from PIL import Image
 
@@ -125,6 +125,88 @@ async def generate_host_candidates(
         "candidates": candidates,
         "partial": len(candidates) < n,
         "errors": errors if errors else None,
+    }
+
+
+async def stream_host_candidates(
+    mode: Mode,
+    text_prompt: Optional[str] = None,
+    face_ref_path: Optional[str] = None,
+    outfit_ref_path: Optional[str] = None,
+    style_ref_path: Optional[str] = None,
+    extra_prompt: Optional[str] = None,
+    builder: Optional[Dict[str, str]] = None,
+    negative_prompt: Optional[str] = None,
+    face_strength: float = 0.7,
+    outfit_strength: float = 0.7,
+    n: int = 4,
+    timeout_per_call: float = 45.0,
+    min_success: int = 2,
+    output_dir: Optional[str] = None,
+) -> AsyncIterator[Dict]:
+    """Async generator — yields one event per candidate as it completes.
+
+    Events:
+      {"type": "candidate", "seed", "path", "url", "done", "total"}
+      {"type": "error",     "seed", "error"}
+      {"type": "done",      "success_count", "total", "partial"}
+
+    The UI consumes these via SSE so each finished tile renders immediately
+    instead of waiting for the slowest sibling (blocking gather).
+    """
+    _validate_inputs(mode, text_prompt, face_ref_path, outfit_ref_path, style_ref_path)
+
+    out_dir = output_dir or config.HOSTS_DIR
+    os.makedirs(out_dir, exist_ok=True)
+    seeds = [10, 42, 77, 128, 256, 512, 1024, 2048][:n]
+
+    async def _run_tagged(seed: int):
+        try:
+            path = await _generate_one(
+                seed=seed,
+                mode=mode,
+                text_prompt=text_prompt,
+                face_ref_path=face_ref_path,
+                outfit_ref_path=outfit_ref_path,
+                style_ref_path=style_ref_path,
+                extra_prompt=extra_prompt,
+                builder=builder,
+                negative_prompt=negative_prompt,
+                face_strength=face_strength,
+                outfit_strength=outfit_strength,
+                timeout=timeout_per_call,
+                output_dir=out_dir,
+            )
+            return (seed, path, None)
+        except Exception as e:
+            return (seed, None, f"{type(e).__name__}: {e}")
+
+    pending = [_run_tagged(s) for s in seeds]
+    done_count = 0
+    success_count = 0
+    for coro in asyncio.as_completed(pending):
+        seed, path, err = await coro
+        done_count += 1
+        if err:
+            logger.warning("Host candidate seed=%s failed: %s", seed, err)
+            yield {"type": "error", "seed": seed, "error": err, "done": done_count, "total": n}
+        elif path:
+            success_count += 1
+            yield {
+                "type": "candidate",
+                "seed": seed,
+                "path": path,
+                "url": f"/api/files/{os.path.relpath(path, config.OUTPUTS_DIR)}",
+                "done": done_count,
+                "total": n,
+            }
+
+    yield {
+        "type": "done",
+        "success_count": success_count,
+        "total": n,
+        "partial": success_count < n,
+        "min_success_met": success_count >= min_success,
     }
 
 

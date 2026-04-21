@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import Icon from './Icon.jsx';
 import { Badge, Button, Card, Chip, Field, Segmented, UploadTile } from './primitives.jsx';
-import { generateHost, humanizeError, uploadReferenceImage } from './api.js';
+import { humanizeError, streamHost, uploadReferenceImage } from './api.js';
 
 // Face/outfit strength is not a real Gemini parameter — the mapping layer (§5.1.2)
 // collapses 0–1 into one of four English prompt clauses. A slider pretends to be
@@ -96,7 +96,6 @@ const Step1Host = ({ state, update }) => {
     setVariants([]);
     setErrorMsg(null);
     try {
-      // Upload face/outfit files if image mode and a File is attached.
       let faceRefPath = host.faceRefPath || null;
       let outfitRefPath = host.outfitRefPath || null;
       if (host.mode !== 'text') {
@@ -112,14 +111,32 @@ const Step1Host = ({ state, update }) => {
         }
       }
       const req = { ...host, faceRefPath, outfitRefPath };
-      const result = await generateHost(req);
-      const vs = (result.candidates || []).map(c => ({
-        seed: c.seed,
-        id: `v${c.seed}`,
-        url: c.url,
-        path: c.path,
-      }));
-      setVariants(vs);
+
+      let successCount = 0;
+      let errorCount = 0;
+      const errs = [];
+      for await (const evt of streamHost(req)) {
+        if (evt.type === 'candidate') {
+          successCount += 1;
+          setVariants(vs => [...vs, { seed: evt.seed, id: `v${evt.seed}`, url: evt.url, path: evt.path }]);
+        } else if (evt.type === 'error') {
+          errorCount += 1;
+          errs.push(`seed ${evt.seed}: ${evt.error}`);
+        } else if (evt.type === 'fatal') {
+          const e = new Error(evt.error || '알 수 없는 오류');
+          e.status = evt.status;
+          throw e;
+        } else if (evt.type === 'done') {
+          if (!evt.min_success_met) {
+            const e = new Error(`후보가 부족해요 (${successCount}/${evt.total})`);
+            e.status = 503;
+            throw e;
+          }
+          if (errorCount > 0) {
+            console.warn('host generate had partial errors:', errs);
+          }
+        }
+      }
     } catch (err) {
       console.error('host generate failed', err);
       setErrorMsg(humanizeError(err));
@@ -278,7 +295,7 @@ const Step1Host = ({ state, update }) => {
         <div ref={resultsRef}>
           <Card title="↓ 이 중에서 골라주세요" subtitle={generating ? '후보를 만드는 중이에요. 잠시면 나타나요.' : '마음에 드는 후보를 클릭하면 선택돼요.'}>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10 }}>
-              {generating && variants.length === 0 && Array.from({ length: 4 }).map((_, i) => (
+              {generating && Array.from({ length: Math.max(0, 4 - variants.length) }).map((_, i) => (
                 <div key={i} className="preset-tile" style={{ padding: 0, cursor: 'default' }}>
                   <div className="swatch skeleton-shimmer" style={{ aspectRatio: '9/16', position: 'relative', display: 'grid', placeItems: 'center', color: 'var(--text-tertiary)', fontSize: 11 }}>
                     <span className="spinner" style={{ width: 18, height: 18 }} />

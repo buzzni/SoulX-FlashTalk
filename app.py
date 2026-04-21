@@ -1421,6 +1421,71 @@ async def host_generate(
     return result
 
 
+@app.post("/api/host/generate/stream")
+async def host_generate_stream(
+    mode: str = Form(...),
+    prompt: Optional[str] = Form(None),
+    extraPrompt: Optional[str] = Form(None),
+    negativePrompt: Optional[str] = Form(None),
+    builder: Optional[str] = Form(None),  # JSON dict
+    faceRefPath: Optional[str] = Form(None),
+    outfitRefPath: Optional[str] = Form(None),
+    styleRefPath: Optional[str] = Form(None),
+    faceStrength: float = Form(0.7),
+    outfitStrength: float = Form(0.7),
+    n: int = Form(4),
+):
+    """SSE variant of /api/host/generate — yields one event per completed
+    candidate instead of blocking on the slowest Gemini call.
+
+    Frontend consumes this via fetch + manual SSE parse (EventSource is GET-only)
+    and appends each 'candidate' event to the variants grid as it arrives.
+    """
+    from utils.security import safe_upload_path
+    from modules.host_generator import stream_host_candidates
+
+    face = safe_upload_path(faceRefPath) if faceRefPath else None
+    outfit = safe_upload_path(outfitRefPath) if outfitRefPath else None
+    style = safe_upload_path(styleRefPath) if styleRefPath else None
+
+    builder_dict = None
+    if builder:
+        try:
+            builder_dict = json.loads(builder)
+            if not isinstance(builder_dict, dict):
+                raise ValueError
+        except (json.JSONDecodeError, ValueError):
+            raise HTTPException(status_code=400, detail="builder must be a JSON object")
+
+    async def events():
+        try:
+            async for evt in stream_host_candidates(
+                mode=mode,
+                text_prompt=prompt,
+                face_ref_path=face,
+                outfit_ref_path=outfit,
+                style_ref_path=style,
+                extra_prompt=extraPrompt,
+                builder=builder_dict,
+                negative_prompt=negativePrompt,
+                face_strength=faceStrength,
+                outfit_strength=outfitStrength,
+                n=n,
+            ):
+                yield f"data: {json.dumps(evt)}\n\n"
+        except ValueError as e:
+            yield f"data: {json.dumps({'type': 'fatal', 'error': str(e), 'status': 400})}\n\n"
+        except Exception as e:
+            logger.error("host stream failed: %s", e)
+            yield f"data: {json.dumps({'type': 'fatal', 'error': str(e), 'status': 500})}\n\n"
+
+    return StreamingResponse(
+        events(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
 # ========================================
 # HostStudio Phase 2 — POST /api/composite/generate
 # ========================================

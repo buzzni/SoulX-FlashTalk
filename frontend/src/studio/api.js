@@ -7,7 +7,10 @@
 // - Every fetch returns parsed JSON or throws a user-friendly Error.
 // - No retries, no toast plumbing — callers (Step components) own UX state.
 
-const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8001';
+// Empty by default → fetch uses page origin → Vite dev-server proxies /api and
+// /static to 127.0.0.1:8001. Set VITE_API_BASE_URL only if you're hosting the
+// frontend and backend at different origins in production.
+const API_BASE = import.meta.env.VITE_API_BASE_URL || '';
 
 // ============================================================
 // Mapping helpers — pure functions, heavily covered by unit tests.
@@ -232,6 +235,52 @@ export async function generateHost(host) {
   const body = buildHostGenerateBody(host);
   const res = await fetch(`${API_BASE}/api/host/generate`, { method: 'POST', body });
   return jsonOrThrow(res, '호스트 생성');
+}
+
+/**
+ * Async generator variant — yields one event per completed candidate.
+ * Use for "하나씩 페이드인" UX (plan §6 state matrix "streaming").
+ *
+ * Usage:
+ *   for await (const evt of streamHost(host)) {
+ *     if (evt.type === 'candidate') setVariants(v => [...v, evt]);
+ *     else if (evt.type === 'done')   break; // or handle partial
+ *     else if (evt.type === 'error')  log(evt);
+ *     else if (evt.type === 'fatal')  throw new Error(evt.error);
+ *   }
+ *
+ * EventSource only supports GET, so we use fetch + manual SSE frame parsing.
+ */
+export async function* streamHost(host) {
+  const body = buildHostGenerateBody(host);
+  const res = await fetch(`${API_BASE}/api/host/generate/stream`, { method: 'POST', body });
+  if (!res.ok) {
+    // Server rejected before stream started (400 / 503 etc.)
+    const err = new Error(`호스트 생성 시작 실패 (${res.status})`);
+    err.status = res.status;
+    try { err.detail = (await res.json()).detail; } catch { /* ignore */ }
+    throw err;
+  }
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    // SSE frames are separated by a blank line (\n\n).
+    let sep;
+    while ((sep = buffer.indexOf('\n\n')) !== -1) {
+      const frame = buffer.slice(0, sep);
+      buffer = buffer.slice(sep + 2);
+      for (const line of frame.split('\n')) {
+        if (line.startsWith('data: ')) {
+          try { yield JSON.parse(line.slice(6)); }
+          catch { /* malformed frame — skip */ }
+        }
+      }
+    }
+  }
 }
 
 // ============================================================
