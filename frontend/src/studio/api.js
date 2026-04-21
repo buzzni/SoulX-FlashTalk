@@ -133,8 +133,6 @@ export function humanizeError(err) {
 const MAX_UPLOAD_BYTES = 20 * 1024 * 1024;
 
 function assertSize(file) {
-  // Catches the "we deserialized a File wrapper but the actual Blob is gone"
-  // case — File must expose the Blob API, not be a plain JSON remnant.
   if (!file || typeof file !== 'object' || !(file instanceof Blob)) {
     const err = new Error('파일이 사라졌어요. 페이지를 새로고침한 뒤 다시 업로드해주세요.');
     err.status = 400;
@@ -147,49 +145,75 @@ function assertSize(file) {
   }
 }
 
-export async function uploadHostImage(file) {
+// Read a File into a base64 string via arrayBuffer() — more reliable than
+// FileReader on some browsers / AV-scanned systems. Chunks the base64 encoding
+// to avoid "Maximum call stack" on large files (btoa + spread operator limit).
+async function fileToBase64(file) {
+  // Prefer arrayBuffer (fast, sync-like after await). Fall back to FileReader
+  // if unavailable (older jsdom in tests, some fringe browsers).
+  if (typeof file.arrayBuffer === 'function') {
+    const buf = await file.arrayBuffer();
+    const bytes = new Uint8Array(buf);
+    let binary = '';
+    const CHUNK = 0x8000;
+    for (let i = 0; i < bytes.length; i += CHUNK) {
+      binary += String.fromCharCode.apply(null, bytes.subarray(i, i + CHUNK));
+    }
+    return btoa(binary);
+  }
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const dataUrl = reader.result || '';
+      const comma = dataUrl.indexOf(',');
+      resolve(comma >= 0 ? dataUrl.slice(comma + 1) : dataUrl);
+    };
+    reader.onerror = () => reject(reader.error || new Error('FileReader failed'));
+    reader.readAsDataURL(file);
+  });
+}
+
+// Single upload helper — POSTs application/json with base64 file.
+// Corporate DPI / AV middleboxes often drop multipart/form-data uploads while
+// letting JSON POSTs through. Kind tells the backend which subdir / validator
+// to use (mirrors the original multipart endpoints).
+async function uploadViaJson(file, kind, label) {
   assertSize(file);
-  const fd = new FormData();
-  fd.append('file', file);
-  const res = await fetch(`${API_BASE}/api/upload/host-image`, { method: 'POST', body: fd });
-  return jsonOrThrow(res, '호스트 이미지 업로드');
+  console.log(`[api] uploadViaJson kind=${kind}`, { name: file.name, size: file.size, type: file.type });
+  const content_base64 = await fileToBase64(file);
+  const body = JSON.stringify({
+    kind,
+    filename: file.name,
+    mime_type: file.type,
+    content_base64,
+  });
+  const res = await fetch(`${API_BASE}/api/upload/json`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body,
+  });
+  console.log(`[api] uploadViaJson kind=${kind} response`, { status: res.status, ok: res.ok });
+  return jsonOrThrow(res, label);
+}
+
+export async function uploadHostImage(file) {
+  return uploadViaJson(file, 'host-image', '호스트 이미지 업로드');
 }
 
 export async function uploadBackgroundImage(file) {
-  assertSize(file);
-  const fd = new FormData();
-  fd.append('file', file);
-  const res = await fetch(`${API_BASE}/api/upload/background-image`, { method: 'POST', body: fd });
-  return jsonOrThrow(res, '배경 이미지 업로드');
+  return uploadViaJson(file, 'background-image', '배경 이미지 업로드');
 }
 
 export async function uploadReferenceImage(file) {
-  console.log('[api] uploadReferenceImage', {
-    name: file.name, size: file.size, type: file.type,
-    isFile: file instanceof File, isBlob: file instanceof Blob,
-  });
-  assertSize(file);
-  const fd = new FormData();
-  fd.append('file', file);
-  const res = await fetch(`${API_BASE}/api/upload/reference-image`, { method: 'POST', body: fd });
-  console.log('[api] uploadReferenceImage response', { status: res.status, ok: res.ok });
-  return jsonOrThrow(res, '참조 이미지 업로드');
+  return uploadViaJson(file, 'reference-image', '참조 이미지 업로드');
 }
 
 export async function uploadAudio(file) {
-  assertSize(file);
-  const fd = new FormData();
-  fd.append('file', file);
-  const res = await fetch(`${API_BASE}/api/upload/audio`, { method: 'POST', body: fd });
-  return jsonOrThrow(res, '오디오 업로드');
+  return uploadViaJson(file, 'audio', '오디오 업로드');
 }
 
 export async function uploadReferenceAudio(file) {
-  assertSize(file);
-  const fd = new FormData();
-  fd.append('file', file);
-  const res = await fetch(`${API_BASE}/api/upload/reference-audio`, { method: 'POST', body: fd });
-  return jsonOrThrow(res, '참조 오디오 업로드');
+  return uploadViaJson(file, 'reference-audio', '참조 오디오 업로드');
 }
 
 // ============================================================

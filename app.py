@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Optional, List
 from datetime import datetime
 
-from fastapi import FastAPI, File, UploadFile, Form, HTTPException
+from fastapi import FastAPI, File, UploadFile, Form, HTTPException, Request
 from fastapi.responses import FileResponse, StreamingResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -582,6 +582,64 @@ async def upload_background_image(file: UploadFile = File(...)):
     save_upload_file(file, filepath)
     validate_image_upload(filepath)
     return {"filename": filename, "path": filepath}
+
+
+@app.post("/api/upload/json")
+async def upload_json(request: Request):
+    """Alternative upload via JSON body with base64 content.
+
+    Some client environments (corporate DPI proxies, certain antivirus, strict
+    browser extensions) silently drop multipart/form-data POSTs. This endpoint
+    accepts the same payload as /api/upload/* but as application/json, which
+    typically passes through such middleware.
+
+    Body: {
+      kind: "host-image" | "background-image" | "reference-image" | "audio" | "reference-audio",
+      filename: "whatever.png",
+      content_base64: "iVBOR...",      # file bytes as base64
+      mime_type: "image/png"           # optional; inferred from kind otherwise
+    }
+    """
+    import base64
+    from utils.security import validate_image_upload, validate_audio_upload
+
+    body = await request.json()
+    kind = (body.get("kind") or "reference-image").strip()
+    filename_in = body.get("filename") or ""
+    b64 = body.get("content_base64") or ""
+    mime = body.get("mime_type") or ""
+
+    if not b64:
+        raise HTTPException(status_code=400, detail="content_base64 required")
+    try:
+        raw = base64.b64decode(b64, validate=True)
+    except Exception:
+        raise HTTPException(status_code=400, detail="content_base64 is not valid base64")
+
+    if len(raw) > config.MAX_UPLOAD_BYTES:
+        raise HTTPException(status_code=413, detail=f"File exceeds {config.MAX_UPLOAD_BYTES // 1_000_000}MB limit")
+
+    is_audio = kind in ("audio", "reference-audio")
+    if is_audio:
+        ext = os.path.splitext(filename_in)[1] or ".mp3"
+        prefix = "audio" if kind == "audio" else "ref_audio"
+    else:
+        if mime and not mime.startswith("image/"):
+            raise HTTPException(status_code=400, detail="mime_type must be image/*")
+        ext = os.path.splitext(filename_in)[1] or ".png"
+        prefix = {"host-image": "host", "background-image": "bg", "reference-image": "ref_img"}.get(kind, "ref_img")
+
+    out_name = f"{prefix}_{uuid.uuid4().hex[:8]}{ext}"
+    out_path = os.path.join(config.UPLOADS_DIR, out_name)
+    with open(out_path, "wb") as f:
+        f.write(raw)
+
+    if is_audio:
+        validate_audio_upload(out_path)
+    else:
+        validate_image_upload(out_path)
+
+    return {"filename": out_name, "path": out_path, "kind": kind, "size": len(raw)}
 
 
 @app.post("/api/upload/reference-image")
