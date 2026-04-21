@@ -48,13 +48,15 @@ const DENSITY_KEY = 'showhost_density';
 // everything else stays so step navigation + validation still work after
 // refresh — users just need to re-attach files if they want to re-upload.
 function sanitizeForPersist(s) {
-  const isBlob = (u) => typeof u === 'string' && u.startsWith('blob:');
+  // Strip any URL that can't survive a refresh (blob: dies with the tab,
+  // data: is fine but can blow past localStorage quota with multi-MB uploads).
+  const isTransientUrl = (u) => typeof u === 'string' && (u.startsWith('blob:') || u.startsWith('data:'));
   const cleanHost = { ...s.host, faceRef: null, outfitRef: null, _file: undefined };
-  const cleanBg = { ...s.background, _file: null, imageUrl: isBlob(s.background?.imageUrl) ? null : s.background?.imageUrl };
+  const cleanBg = { ...s.background, _file: null, imageUrl: isTransientUrl(s.background?.imageUrl) ? null : s.background?.imageUrl };
   const cleanProducts = (s.products || []).map(p => ({
     ...p,
     _file: undefined,
-    url: isBlob(p.url) ? null : p.url,
+    url: isTransientUrl(p.url) ? null : p.url,
   }));
   const cleanVoice = {
     ...s.voice,

@@ -108,8 +108,19 @@ export const UploadTile = ({ file, onFile, onRemove, label = '클릭 또는 드�
   const inputRef = useRef(null);
   const handleFile = (f) => {
     if (!f) return;
-    const url = URL.createObjectURL(f);
-    onFile({ name: f.name, size: f.size, type: f.type, url, _fake: false, _file: f });
+    // Use FileReader → data URL for the preview instead of URL.createObjectURL.
+    // Blob URLs (blob:http://172.28...:5555/<uuid>) intermittently hit
+    // ERR_TIMED_OUT on non-localhost origins in Chromium; data: URLs resolve
+    // in-browser with no fetch roundtrip. Slight memory cost (base64 doubles
+    // size), negligible for 20MB-capped image uploads.
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      onFile({ name: f.name, size: f.size, type: f.type, url: e.target.result, _fake: false, _file: f });
+    };
+    reader.onerror = () => {
+      onFile({ name: f.name, size: f.size, type: f.type, url: null, _fake: false, _file: f });
+    };
+    reader.readAsDataURL(f);
   };
   const fakeUpload = () => {
     const fake = {
