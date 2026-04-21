@@ -584,6 +584,44 @@ async def upload_background_image(file: UploadFile = File(...)):
     return {"filename": filename, "path": filepath}
 
 
+@app.get("/api/upload/list")
+async def list_uploads(kind: str = "image"):
+    """List files already present in UPLOADS_DIR so the UI can pick one
+    without re-uploading. Workaround for environments where the browser's
+    file read or multipart POST is blocked by DLP/VPN — user scp's the file
+    to uploads/ once, then selects it from this list in the UI.
+    """
+    exts = {
+        "image": {".png", ".jpg", ".jpeg", ".webp"},
+        "audio": {".wav", ".mp3", ".m4a", ".flac"},
+    }.get(kind, {".png", ".jpg", ".jpeg", ".webp"})
+
+    if not os.path.isdir(config.UPLOADS_DIR):
+        return {"files": []}
+
+    results = []
+    for fname in os.listdir(config.UPLOADS_DIR):
+        fp = os.path.join(config.UPLOADS_DIR, fname)
+        if not os.path.isfile(fp):
+            continue
+        ext = os.path.splitext(fname)[1].lower()
+        if ext not in exts:
+            continue
+        try:
+            st = os.stat(fp)
+        except OSError:
+            continue
+        results.append({
+            "filename": fname,
+            "path": fp,
+            "url": f"/api/files/{fname}",
+            "size": st.st_size,
+            "modified": st.st_mtime,
+        })
+    results.sort(key=lambda r: r["modified"], reverse=True)
+    return {"files": results[:200]}
+
+
 @app.post("/api/upload/json")
 async def upload_json(request: Request):
     """Alternative upload via JSON body with base64 content.

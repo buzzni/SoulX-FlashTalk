@@ -7,14 +7,12 @@
 // - Every fetch returns parsed JSON or throws a user-friendly Error.
 // - No retries, no toast plumbing — callers (Step components) own UX state.
 
-// Match the legacy frontend's working pattern: hardcode loopback to the backend.
-// The page URL may be accessed via a LAN IP (e.g., http://172.28.60.60:5555),
-// but fetches go to `http://localhost:8001` so the kernel routes them via the
-// loopback interface. Korean enterprise security agents (AhnLab ASTx etc.) do
-// not inspect loopback traffic but will stall multipart POSTs to a LAN IP —
-// even on the same machine, because 172.28.x is a real network interface IP,
-// not 127.0.0.1. This single line is what makes uploads work.
-const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8001';
+// Empty → fetch uses the page origin → Vite dev-server proxies /api and
+// /static to 127.0.0.1:8001 on the server. Works whether the page is loaded
+// from localhost or a LAN IP, because the browser never talks to the backend
+// directly; the proxy handles it server-side. Override with VITE_API_BASE_URL
+// only in production or when you specifically need a different origin.
+const API_BASE = import.meta.env.VITE_API_BASE_URL || '';
 
 // ============================================================
 // Mapping helpers — pure functions, heavily covered by unit tests.
@@ -180,6 +178,18 @@ export async function uploadAudio(file) {
 
 export async function uploadReferenceAudio(file) {
   return uploadMultipart(file, '/api/upload/reference-audio', '참조 오디오 업로드');
+}
+
+/**
+ * List files already uploaded to the server's uploads/ dir.
+ * Workaround for environments where browser file upload is blocked (DLP / VPN).
+ * User scp's files onto the server once, then picks from this list in the UI.
+ *
+ * kind: 'image' | 'audio'. Returns { files: [{filename, path, url, size, modified}, ...] }.
+ */
+export async function listServerFiles(kind = 'image') {
+  const res = await fetch(`${API_BASE}/api/upload/list?kind=${encodeURIComponent(kind)}`);
+  return jsonOrThrow(res, '서버 파일 목록 조회');
 }
 
 // ============================================================

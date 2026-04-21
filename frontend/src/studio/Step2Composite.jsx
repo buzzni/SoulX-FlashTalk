@@ -7,6 +7,7 @@ import {
   uploadBackgroundImage,
   uploadReferenceImage,
 } from './api.js';
+import ServerFilePicker from './ServerFilePicker.jsx';
 
 // Step 2 — 제품 + 배경 + 구도 지시 → 합성 스틸 한 장
 const BG_PRESETS = [
@@ -243,6 +244,43 @@ const Step2Composite = ({ state, update }) => {
     }
   }, [generating, variants.length]);
 
+  // Server-side file picker state — active target is either 'products' or 'bg'.
+  const [pickerFor, setPickerFor] = useState(null);
+  const handlePickedServerFile = (f) => {
+    if (pickerFor === 'bg') {
+      setBg({
+        _file: null,
+        imageUrl: f.url,
+        uploadPath: f.path,
+        preset: null,
+        prompt: '',
+        url: '',
+        serverFilename: f.filename,
+      });
+    } else if (pickerFor === 'products') {
+      setProducts(ps => {
+        const nextRow = {
+          id: Date.now().toString(36),
+          url: f.url,
+          name: f.filename,
+          source: 'upload',
+          path: f.path,
+          _file: null,
+        };
+        // Replace stubs (no url/file/path) first, otherwise append.
+        const stubIdx = ps.findIndex(p => !p.url && !p._file && !p.path);
+        if (stubIdx >= 0) {
+          const next = ps.slice();
+          next[stubIdx] = nextRow;
+          return next;
+        }
+        if (ps.length === 0) return [nextRow];
+        return [...ps, nextRow];
+      });
+    }
+    setPickerFor(null);
+  };
+
   return (
     <div className="step-page">
       <div className="step-heading">
@@ -251,7 +289,10 @@ const Step2Composite = ({ state, update }) => {
       </div>
 
       <Card title="소개할 상품" subtitle="여러 개 추가할 수 있어요. 구도 지시에서 ①②③ 번호로 지칭해요" action={
-        <Button icon="plus" size="sm" onClick={addProduct}>제품 추가</Button>
+        <div style={{ display: 'flex', gap: 6 }}>
+          <Button icon="file" size="sm" onClick={() => setPickerFor('products')}>서버 파일 선택</Button>
+          <Button icon="plus" size="sm" onClick={addProduct}>제품 추가</Button>
+        </div>
       }>
         {products.length === 0 || products.every(p => !p.url && !p._file && !p.path) ? (
           <UploadTile
@@ -371,16 +412,46 @@ const Step2Composite = ({ state, update }) => {
             </div>
           )}
           {bgSource === 'upload' && (
-            <UploadTile
-              file={background._file}
-              onFile={f => {
-                console.log('[Step2] bg onFile', { wrapperKeys: Object.keys(f), urlLen: f.url?.length, hasFile: !!f._file, fileIsBlob: f._file instanceof Blob });
-                setBg({ _file: f, imageUrl: f.url, preset: null, prompt: '', url: '' });
-              }}
-              onRemove={() => setBg({ _file: null, imageUrl: null })}
-              label="배경 사진 올리기"
-              sub="촬영한 매장 사진 등"
-            />
+            <div className="flex-col gap-2">
+              {background.imageUrl && background.uploadPath && !background._file ? (
+                <div className="upload-tile has-file">
+                  <div className="file-thumb">
+                    <img src={background.imageUrl} alt={background.serverFilename || ''} />
+                  </div>
+                  <div className="file-meta">
+                    <span className="truncate">{background.serverFilename || '(서버 파일)'}</span>
+                    <span className="mono">server</span>
+                  </div>
+                  <div className="file-buttons">
+                    <button className="file-btn" onClick={() => setPickerFor('bg')}>
+                      <Icon name="swap" size={12} /> 다른 파일
+                    </button>
+                    <button className="file-btn file-btn-danger" onClick={() => setBg({ _file: null, imageUrl: null, uploadPath: null, serverFilename: null })}>
+                      <Icon name="trash" size={12} /> 삭제
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <UploadTile
+                  file={background._file}
+                  onFile={f => {
+                    console.log('[Step2] bg onFile', { wrapperKeys: Object.keys(f), urlLen: f.url?.length, hasFile: !!f._file, fileIsBlob: f._file instanceof Blob });
+                    setBg({ _file: f, imageUrl: f.url, preset: null, prompt: '', url: '' });
+                  }}
+                  onRemove={() => setBg({ _file: null, imageUrl: null })}
+                  label="배경 사진 올리기"
+                  sub="촬영한 매장 사진 등"
+                />
+              )}
+              <button
+                className="btn btn-ghost btn-sm"
+                onClick={() => setPickerFor('bg')}
+                style={{ alignSelf: 'flex-start' }}
+                type="button"
+              >
+                <Icon name="file" size={12} /> 서버에 있는 파일에서 선택
+              </button>
+            </div>
           )}
           {bgSource === 'url' && (
             <Field label="이미지 주소">
@@ -595,6 +666,13 @@ const Step2Composite = ({ state, update }) => {
           </Card>
         </div>
       )}
+
+      <ServerFilePicker
+        open={pickerFor !== null}
+        kind="image"
+        onClose={() => setPickerFor(null)}
+        onSelect={handlePickedServerFile}
+      />
     </div>
   );
 };
