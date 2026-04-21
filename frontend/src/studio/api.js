@@ -7,10 +7,14 @@
 // - Every fetch returns parsed JSON or throws a user-friendly Error.
 // - No retries, no toast plumbing — callers (Step components) own UX state.
 
-// Empty by default → fetch uses page origin → Vite dev-server proxies /api and
-// /static to 127.0.0.1:8001. Set VITE_API_BASE_URL only if you're hosting the
-// frontend and backend at different origins in production.
-const API_BASE = import.meta.env.VITE_API_BASE_URL || '';
+// Match the legacy frontend's working pattern: hardcode loopback to the backend.
+// The page URL may be accessed via a LAN IP (e.g., http://172.28.60.60:5555),
+// but fetches go to `http://localhost:8001` so the kernel routes them via the
+// loopback interface. Korean enterprise security agents (AhnLab ASTx etc.) do
+// not inspect loopback traffic but will stall multipart POSTs to a LAN IP —
+// even on the same machine, because 172.28.x is a real network interface IP,
+// not 127.0.0.1. This single line is what makes uploads work.
+const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8001';
 
 // ============================================================
 // Mapping helpers — pure functions, heavily covered by unit tests.
@@ -145,75 +149,37 @@ function assertSize(file) {
   }
 }
 
-// Read a File into a base64 string via arrayBuffer() — more reliable than
-// FileReader on some browsers / AV-scanned systems. Chunks the base64 encoding
-// to avoid "Maximum call stack" on large files (btoa + spread operator limit).
-async function fileToBase64(file) {
-  // Prefer arrayBuffer (fast, sync-like after await). Fall back to FileReader
-  // if unavailable (older jsdom in tests, some fringe browsers).
-  if (typeof file.arrayBuffer === 'function') {
-    const buf = await file.arrayBuffer();
-    const bytes = new Uint8Array(buf);
-    let binary = '';
-    const CHUNK = 0x8000;
-    for (let i = 0; i < bytes.length; i += CHUNK) {
-      binary += String.fromCharCode.apply(null, bytes.subarray(i, i + CHUNK));
-    }
-    return btoa(binary);
-  }
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => {
-      const dataUrl = reader.result || '';
-      const comma = dataUrl.indexOf(',');
-      resolve(comma >= 0 ? dataUrl.slice(comma + 1) : dataUrl);
-    };
-    reader.onerror = () => reject(reader.error || new Error('FileReader failed'));
-    reader.readAsDataURL(file);
-  });
-}
-
-// Single upload helper — POSTs application/json with base64 file.
-// Corporate DPI / AV middleboxes often drop multipart/form-data uploads while
-// letting JSON POSTs through. Kind tells the backend which subdir / validator
-// to use (mirrors the original multipart endpoints).
-async function uploadViaJson(file, kind, label) {
+// Match legacy VideoGenerator upload pattern verbatim: raw FormData multipart
+// to the existing /api/upload/* endpoints. The JSON/base64 detour was
+// speculation about an ASTx/DLP multipart block that turned out to be wrong —
+// our own legacy frontend running on :5173 does the exact same multipart
+// POSTs from the same browser and they succeed.
+async function uploadMultipart(file, path, label) {
   assertSize(file);
-  console.log(`[api] uploadViaJson kind=${kind}`, { name: file.name, size: file.size, type: file.type });
-  const content_base64 = await fileToBase64(file);
-  const body = JSON.stringify({
-    kind,
-    filename: file.name,
-    mime_type: file.type,
-    content_base64,
-  });
-  const res = await fetch(`${API_BASE}/api/upload/json`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body,
-  });
-  console.log(`[api] uploadViaJson kind=${kind} response`, { status: res.status, ok: res.ok });
+  const fd = new FormData();
+  fd.append('file', file);
+  const res = await fetch(`${API_BASE}${path}`, { method: 'POST', body: fd });
   return jsonOrThrow(res, label);
 }
 
 export async function uploadHostImage(file) {
-  return uploadViaJson(file, 'host-image', '호스트 이미지 업로드');
+  return uploadMultipart(file, '/api/upload/host-image', '호스트 이미지 업로드');
 }
 
 export async function uploadBackgroundImage(file) {
-  return uploadViaJson(file, 'background-image', '배경 이미지 업로드');
+  return uploadMultipart(file, '/api/upload/background-image', '배경 이미지 업로드');
 }
 
 export async function uploadReferenceImage(file) {
-  return uploadViaJson(file, 'reference-image', '참조 이미지 업로드');
+  return uploadMultipart(file, '/api/upload/reference-image', '참조 이미지 업로드');
 }
 
 export async function uploadAudio(file) {
-  return uploadViaJson(file, 'audio', '오디오 업로드');
+  return uploadMultipart(file, '/api/upload/audio', '오디오 업로드');
 }
 
 export async function uploadReferenceAudio(file) {
-  return uploadViaJson(file, 'reference-audio', '참조 오디오 업로드');
+  return uploadMultipart(file, '/api/upload/reference-audio', '참조 오디오 업로드');
 }
 
 // ============================================================

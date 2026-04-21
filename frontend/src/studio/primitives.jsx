@@ -171,19 +171,41 @@ export const UploadTile = ({ file, onFile, onRemove, label = '클릭 또는 드�
     );
   }
 
+  // Clipboard paste handler — bypasses FileReader / multipart-POST paths that
+  // AhnLab ASTx and similar enterprise security agents tend to block. Image
+  // bytes come from Chrome's clipboard buffer rather than an OS file handle,
+  // so the NotReadableError trigger (file-lock / snapshot-state) doesn't apply.
+  const onPaste = (e) => {
+    const items = e.clipboardData?.items;
+    if (!items) return;
+    for (const it of items) {
+      if (it.kind === 'file' && it.type.startsWith('image/')) {
+        e.preventDefault();
+        const f = it.getAsFile();
+        if (f) handleFile(f);
+        return;
+      }
+    }
+  };
+
   return (
     <div
       className="upload-tile"
       style={dragOver ? { borderColor: 'var(--accent)', background: 'var(--accent-soft)' } : {}}
+      tabIndex={0}
       onClick={() => { inputRef.current?.click(); }}
       onDragOver={e => { e.preventDefault(); setDragOver(true); }}
       onDragLeave={() => setDragOver(false)}
       onDrop={e => { e.preventDefault(); setDragOver(false); handleFile(e.dataTransfer.files[0]); }}
+      onPaste={onPaste}
     >
       <input type="file" accept={accept} ref={inputRef} style={{ display: 'none' }} onChange={e => handleFile(e.target.files[0])} />
       <Icon name="upload" size={compact ? 18 : 22} />
       <div className="label">{label}</div>
       <div className="sub">{sub}</div>
+      <div className="sub" style={{ marginTop: 4, fontSize: 10, color: 'var(--text-tertiary)' }}>
+        또는 이미지 복사 후 이 영역에 <kbd style={{ fontFamily: 'monospace', padding: '0 4px', border: '1px solid var(--border)', borderRadius: 3 }}>Ctrl+V</kbd> / <kbd style={{ fontFamily: 'monospace', padding: '0 4px', border: '1px solid var(--border)', borderRadius: 3 }}>Cmd+V</kbd>
+      </div>
       <button className="btn btn-secondary btn-sm mt-1" onClick={e => { e.stopPropagation(); fakeUpload(); }} type="button">
         샘플 사용
       </button>

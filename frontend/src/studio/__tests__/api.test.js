@@ -271,7 +271,7 @@ describe('api.js — upload choreography', () => {
     vi.restoreAllMocks();
   });
 
-  it('posts to /api/upload/json with base64 body and returns parsed JSON', async () => {
+  it('posts to /api/upload/host-image and returns parsed JSON', async () => {
     global.fetch.mockResolvedValueOnce({
       ok: true,
       json: async () => ({ path: '/uploads/host_123.png', filename: 'host_123.png' }),
@@ -280,17 +280,9 @@ describe('api.js — upload choreography', () => {
     const r = await uploadHostImage(file);
     expect(r.path).toBe('/uploads/host_123.png');
     expect(global.fetch).toHaveBeenCalledWith(
-      expect.stringMatching(/\/api\/upload\/json$/),
-      expect.objectContaining({
-        method: 'POST',
-        headers: expect.objectContaining({ 'Content-Type': 'application/json' }),
-      }),
+      expect.stringMatching(/\/api\/upload\/host-image$/),
+      expect.objectContaining({ method: 'POST' }),
     );
-    // Body should contain a base64 content field with the kind set for host
-    const body = JSON.parse(global.fetch.mock.calls[0][1].body);
-    expect(body.kind).toBe('host-image');
-    expect(typeof body.content_base64).toBe('string');
-    expect(body.content_base64.length).toBeGreaterThan(0);
   });
 
   it('throws on >20MB file before network call', async () => {
