@@ -235,7 +235,10 @@ const Step2Composite = ({ state, update }) => {
       <Card title="소개할 상품" subtitle="여러 개 추가할 수 있어요. 구도 지시에서 ①②③ 번호로 지칭해요" action={
         <Button icon="plus" size="sm" onClick={addProduct}>제품 추가</Button>
       }>
-        {products.length === 0 ? (
+        {products.length === 0 || products.every(p => !p.url && !p._file && !p.path) ? (
+          // Show the first-upload card whenever nothing usable is attached.
+          // After a refresh the sanitizer strips data URLs and _file handles,
+          // so a products[0] remnant would otherwise hide the upload UI.
           <UploadTile
             onFile={f => setProducts([{ id: Date.now().toString(36), url: f.url, name: f.name, source: 'upload', _file: f._file }])}
             label="제품 사진 올리기"
@@ -279,7 +282,20 @@ const Step2Composite = ({ state, update }) => {
                       <Icon name={p.url ? 'swap' : 'upload'} size={12} />
                       {p.url ? '사진 교체' : '사진 올리기'}
                       <input type="file" accept="image/*" style={{ display: 'none' }}
-                        onChange={e => { const f = e.target.files[0]; if (f) updateProduct(p.id, { url: URL.createObjectURL(f), name: f.name, _file: f, path: null }); }}
+                        onChange={e => {
+                          const f = e.target.files[0];
+                          if (!f) return;
+                          // Mirror UploadTile.handleFile: data URL (blob: times out on
+                          // network-IP origins) + raw File for the upload call.
+                          const reader = new FileReader();
+                          reader.onload = (ev) => updateProduct(p.id, {
+                            url: ev.target.result,
+                            name: f.name,
+                            _file: f,
+                            path: null,
+                          });
+                          reader.readAsDataURL(f);
+                        }}
                       />
                     </label>
                   )}
