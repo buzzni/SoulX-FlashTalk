@@ -251,7 +251,9 @@ async def generate_composite_candidates(
             candidates.append({
                 "seed": seed,
                 "path": res,
-                "url": f"/api/files/{os.path.relpath(res, config.PROJECT_ROOT)}",
+                # /api/files prepends a SAFE_ROOT (OUTPUTS_DIR here) — so the
+                # path must be relative to OUTPUTS_DIR, not PROJECT_ROOT.
+                "url": f"/api/files/{os.path.relpath(res, config.OUTPUTS_DIR)}",
             })
 
     if len(candidates) < min_success:

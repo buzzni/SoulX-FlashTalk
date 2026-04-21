@@ -109,7 +109,10 @@ async def generate_host_candidates(
             candidates.append({
                 "seed": seed,
                 "path": res,
-                "url": f"/api/files/{os.path.relpath(res, config.PROJECT_ROOT)}",
+                # /api/files prepends a SAFE_ROOT (OUTPUTS_DIR here) — so the
+                # path must be relative to OUTPUTS_DIR, not PROJECT_ROOT, or
+                # we end up with "outputs/outputs/hosts/..." and a 404.
+                "url": f"/api/files/{os.path.relpath(res, config.OUTPUTS_DIR)}",
             })
 
     if len(candidates) < min_success:
