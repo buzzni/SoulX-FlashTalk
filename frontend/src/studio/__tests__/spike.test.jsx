@@ -1,6 +1,8 @@
 /**
  * Phase -1 React 19 compatibility smoke test.
  * If this passes, useState + useRef + useEffect + event listeners all work under Vitest jsdom + React 19.
+ *
+ * @vitest-environment jsdom
  */
 import { describe, it, expect, afterEach } from 'vitest'
 import { render, screen, cleanup } from '@testing-library/react'

@@ -13,6 +13,7 @@ import Step1Host from './Step1Host.jsx';
 import Step2Composite from './Step2Composite.jsx';
 import Step3Audio from './Step3Audio.jsx';
 import PreviewPanel from './PreviewPanel.jsx';
+import QueueStatus from './QueueStatus.jsx';
 import RenderDashboard from './RenderDashboard.jsx';
 
 import './styles/tokens.css';
@@ -107,6 +108,7 @@ const HostStudio = () => {
         <div className="app-shell" data-screen-label="05 Render">
           <TopBar onReset={reset} step={null} onTweaksToggle={() => setTweaksOpen(o => !o)} />
           <RenderDashboard state={state} onBack={() => setRendering(false)} onReset={reset} />
+          <QueueStatus />
           {tweaksOpen && (
             <TweaksPanel density={density} setDensity={setDensity} onClose={() => setTweaksOpen(false)} />
           )}
@@ -154,6 +156,7 @@ const HostStudio = () => {
           <PreviewPanel state={state} step={step} />
         </div>
 
+        <QueueStatus />
         {tweaksOpen && (
           <TweaksPanel density={density} setDensity={setDensity} onClose={() => setTweaksOpen(false)} />
         )}

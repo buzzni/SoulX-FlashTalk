@@ -321,6 +321,12 @@ export async function generateVideo({ state, audio }) {
   return jsonOrThrow(res, '영상 생성');
 }
 
+// Queue polling — returns { running, pending, recent, total_running, total_pending }.
+export async function fetchQueue() {
+  const res = await fetch(`${API_BASE}/api/queue`);
+  return jsonOrThrow(res, '큐 상태 조회');
+}
+
 // SSE subscription. Returns unsubscribe fn.
 export function subscribeProgress(taskId, onUpdate) {
   const es = new EventSource(`${API_BASE}/api/progress/${taskId}`);
