@@ -19,7 +19,11 @@ ELEVENLABS_BASE_URL = "https://api.elevenlabs.io/v1"
 
 
 class ElevenLabsTTS:
-    def __init__(self, api_key: str, model_id: str = "eleven_multilingual_v2"):
+    def __init__(self, api_key: str, model_id: str = "eleven_v3"):
+        """v3 default: native [breath], 5000-char limit.
+
+        Phase 0 T-EL0: global v3 upgrade (see specs/hoststudio-migration/plan.md).
+        """
         if not api_key:
             raise ValueError("ElevenLabs API key is required. Set ELEVENLABS_API_KEY environment variable.")
         self.api_key = api_key
@@ -53,29 +57,44 @@ class ElevenLabsTTS:
         stability: float = 0.5,
         similarity_boost: float = 0.75,
         style: float = 0.0,
+        speed: float = 1.0,
+        use_speaker_boost: bool = True,
+        language_code: str = "ko",
     ) -> str:
         """Generate speech audio from text using a specific voice.
 
         Args:
-            text: Text to synthesize
+            text: Text to synthesize (v3: max 5000 chars, includes [breath] tokens)
             voice_id: ElevenLabs voice ID
             output_path: Path to save the WAV file (16kHz mono)
             stability: Voice stability (0.0-1.0)
             similarity_boost: Similarity boost (0.0-1.0)
             style: Style exaggeration (0.0-1.0)
+            speed: Playback speed multiplier (0.5-1.8). Phase 0 T-EL3.
+            use_speaker_boost: Enhance voice presence. Phase 0 T-EL1 (default: True).
+            language_code: Language hint. Phase 0 T-EL2 (default: "ko" for Korean).
 
         Returns:
             Path to the generated WAV file
         """
-        logger.info(f"Generating speech: text={text[:50]}..., voice={voice_id}")
+        logger.info(f"Generating speech: text={text[:50]}..., voice={voice_id}, model={self.model_id}")
+
+        # v3: 5000 char limit (includes [breath] tokens)
+        if len(text) > 5000:
+            raise ValueError(
+                f"Script too long ({len(text)} chars). v3 limit is 5000 including [breath] tokens."
+            )
 
         payload = {
             "text": text,
             "model_id": self.model_id,
+            "language_code": language_code,
             "voice_settings": {
                 "stability": stability,
                 "similarity_boost": similarity_boost,
                 "style": style,
+                "speed": speed,
+                "use_speaker_boost": use_speaker_boost,
             },
         }
 

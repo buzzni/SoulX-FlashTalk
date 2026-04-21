@@ -14,6 +14,15 @@ PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
 UPLOADS_DIR = os.path.join(PROJECT_ROOT, "uploads")
 OUTPUTS_DIR = os.path.join(PROJECT_ROOT, "outputs")
 TEMP_DIR = os.path.join(PROJECT_ROOT, "temp")
+EXAMPLES_DIR = os.path.join(PROJECT_ROOT, "examples")
+HOSTS_DIR = os.path.join(OUTPUTS_DIR, "hosts", "saved")
+
+# Whitelisted roots for path-traversal-safe file access (CSO audit).
+# Used by _safe_upload_path() helper; no PROJECT_ROOT fallback.
+SAFE_ROOTS = (UPLOADS_DIR, OUTPUTS_DIR, EXAMPLES_DIR)
+
+# Upload limits
+MAX_UPLOAD_BYTES = 20 * 1024 * 1024  # 20 MB
 
 # ========================================
 # SoulX-FlashTalk Model Settings
@@ -48,12 +57,39 @@ MULTITALK_OPTIONS = {
 ELEVENLABS_API_KEY = os.environ.get("ELEVENLABS_API_KEY", "")
 ELEVENLABS_OPTIONS = {
     "default_voice_id": "",  # Will be populated from API
-    "model_id": "eleven_multilingual_v2",  # Best for Korean
+    "model_id": "eleven_v3",  # v3: [breath] native, 5000 char limit (Phase 0 T-EL0)
     "output_format": "pcm_16000",  # 16kHz PCM for FlashTalk compatibility
     "stability": 0.5,
     "similarity_boost": 0.75,
     "style": 0.0,
+    "speed": 1.0,
+    "use_speaker_boost": True,  # T-EL1
+    "language_code": "ko",  # T-EL2
 }
+ELEVENLABS_MAX_CHARS = 5000  # v3 limit; HostStudio UI enforces same
+
+# ========================================
+# Feature flags (Phase 0)
+# ========================================
+FEATURE_HOSTSTUDIO = os.environ.get("FEATURE_HOSTSTUDIO", "1") == "1"
+
+# Auth baseline (Phase 0 D13, §4.0.6)
+REQUIRE_API_KEY = os.environ.get("REQUIRE_API_KEY", "0") == "1"
+API_KEY = os.environ.get("API_KEY", "")
+
+# CORS (Phase 0 D12, §4.0.5)
+CORS_ORIGINS = [
+    o.strip() for o in os.environ.get(
+        "CORS_ORIGINS",
+        "http://localhost:5173,http://localhost:8001",
+    ).split(",") if o.strip()
+]
+
+# Audit log (Phase 0 §4.0.7)
+AUDIT_LOG_PATH = os.environ.get(
+    "AUDIT_LOG_PATH",
+    os.path.join(PROJECT_ROOT, "logs", "audit.log"),
+)
 
 # ========================================
 # Default Input Files

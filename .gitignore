@@ -7,3 +7,21 @@ sample_results/
 gradio_results/
 gradio_results_multigpu/
 models/
+.gstack/
+
+# Secrets / credentials (never commit)
+.env
+.env.*
+*.key
+*.pem
+
+# Test coverage artifacts
+.coverage
+htmlcov/
+coverage.xml
+
+# Node
+node_modules/
+
+# Audit log (runtime)
+logs/audit.log

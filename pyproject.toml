@@ -1,0 +1,35 @@
+[project]
+name = "soulx-flashtalk"
+version = "2.0.0"
+description = "AI 쇼호스트 영상 생성 파이프라인 (HostStudio migration)"
+requires-python = ">=3.11"
+
+[tool.pytest.ini_options]
+minversion = "7.0"
+testpaths = ["tests"]
+asyncio_mode = "auto"
+markers = [
+    "phase0: Phase 0 - model parameter patches + security",
+    "phase1: Phase 1 - host generator + hosts CRUD",
+    "phase2: Phase 2 - composite generator",
+    "phase3: Phase 3 - frontend fidelity + a11y",
+    "phase4: Phase 4 - mapping layer + pitch post-process",
+    "phase5: Phase 5 - render dashboard + queue",
+    "phase6: Phase 6 - legacy cutover",
+]
+addopts = [
+    "--strict-markers",
+    "--cov=modules",
+    "--cov=app",
+    "--cov-report=term-missing",
+    # Coverage floor: raise incrementally as Phases unskip tests.
+    # Phase -1 (skeleton): 0, Phase 0: 20, Phase 1: 40, Phase 2+: 60.
+    "--cov-fail-under=0",
+]
+
+[tool.coverage.run]
+omit = [
+    "*/tests/*",
+    "*/.venv/*",
+    "flash_talk/*",
+]

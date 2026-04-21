@@ -10,6 +10,7 @@ Approach:
 
 import os
 import logging
+import re
 import uuid
 from io import BytesIO
 from PIL import Image
@@ -17,8 +18,77 @@ from typing import Optional, Tuple, List, Dict
 
 logger = logging.getLogger(__name__)
 
+# Phase 0 T-GM1: Flash swap (~1/5 cost vs Pro, 9:16 portrait capable)
+GEMINI_IMAGE_MODEL = "gemini-3.1-flash-image-preview"
+
 _gemini_client = None
 _rembg_session = None
+
+
+def _derive_aspect_ratio(target_size: Tuple[int, int]) -> str:
+    """Phase 0 T-GM2: derive aspect_ratio from (width, height).
+
+    Returns '9:16' for portrait, '16:9' for landscape, '1:1' for square.
+    Never hardcoded — always reflects target_size to avoid landscape pipeline breakage.
+    """
+    w, h = target_size
+    if h > w * 1.3:
+        return "9:16"
+    if w > h * 1.3:
+        return "16:9"
+    return "1:1"
+
+
+def _sanitize_user_prompt(text: str) -> str:
+    """Phase 0 T-GM3c: strip prompt-injection delimiter tokens from user input.
+
+    Preserves paragraph breaks (\\n\\n); collapses only \\n{3,} → \\n\\n.
+    Removes triple-quote / fence tokens that could break out of system_instruction.
+    """
+    if not text:
+        return ""
+    # Strip dangerous delimiter tokens
+    text = re.sub(r"`{3,}|\"{3,}|'{3,}|<\|.*?\|>|---\n", " ", text)
+    # Preserve \n\n, collapse 3+
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    return text.strip()
+
+
+def _build_gemini_image_config(
+    target_size: Tuple[int, int],
+    system_instruction: Optional[str] = None,
+    thinking_minimal: bool = True,
+):
+    """Phase 0 T-GM2/3/3b/4: centralized Gemini config for image generation.
+
+    Always sets aspect_ratio (derived), safety_settings (BLOCK_MEDIUM_AND_ABOVE on
+    all 4 categories), and thinking_level='minimal' for Flash.
+    """
+    from google.genai import types
+
+    aspect = _derive_aspect_ratio(target_size)
+    safety = [
+        types.SafetySetting(
+            category=c,
+            threshold=types.HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE,
+        )
+        for c in (
+            types.HarmCategory.HARM_CATEGORY_HARASSMENT,
+            types.HarmCategory.HARM_CATEGORY_HATE_SPEECH,
+            types.HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT,
+            types.HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT,
+        )
+    ]
+    kwargs = dict(
+        response_modalities=["Text", "Image"],
+        image_config=types.ImageConfig(aspect_ratio=aspect, image_size="1K"),
+        safety_settings=safety,
+    )
+    if thinking_minimal:
+        kwargs["thinking_config"] = types.ThinkingConfig(thinking_level="minimal")
+    if system_instruction:
+        kwargs["system_instruction"] = system_instruction
+    return types.GenerateContentConfig(**kwargs)
 
 
 def _get_gemini_client():
@@ -238,12 +308,16 @@ def _gemini_generate_scene(
             for ref_img in reference_images:
                 contents.append(_resize_for_api(ref_img.convert("RGB")))
 
+        system_instruction = (
+            "You are a scene generator. Preserve the foreground subjects (people) "
+            "from the provided image exactly as-is; only compose the background/scene "
+            "around them. Do not add any text, watermarks, or logos. "
+            "Keep lighting and shadows consistent across all subjects."
+        )
         response = client.models.generate_content(
-            model="gemini-3-pro-image-preview",
+            model=GEMINI_IMAGE_MODEL,
             contents=contents,
-            config=types.GenerateContentConfig(
-                response_modalities=["Text", "Image"],
-            ),
+            config=_build_gemini_image_config(target_size, system_instruction),
         )
 
         for part in response.candidates[0].content.parts:
@@ -483,12 +557,14 @@ def generate_background_only(
             for ref in ref_images:
                 contents.append(_resize_for_api(ref))
 
+        system_instruction = (
+            "Generate only a background scene. No people, no text, no logos. "
+            "Match the requested aspect ratio precisely."
+        )
         response = client.models.generate_content(
-            model="gemini-3-pro-image-preview",
+            model=GEMINI_IMAGE_MODEL,
             contents=contents,
-            config=types.GenerateContentConfig(
-                response_modalities=["Text", "Image"],
-            ),
+            config=_build_gemini_image_config(target_size, system_instruction),
         )
 
         for part in response.candidates[0].content.parts:

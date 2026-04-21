@@ -47,18 +47,25 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=config.CORS_ORIGINS,  # Phase 0 D12: explicit list, not "*"
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
+# Phase 0 §4.0.3/4.0.6/4.0.7 — request middleware stack
+from utils.middleware import AuditLog, ApiKeyAuth, ContentLengthLimit
+
+app.add_middleware(AuditLog)  # outermost (logs even on 4xx)
+app.add_middleware(ApiKeyAuth)
+app.add_middleware(ContentLengthLimit)
+
 # Create directories
-for d in [config.UPLOADS_DIR, config.OUTPUTS_DIR, config.TEMP_DIR]:
+for d in [config.UPLOADS_DIR, config.OUTPUTS_DIR, config.TEMP_DIR, config.EXAMPLES_DIR, config.HOSTS_DIR]:
     os.makedirs(d, exist_ok=True)
 
-# Mount static files
-app.mount("/static", StaticFiles(directory=config.PROJECT_ROOT), name="static")
+# Mount static files (UPLOADS only — NOT PROJECT_ROOT; Phase 0 Critical #1)
+app.mount("/static", StaticFiles(directory=config.UPLOADS_DIR), name="static")
 
 # Video history file
 VIDEO_HISTORY_FILE = os.path.join(config.OUTPUTS_DIR, "video_history.json")
@@ -152,11 +159,33 @@ def add_to_history(task_id: str, script_text: str, host_image: str, audio_source
 # Helper
 # ========================================
 
-def save_upload_file(upload_file: UploadFile, destination: str) -> str:
+def save_upload_file(upload_file: UploadFile, destination: str, max_bytes: int | None = None) -> str:
+    """Stream-save upload with cumulative size cap (Phase 0 CSO High #6).
+
+    Defaults to config.MAX_UPLOAD_BYTES. Aborts mid-stream with 413 if exceeded.
+    """
+    if max_bytes is None:
+        max_bytes = config.MAX_UPLOAD_BYTES
+    chunk_size = 1024 * 1024  # 1MB
+    total = 0
     try:
         with open(destination, "wb") as f:
-            content = upload_file.file.read()
-            f.write(content)
+            while True:
+                chunk = upload_file.file.read(chunk_size)
+                if not chunk:
+                    break
+                total += len(chunk)
+                if total > max_bytes:
+                    f.close()
+                    try:
+                        os.unlink(destination)
+                    except OSError:
+                        pass
+                    raise HTTPException(
+                        status_code=413,
+                        detail=f"File exceeds {max_bytes // 1_000_000}MB limit",
+                    )
+                f.write(chunk)
         return destination
     finally:
         upload_file.file.close()
@@ -526,42 +555,48 @@ async def get_config():
 
 @app.post("/api/upload/host-image")
 async def upload_host_image(file: UploadFile = File(...)):
+    from utils.security import validate_image_upload
+
     if not file.content_type or not file.content_type.startswith("image/"):
         raise HTTPException(status_code=400, detail="File must be an image")
 
-    ext = os.path.splitext(file.filename)[1]
+    ext = os.path.splitext(file.filename or "")[1] or ".png"
     filename = f"host_{uuid.uuid4().hex[:8]}{ext}"
     filepath = os.path.join(config.UPLOADS_DIR, filename)
     save_upload_file(file, filepath)
-
+    validate_image_upload(filepath)  # Pillow magic-byte
     return {"filename": filename, "path": filepath}
 
 
 @app.post("/api/upload/background-image")
 async def upload_background_image(file: UploadFile = File(...)):
     """Upload background image for agent composition."""
+    from utils.security import validate_image_upload
+
     if not file.content_type or not file.content_type.startswith("image/"):
         raise HTTPException(status_code=400, detail="File must be an image")
 
-    ext = os.path.splitext(file.filename)[1]
+    ext = os.path.splitext(file.filename or "")[1] or ".png"
     filename = f"bg_{uuid.uuid4().hex[:8]}{ext}"
     filepath = os.path.join(config.UPLOADS_DIR, filename)
     save_upload_file(file, filepath)
+    validate_image_upload(filepath)
+    return {"filename": filename, "path": filepath}
 
 
 @app.post("/api/upload/reference-image")
 async def upload_reference_image(file: UploadFile = File(...)):
     """Upload reference image (product, branding, etc.) for Gemini scene generation."""
+    from utils.security import validate_image_upload
+
     if not file.content_type or not file.content_type.startswith("image/"):
         raise HTTPException(status_code=400, detail="File must be an image")
 
-    ext = os.path.splitext(file.filename)[1]
+    ext = os.path.splitext(file.filename or "")[1] or ".png"
     filename = f"ref_img_{uuid.uuid4().hex[:8]}{ext}"
     filepath = os.path.join(config.UPLOADS_DIR, filename)
     save_upload_file(file, filepath)
-
-    return {"filename": filename, "path": filepath}
-
+    validate_image_upload(filepath)
     return {"filename": filename, "path": filepath}
 
 
@@ -575,7 +610,10 @@ async def preview_composite(
 ):
     """Generate a single-agent composite preview image (host + background)."""
     import asyncio
+    from utils.security import safe_upload_path
 
+    host_image_path = safe_upload_path(host_image_path)
+    bg_image_path = safe_upload_path(bg_image_path)
     if not os.path.exists(host_image_path):
         raise HTTPException(status_code=400, detail="Host image not found")
     if not os.path.exists(bg_image_path):
@@ -614,8 +652,10 @@ async def preview_composite_together(
     """Generate combined composite preview with Gemini scene generation."""
     import asyncio
 
-    host_paths = json.loads(host_image_paths)
-    ref_paths = json.loads(reference_image_paths)
+    from utils.security import safe_upload_path
+
+    host_paths = [safe_upload_path(p) for p in json.loads(host_image_paths)]
+    ref_paths = [safe_upload_path(p) for p in json.loads(reference_image_paths)]
     if not host_paths:
         raise HTTPException(status_code=400, detail="No host images provided")
     for p in host_paths:
@@ -653,24 +693,29 @@ async def preview_composite_together(
 
 @app.post("/api/upload/reference-audio")
 async def upload_reference_audio(file: UploadFile = File(...)):
+    from utils.security import validate_audio_upload
+
     if not file.content_type or not file.content_type.startswith("audio/"):
         raise HTTPException(status_code=400, detail="File must be an audio file")
 
-    ext = os.path.splitext(file.filename)[1]
+    ext = os.path.splitext(file.filename or "")[1] or ".mp3"
     filename = f"ref_{uuid.uuid4().hex[:8]}{ext}"
     filepath = os.path.join(config.UPLOADS_DIR, filename)
     save_upload_file(file, filepath)
-
+    validate_audio_upload(filepath)  # ffprobe magic-byte
     return {"filename": filename, "path": filepath}
 
 
 @app.post("/api/upload/audio")
 async def upload_audio(file: UploadFile = File(...)):
     """Upload audio file directly for video generation (any audio)"""
-    ext = os.path.splitext(file.filename)[1]
+    from utils.security import validate_audio_upload
+
+    ext = os.path.splitext(file.filename or "")[1] or ".mp3"
     filename = f"audio_{uuid.uuid4().hex[:8]}{ext}"
     filepath = os.path.join(config.UPLOADS_DIR, filename)
     save_upload_file(file, filepath)
+    validate_audio_upload(filepath)
 
     # Convert to 16kHz WAV if needed
     wav_path = filepath
@@ -798,12 +843,27 @@ async def generate_video(
     reference_image_paths: str = Form("[]"),
 ):
     """Generate video from host image + audio"""
+    from utils.security import safe_upload_path
 
-    # Resolve host image
+    # Resolve + guard host image (body-field path traversal fix)
+    if host_image_path:
+        try:
+            host_image_path = safe_upload_path(host_image_path)
+        except HTTPException:
+            host_image_path = None
     if not host_image_path or not os.path.exists(host_image_path):
         host_image_path = config.DEFAULT_HOST_IMAGE
     if not os.path.exists(host_image_path):
         raise HTTPException(status_code=404, detail=f"Host image not found: {host_image_path}")
+
+    # Guard reference_image_paths too
+    try:
+        _ref_list = json.loads(reference_image_paths) if reference_image_paths else []
+        reference_image_paths = json.dumps([safe_upload_path(p) for p in _ref_list])
+    except (json.JSONDecodeError, HTTPException) as e:
+        if isinstance(e, HTTPException):
+            raise
+        reference_image_paths = "[]"
 
     # Resolve audio
     audio_source_label = audio_source
@@ -830,10 +890,19 @@ async def generate_video(
             stability=stability,
             similarity_boost=similarity_boost,
             style=style,
+            speed=config.ELEVENLABS_OPTIONS.get("speed", 1.0),
+            use_speaker_boost=config.ELEVENLABS_OPTIONS.get("use_speaker_boost", True),
+            language_code=config.ELEVENLABS_OPTIONS.get("language_code", "ko"),
         )
         audio_source_label = f"elevenlabs:{voice_id}"
 
     elif audio_source == "upload":
+        # Guard body-field audio_path (was: attacker could set audio_path="/etc/passwd")
+        if audio_path:
+            try:
+                audio_path = safe_upload_path(audio_path)
+            except HTTPException:
+                audio_path = None
         if not audio_path or not os.path.exists(audio_path):
             audio_path = config.DEFAULT_AUDIO
         if not os.path.exists(audio_path):
@@ -1254,12 +1323,24 @@ async def cancel_queued_task(task_id: str):
 
 @app.get("/api/files/{filename:path}")
 async def get_file(filename: str):
-    """Serve uploaded files"""
-    filepath = os.path.join(config.UPLOADS_DIR, filename)
-    if not os.path.exists(filepath):
-        filepath = os.path.join(config.PROJECT_ROOT, filename)
-    if not os.path.exists(filepath):
+    """Serve files from SAFE_ROOTS (UPLOADS/OUTPUTS/EXAMPLES). No PROJECT_ROOT fallback.
+
+    Phase 0 CSO Critical #1 fix. Probes each safe root in order; rejects path
+    traversal via utils.security.safe_upload_path realpath containment.
+    """
+    from utils.security import safe_upload_path
+
+    candidate = None
+    for root in config.SAFE_ROOTS:
+        probe = os.path.join(root, filename)
+        if os.path.exists(probe):
+            candidate = probe
+            break
+    if candidate is None:
         raise HTTPException(status_code=404, detail="File not found")
+
+    # Validate no traversal escape (safe_upload_path raises on any escape)
+    filepath = safe_upload_path(candidate)
 
     ext = os.path.splitext(filename)[1].lower()
     media_types = {
@@ -1270,13 +1351,167 @@ async def get_file(filename: str):
 
 
 # ========================================
+# HostStudio Phase 1 — Host Maker (Stage 1)
+# ========================================
+
+
+@app.post("/api/host/generate")
+async def host_generate(
+    mode: str = Form(...),
+    prompt: Optional[str] = Form(None),
+    extraPrompt: Optional[str] = Form(None),
+    negativePrompt: Optional[str] = Form(None),
+    builder: Optional[str] = Form(None),  # JSON dict
+    faceRefPath: Optional[str] = Form(None),
+    outfitRefPath: Optional[str] = Form(None),
+    styleRefPath: Optional[str] = Form(None),
+    faceStrength: float = Form(0.7),
+    outfitStrength: float = Form(0.7),
+    n: int = Form(4),
+):
+    """Generate N=4 host candidates via Gemini (Phase 1)."""
+    from utils.security import safe_upload_path
+    from modules.host_generator import generate_host_candidates
+
+    # Path-traversal guard on all reference images
+    face = safe_upload_path(faceRefPath) if faceRefPath else None
+    outfit = safe_upload_path(outfitRefPath) if outfitRefPath else None
+    style = safe_upload_path(styleRefPath) if styleRefPath else None
+
+    builder_dict = None
+    if builder:
+        try:
+            builder_dict = json.loads(builder)
+            if not isinstance(builder_dict, dict):
+                raise ValueError
+        except (json.JSONDecodeError, ValueError):
+            raise HTTPException(status_code=400, detail="builder must be a JSON object")
+
+    try:
+        result = await generate_host_candidates(
+            mode=mode,
+            text_prompt=prompt,
+            face_ref_path=face,
+            outfit_ref_path=outfit,
+            style_ref_path=style,
+            extra_prompt=extraPrompt,
+            builder=builder_dict,
+            negative_prompt=negativePrompt,
+            face_strength=faceStrength,
+            outfit_strength=outfitStrength,
+            n=n,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except RuntimeError as e:
+        # All (or too many) Gemini calls failed
+        raise HTTPException(status_code=503, detail=str(e))
+    return result
+
+
+# ========================================
+# HostStudio Phase 1 — Saved Hosts CRUD
+# ========================================
+
+
+def _host_meta_path(host_id: str) -> str:
+    return os.path.join(config.HOSTS_DIR, f"{host_id}.json")
+
+
+def _host_image_path(host_id: str) -> str:
+    return os.path.join(config.HOSTS_DIR, f"{host_id}.png")
+
+
+@app.get("/api/hosts")
+async def list_saved_hosts():
+    """List saved hosts (server-persisted). localStorage holds index on client."""
+    if not os.path.isdir(config.HOSTS_DIR):
+        return {"hosts": []}
+    items = []
+    for fname in sorted(os.listdir(config.HOSTS_DIR)):
+        if not fname.endswith(".json"):
+            continue
+        host_id = fname[:-5]
+        meta_path = _host_meta_path(host_id)
+        try:
+            with open(meta_path, "r", encoding="utf-8") as f:
+                meta = json.load(f)
+        except (OSError, json.JSONDecodeError):
+            continue
+        items.append(meta)
+    return {"hosts": items}
+
+
+@app.post("/api/hosts/save")
+async def save_host(
+    source_path: str = Form(...),
+    name: str = Form(...),
+    meta: Optional[str] = Form(None),  # JSON dict
+):
+    """Persist a candidate image under HOSTS_DIR (V1 — no auth; protect via REQUIRE_API_KEY)."""
+    from utils.security import safe_upload_path
+
+    # Guard source_path (must be in UPLOADS/OUTPUTS)
+    source = safe_upload_path(source_path)
+    if not os.path.exists(source):
+        raise HTTPException(status_code=404, detail="Source image not found")
+
+    host_id = uuid.uuid4().hex
+    dst = _host_image_path(host_id)
+    import shutil
+    shutil.copyfile(source, dst)
+
+    meta_dict = {"id": host_id, "name": name, "path": dst, "url": f"/api/files/outputs/hosts/saved/{host_id}.png"}
+    if meta:
+        try:
+            extra = json.loads(meta)
+            if isinstance(extra, dict):
+                meta_dict["meta"] = extra
+        except json.JSONDecodeError:
+            pass
+    try:
+        with open(_host_meta_path(host_id), "w", encoding="utf-8") as f:
+            json.dump(meta_dict, f, ensure_ascii=False, indent=2)
+    except OSError as e:
+        # Cleanup image if metadata write fails
+        try:
+            os.unlink(dst)
+        except OSError:
+            pass
+        raise HTTPException(status_code=500, detail=f"Failed to save host: {e}")
+    return meta_dict
+
+
+@app.delete("/api/hosts/{host_id}")
+async def delete_host(host_id: str):
+    """Remove a saved host and its metadata."""
+    # Defensive: host_id must be alphanumeric (UUID hex) to avoid path traversal
+    if not host_id.isalnum():
+        raise HTTPException(status_code=400, detail="Invalid host_id")
+    meta = _host_meta_path(host_id)
+    img = _host_image_path(host_id)
+    if not os.path.exists(meta):
+        raise HTTPException(status_code=404, detail="Host not found")
+    try:
+        os.unlink(meta)
+        if os.path.exists(img):
+            os.unlink(img)
+    except OSError as e:
+        raise HTTPException(status_code=500, detail=f"Delete failed: {e}")
+    return {"message": "deleted", "id": host_id}
+
+
+# ========================================
 # Main
 # ========================================
 
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser()
-    parser.add_argument("--host", default="0.0.0.0")
-    parser.add_argument("--port", type=int, default=8001)
+    # Phase 0 D13: default 127.0.0.1 bind for security;
+    # override with HOST=0.0.0.0 env or --host CLI if exposing externally.
+    default_host = os.environ.get("HOST", "127.0.0.1")
+    parser.add_argument("--host", default=default_host)
+    parser.add_argument("--port", type=int, default=int(os.environ.get("PORT", "8001")))
     args = parser.parse_args()
     uvicorn.run(app, host=args.host, port=args.port)
