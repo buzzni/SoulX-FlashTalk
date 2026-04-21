@@ -280,6 +280,11 @@ export async function generateComposite({ host, products, background, compositio
 // Step 3 — POST /api/elevenlabs/generate (voice) + final /api/generate
 // ============================================================
 
+export async function listVoices() {
+  const res = await fetch(`${API_BASE}/api/elevenlabs/voices`);
+  return jsonOrThrow(res, '보이스 목록 조회');
+}
+
 export async function cloneVoice(sampleFile, name = 'HostStudio 클론') {
   assertSize(sampleFile);
   const fd = new FormData();

@@ -1,7 +1,7 @@
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import Icon from './Icon.jsx';
 import { Badge, Button, Card, Field, Slider, UploadTile } from './primitives.jsx';
-import { cloneVoice, generateVoice, humanizeError, uploadAudio } from './api.js';
+import { cloneVoice, generateVoice, humanizeError, listVoices, uploadAudio } from './api.js';
 
 // Step 3 — 목소리 (비개발자 친화)
 const VOICE_PRESETS = [
@@ -37,6 +37,53 @@ const Step3Audio = ({ state, update }) => {
   const { resolution } = state;
   const [generating, setGenerating] = useState(false);
   const [advancedOpen, setAdvancedOpen] = useState(false);
+
+  // Fetch real voices from /api/elevenlabs/voices; fall back to hardcoded presets.
+  const [remoteVoices, setRemoteVoices] = useState(null);
+  const [voicesError, setVoicesError] = useState(null);
+  useEffect(() => {
+    let alive = true;
+    listVoices()
+      .then(r => { if (alive) setRemoteVoices(r.voices || []); })
+      .catch(err => { if (alive) setVoicesError(err.message || '목소리 목록을 불러오지 못했어요'); });
+    return () => { alive = false; };
+  }, []);
+  const voiceList = remoteVoices && remoteVoices.length > 0
+    ? remoteVoices.map(v => ({
+        id: v.voice_id,
+        name: v.name,
+        desc: v.labels?.description || v.labels?.descriptive || v.category || '',
+        preview_url: v.preview_url,
+        lang: v.labels?.language || '',
+      }))
+    : VOICE_PRESETS;
+
+  // Preview audio refs — one for voice-tile previews, one for generated output.
+  const previewAudioRef = useRef(null);
+  const generatedAudioRef = useRef(null);
+  const [playingPreview, setPlayingPreview] = useState(null);
+
+  const playVoicePreview = (voiceItem) => {
+    if (!voiceItem.preview_url) return;
+    const el = previewAudioRef.current;
+    if (!el) return;
+    if (playingPreview === voiceItem.id) {
+      el.pause();
+      setPlayingPreview(null);
+      return;
+    }
+    el.src = voiceItem.preview_url;
+    el.play().then(() => setPlayingPreview(voiceItem.id)).catch(() => setPlayingPreview(null));
+  };
+
+  const playGenerated = () => {
+    const el = generatedAudioRef.current;
+    if (!el || !voice.generatedAudioPath) return;
+    el.src = voice.generatedAudioPath.startsWith('http')
+      ? voice.generatedAudioPath
+      : `${window.location.protocol}//${window.location.hostname}:8001/api/files/${voice.generatedAudioPath}`;
+    el.play().catch(() => {});
+  };
 
   // Ensure paragraphs always exists with at least one entry
   const paragraphs = (voice.paragraphs && voice.paragraphs.length > 0) ? voice.paragraphs : [''];
@@ -156,19 +203,39 @@ const Step3Audio = ({ state, update }) => {
         {(voice.source === 'tts' || voice.source === 'clone') && (
           <>
             {voice.source === 'tts' && (
-              <Field label="목소리 선택" hint="재생 버튼으로 미리 들어보세요">
+              <Field
+                label="목소리 선택"
+                hint={voicesError ? '백엔드에 연결되면 실제 목소리 목록이 뜹니다' : '재생 버튼으로 미리 들어보세요'}
+              >
                 <div className="voice-list">
-                  {VOICE_PRESETS.map(v => (
-                    <div key={v.id} className={`voice-item ${voice.voiceId === v.id ? 'on' : ''}`} onClick={() => setV({ voiceId: v.id, voiceName: v.name })}>
+                  {voiceList.map(v => (
+                    <div
+                      key={v.id}
+                      className={`voice-item ${voice.voiceId === v.id ? 'on' : ''}`}
+                      onClick={() => setV({ voiceId: v.id, voiceName: v.name })}
+                    >
                       <div className="voice-avatar">{v.name[0]}</div>
                       <div className="voice-info">
                         <div className="voice-name">{v.name}</div>
-                        <div className="voice-meta">{v.desc}</div>
+                        <div className="voice-meta">{v.desc || v.lang || ''}</div>
                       </div>
-                      <button className="btn btn-ghost btn-icon btn-sm voice-play" title="미리 듣기" onClick={e => e.stopPropagation()}><Icon name="play" size={10} /></button>
+                      <button
+                        className="btn btn-ghost btn-icon btn-sm voice-play"
+                        title={v.preview_url ? '미리 듣기' : '미리듣기 샘플이 없어요'}
+                        disabled={!v.preview_url}
+                        onClick={e => { e.stopPropagation(); playVoicePreview(v); }}
+                      >
+                        <Icon name={playingPreview === v.id ? 'pause' : 'play'} size={10} />
+                      </button>
                     </div>
                   ))}
                 </div>
+                <audio
+                  ref={previewAudioRef}
+                  onEnded={() => setPlayingPreview(null)}
+                  onPause={() => setPlayingPreview(null)}
+                  style={{ display: 'none' }}
+                />
               </Field>
             )}
 
@@ -297,11 +364,19 @@ const Step3Audio = ({ state, update }) => {
                 {voice.generated ? <Badge variant="success" icon="check_circle">음성 준비 완료 · {estDuration}초</Badge> : '목소리를 고르고 대본을 적은 뒤 만들기 버튼을 눌러주세요'}
               </div>
               <div style={{ display: 'flex', gap: 8 }}>
-                <Button size="sm" icon="play" disabled={!voice.generated}>미리 듣기</Button>
+                <Button
+                  size="sm"
+                  icon="play"
+                  disabled={!voice.generated || !voice.generatedAudioPath}
+                  onClick={playGenerated}
+                >
+                  미리 듣기
+                </Button>
                 <Button variant="primary" icon={generating ? undefined : 'sparkles'} onClick={generate} disabled={generating || !voice.voiceId || !combinedScript}>
                   {generating ? <><span className="spinner"/> 만드는 중</> : '음성 만들기'}
                 </Button>
               </div>
+              <audio ref={generatedAudioRef} style={{ display: 'none' }} />
             </div>
           </>
         )}
