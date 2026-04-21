@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { Fragment, useState, useEffect, useRef } from 'react';
 import Icon from './Icon.jsx';
 import { Badge, Button, Card, Field, Slider, UploadTile } from './primitives.jsx';
 import { cloneVoice, generateVoice, humanizeError, listVoices, uploadAudio } from './api.js';
@@ -278,7 +278,7 @@ const Step3Audio = ({ state, update }) => {
             >
               <div className="script-paragraphs">
                 {paragraphs.map((p, idx) => (
-                  <React.Fragment key={idx}>
+                  <Fragment key={idx}>
                     {idx > 0 && (
                       <div className="breath-divider" aria-hidden>
                         <span className="breath-dot" />
@@ -308,7 +308,7 @@ const Step3Audio = ({ state, update }) => {
                         onChange={e => updateParagraph(idx, e.target.value)}
                       />
                     </div>
-                  </React.Fragment>
+                  </Fragment>
                 ))}
               </div>
               <div style={{ marginTop: 10, display: 'flex', justifyContent: 'center' }}>
