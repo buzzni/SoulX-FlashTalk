@@ -117,9 +117,27 @@ const Step2Composite = ({ state, update }) => {
   };
 
   // 합성 스틸 생성 (후보 4장)
-  const bgReady = !!(background.preset || background.imageUrl || background.url || background._gradient);
-  const productsReady = products.length > 0 && products.some(p => p.url || p.urlInput);
+  // Preview URL is best-effort (FileReader can fail on some local file
+  // sources); having the raw File or a server-persisted path is enough to
+  // proceed with generation.
+  const bgReady = !!(
+    background.preset ||
+    background.imageUrl ||
+    background.url ||
+    background._gradient ||
+    background._file ||
+    background.uploadPath
+  );
+  const productsReady = products.length > 0 && products.some(p => p.url || p.urlInput || p._file || p.path);
   const canGenerate = bgReady && productsReady;
+  // Debug — will help pinpoint why canGenerate stays false when UI says upload done.
+  console.log('[Step2] readiness', {
+    bgReady,
+    productsReady,
+    canGenerate,
+    bg: { source: background.source, preset: background.preset, hasImageUrl: !!background.imageUrl, imageUrlLen: background.imageUrl?.length, hasFile: !!background._file },
+    products: products.map(p => ({ id: p.id, hasUrl: !!p.url, urlLen: p.url?.length, hasFile: !!p._file, hasPath: !!p.path })),
+  });
 
   const [errorMsg, setErrorMsg] = useState(null);
 
@@ -236,11 +254,12 @@ const Step2Composite = ({ state, update }) => {
         <Button icon="plus" size="sm" onClick={addProduct}>제품 추가</Button>
       }>
         {products.length === 0 || products.every(p => !p.url && !p._file && !p.path) ? (
-          // Show the first-upload card whenever nothing usable is attached.
-          // After a refresh the sanitizer strips data URLs and _file handles,
-          // so a products[0] remnant would otherwise hide the upload UI.
           <UploadTile
-            onFile={f => setProducts([{ id: Date.now().toString(36), url: f.url, name: f.name, source: 'upload', _file: f._file }])}
+            onFile={f => {
+              const next = { id: Date.now().toString(36), url: f.url, name: f.name, source: 'upload', _file: f._file };
+              console.log('[Step2] product onFile', { wrapperKeys: Object.keys(f), urlLen: f.url?.length, hasFile: !!f._file, fileIsBlob: f._file instanceof Blob, next });
+              setProducts([next]);
+            }}
             label="제품 사진 올리기"
             sub="배경이 없는 PNG가 제일 깔끔해요"
           />
@@ -354,7 +373,10 @@ const Step2Composite = ({ state, update }) => {
           {bgSource === 'upload' && (
             <UploadTile
               file={background._file}
-              onFile={f => setBg({ _file: f, imageUrl: f.url, preset: null, prompt: '', url: '' })}
+              onFile={f => {
+                console.log('[Step2] bg onFile', { wrapperKeys: Object.keys(f), urlLen: f.url?.length, hasFile: !!f._file, fileIsBlob: f._file instanceof Blob });
+                setBg({ _file: f, imageUrl: f.url, preset: null, prompt: '', url: '' });
+              }}
               onRemove={() => setBg({ _file: null, imageUrl: null })}
               label="배경 사진 올리기"
               sub="촬영한 매장 사진 등"

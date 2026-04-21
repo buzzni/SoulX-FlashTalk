@@ -164,10 +164,15 @@ export async function uploadBackgroundImage(file) {
 }
 
 export async function uploadReferenceImage(file) {
+  console.log('[api] uploadReferenceImage', {
+    name: file.name, size: file.size, type: file.type,
+    isFile: file instanceof File, isBlob: file instanceof Blob,
+  });
   assertSize(file);
   const fd = new FormData();
   fd.append('file', file);
   const res = await fetch(`${API_BASE}/api/upload/reference-image`, { method: 'POST', body: fd });
+  console.log('[api] uploadReferenceImage response', { status: res.status, ok: res.ok });
   return jsonOrThrow(res, '참조 이미지 업로드');
 }
 

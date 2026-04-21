@@ -108,19 +108,33 @@ export const UploadTile = ({ file, onFile, onRemove, label = '클릭 또는 드�
   const inputRef = useRef(null);
   const handleFile = (f) => {
     if (!f) return;
-    // Use FileReader → data URL for the preview instead of URL.createObjectURL.
-    // Blob URLs (blob:http://172.28...:5555/<uuid>) intermittently hit
-    // ERR_TIMED_OUT on non-localhost origins in Chromium; data: URLs resolve
-    // in-browser with no fetch roundtrip. Slight memory cost (base64 doubles
-    // size), negligible for 20MB-capped image uploads.
+    console.log('[UploadTile] handleFile', { name: f.name, size: f.size, type: f.type, isFile: f instanceof File, isBlob: f instanceof Blob });
     const reader = new FileReader();
     reader.onload = (e) => {
+      const urlLen = typeof e.target.result === 'string' ? e.target.result.length : 0;
+      console.log('[UploadTile] FileReader.onload', { name: f.name, urlLen, urlHead: (e.target.result || '').slice(0, 40) });
       onFile({ name: f.name, size: f.size, type: f.type, url: e.target.result, _fake: false, _file: f });
     };
-    reader.onerror = () => {
+    reader.onerror = (e) => {
+      console.error('[UploadTile] FileReader.onerror', {
+        readerError: reader.error ? { name: reader.error.name, message: reader.error.message, code: reader.error.code } : null,
+        readyState: reader.readyState,
+      });
+      // No blob URL fallback — creating an <img src="blob:..."> that Chromium
+      // can't resolve on network-IP origins ties up a socket in the connection
+      // pool per tile and causes subsequent POSTs to queue until timeout.
+      // Preview just stays blank; the File is preserved so upload still works.
       onFile({ name: f.name, size: f.size, type: f.type, url: null, _fake: false, _file: f });
     };
-    reader.readAsDataURL(f);
+    reader.onabort = () => {
+      console.warn('[UploadTile] FileReader.onabort', { readyState: reader.readyState });
+    };
+    try {
+      reader.readAsDataURL(f);
+    } catch (err) {
+      console.error('[UploadTile] readAsDataURL threw synchronously', err);
+      onFile({ name: f.name, size: f.size, type: f.type, url: null, _fake: false, _file: f });
+    }
   };
   const fakeUpload = () => {
     const fake = {
