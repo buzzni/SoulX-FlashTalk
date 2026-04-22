@@ -8,6 +8,7 @@ import {
   uploadReferenceImage,
 } from './api.js';
 import ServerFilePicker from './ServerFilePicker.jsx';
+import { applyPickedFileToBackground, applyPickedFileToProducts } from './picker_handler.js';
 
 // Step 2 — 제품 + 배경 + 구도 지시 → 합성 스틸 한 장
 const BG_PRESETS = [
@@ -248,36 +249,9 @@ const Step2Composite = ({ state, update }) => {
   const [pickerFor, setPickerFor] = useState(null);
   const handlePickedServerFile = (f) => {
     if (pickerFor === 'bg') {
-      setBg({
-        _file: null,
-        imageUrl: f.url,
-        uploadPath: f.path,
-        preset: null,
-        prompt: '',
-        url: '',
-        serverFilename: f.filename,
-      });
+      setBg(applyPickedFileToBackground(background, f));
     } else if (pickerFor === 'products') {
-      setProducts(ps => {
-        const nextRow = {
-          id: Date.now().toString(36),
-          url: f.url,
-          name: f.filename,
-          source: 'upload',
-          path: f.path,
-          _file: null,
-        };
-        // Replace any row that's a stub OR a not-yet-uploaded _file (those
-        // would re-trigger the failing browser upload at generate time).
-        const replaceIdx = ps.findIndex(p => !p.path);
-        if (replaceIdx >= 0) {
-          const next = ps.slice();
-          next[replaceIdx] = nextRow;
-          return next;
-        }
-        if (ps.length === 0) return [nextRow];
-        return [...ps, nextRow];
-      });
+      setProducts(ps => applyPickedFileToProducts(ps, f));
     }
     setPickerFor(null);
   };

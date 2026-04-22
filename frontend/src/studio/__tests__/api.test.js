@@ -16,6 +16,7 @@ import {
   buildHostGenerateBody,
   buildCompositeBody,
   uploadHostImage,
+  listServerFiles,
 } from '../api.js';
 
 describe('api.js — builder ko→en suffix', () => {
@@ -299,5 +300,33 @@ describe('api.js — upload choreography', () => {
     });
     const file = new File(['x'], 'fake.png', { type: 'image/png' });
     await expect(uploadHostImage(file)).rejects.toThrow(/Not a valid image file/);
+  });
+});
+
+describe('api.js — listServerFiles (DLP/VPN bypass)', () => {
+  beforeEach(() => { global.fetch = vi.fn(); });
+  afterEach(() => { vi.restoreAllMocks(); });
+
+  it("hits /api/upload/list?kind=image and returns parsed {files}", async () => {
+    const payload = { files: [{ filename: 'a.png', path: '/u/a.png', url: '/api/files/a.png', size: 100, modified: 1 }] };
+    global.fetch.mockResolvedValueOnce({ ok: true, json: async () => payload });
+    const r = await listServerFiles('image');
+    expect(r).toEqual(payload);
+    expect(global.fetch).toHaveBeenCalledWith(expect.stringMatching(/\/api\/upload\/list\?kind=image$/));
+  });
+
+  it('URL-encodes the kind parameter', async () => {
+    global.fetch.mockResolvedValueOnce({ ok: true, json: async () => ({ files: [] }) });
+    await listServerFiles('audio/mp3');
+    expect(global.fetch).toHaveBeenCalledWith(expect.stringMatching(/kind=audio%2Fmp3$/));
+  });
+
+  it('throws via jsonOrThrow on non-OK response', async () => {
+    global.fetch.mockResolvedValueOnce({
+      ok: false,
+      status: 500,
+      json: async () => ({ detail: 'boom' }),
+    });
+    await expect(listServerFiles('image')).rejects.toThrow(/boom/);
   });
 });
