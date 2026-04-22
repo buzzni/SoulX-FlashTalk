@@ -267,11 +267,12 @@ const Step2Composite = ({ state, update }) => {
           path: f.path,
           _file: null,
         };
-        // Replace stubs (no url/file/path) first, otherwise append.
-        const stubIdx = ps.findIndex(p => !p.url && !p._file && !p.path);
-        if (stubIdx >= 0) {
+        // Replace any row that's a stub OR a not-yet-uploaded _file (those
+        // would re-trigger the failing browser upload at generate time).
+        const replaceIdx = ps.findIndex(p => !p.path);
+        if (replaceIdx >= 0) {
           const next = ps.slice();
-          next[stubIdx] = nextRow;
+          next[replaceIdx] = nextRow;
           return next;
         }
         if (ps.length === 0) return [nextRow];
