@@ -32,10 +32,10 @@ const STEPS = [
 // The prototype's sliders for those widgets were cargo-culted from mockups that
 // didn't consider the actual Gemini / ElevenLabs / FlashTalk model capabilities.
 const INITIAL_STATE = {
-  host: { mode: 'text', prompt: '', negativePrompt: '', builder: {}, generated: false, selectedSeed: null, _gradient: null, faceRef: null, outfitRef: null, faceStrength: 0.7, outfitStrength: 0.5 },
+  host: { mode: 'text', prompt: '', negativePrompt: '', builder: {}, generated: false, selectedSeed: null, _gradient: null, faceRef: null, outfitRef: null, faceStrength: 0.7, outfitStrength: 0.5, temperature: 0.7 },
   products: [],
   background: { source: 'preset', preset: null, url: '', prompt: '', imageUrl: null, _gradient: null, _file: null },
-  composition: { direction: '', shot: 'medium', angle: 'eye', generated: false, selectedSeed: null },
+  composition: { direction: '', shot: 'medium', angle: 'eye', generated: false, selectedSeed: null, temperature: 0.7 },
   voice: { source: 'tts', voiceId: null, voiceName: null, paragraphs: [''], script: '', stability: 0.5, style: 0.3, similarity: 0.75, speed: 1, generated: false, uploadedAudio: null, cloneSample: null },
   script: '',
   resolution: { key: '448p', label: '448p', width: 448, height: 768, size: '~8MB', speed: '빠름', default: true },

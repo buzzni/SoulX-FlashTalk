@@ -553,6 +553,21 @@ const Step2Composite = ({ state, update }) => {
 
         <hr className="hr" />
 
+        <Field
+          label="변동성"
+          hint="같은 입력으로도 결과를 얼마나 다양하게 뽑을지 — 안정적이면 4장이 비슷, 창의적이면 제각각"
+        >
+          <Segmented
+            value={composition.temperature ?? 0.7}
+            onChange={v => setComp({ temperature: v })}
+            options={[
+              { value: 0.4, label: '안정적' },
+              { value: 0.7, label: '보통' },
+              { value: 1.0, label: '창의적' },
+            ]}
+          />
+        </Field>
+
         <div className="flex justify-between items-center">
           <div className="text-xs text-tertiary">
             버튼을 누르면 아래에 4장의 합성 후보가 나타나요. 마음에 드는 걸 하나 고르세요.

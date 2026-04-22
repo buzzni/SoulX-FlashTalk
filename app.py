@@ -1476,12 +1476,16 @@ async def host_generate(
     faceStrength: float = Form(0.7),
     outfitStrength: float = Form(0.7),
     n: int = Form(4),
+    temperature: Optional[float] = Form(None),
 ):
-    """Generate N=4 host candidates via Gemini (Phase 1)."""
+    """Generate N=4 host candidates via Gemini (Phase 1).
+
+    temperature: optional 0.0-2.0 sampling knob. None → Gemini default.
+    UI exposes 0.4 (conservative) / 0.7 (balanced) / 1.0 (varied).
+    """
     from utils.security import safe_upload_path
     from modules.host_generator import generate_host_candidates
 
-    # Path-traversal guard on all reference images
     face = safe_upload_path(faceRefPath) if faceRefPath else None
     outfit = safe_upload_path(outfitRefPath) if outfitRefPath else None
     style = safe_upload_path(styleRefPath) if styleRefPath else None
@@ -1494,6 +1498,9 @@ async def host_generate(
                 raise ValueError
         except (json.JSONDecodeError, ValueError):
             raise HTTPException(status_code=400, detail="builder must be a JSON object")
+
+    if temperature is not None and not 0.0 <= temperature <= 2.0:
+        raise HTTPException(status_code=400, detail=f"temperature must be in [0.0, 2.0], got {temperature}")
 
     try:
         result = await generate_host_candidates(
@@ -1508,11 +1515,11 @@ async def host_generate(
             face_strength=faceStrength,
             outfit_strength=outfitStrength,
             n=n,
+            temperature=temperature,
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except RuntimeError as e:
-        # All (or too many) Gemini calls failed
         raise HTTPException(status_code=503, detail=str(e))
     return result
 
@@ -1530,6 +1537,7 @@ async def host_generate_stream(
     faceStrength: float = Form(0.7),
     outfitStrength: float = Form(0.7),
     n: int = Form(4),
+    temperature: Optional[float] = Form(None),
 ):
     """SSE variant of /api/host/generate — yields one event per completed
     candidate instead of blocking on the slowest Gemini call.
@@ -1553,6 +1561,9 @@ async def host_generate_stream(
         except (json.JSONDecodeError, ValueError):
             raise HTTPException(status_code=400, detail="builder must be a JSON object")
 
+    if temperature is not None and not 0.0 <= temperature <= 2.0:
+        raise HTTPException(status_code=400, detail=f"temperature must be in [0.0, 2.0], got {temperature}")
+
     async def events():
         try:
             async for evt in stream_host_candidates(
@@ -1567,6 +1578,7 @@ async def host_generate_stream(
                 face_strength=faceStrength,
                 outfit_strength=outfitStrength,
                 n=n,
+                temperature=temperature,
             ):
                 yield f"data: {json.dumps(evt)}\n\n"
         except ValueError as e:
@@ -1601,6 +1613,7 @@ async def composite_generate(
     angle: str = Form("eye"),
     n: int = Form(4),
     rembg: bool = True,  # query param: ?rembg=false to skip
+    temperature: Optional[float] = Form(None),
 ):
     """Generate N=4 composite candidates (host + products + background scene) via Gemini.
 
@@ -1609,7 +1622,6 @@ async def composite_generate(
     from utils.security import safe_upload_path
     from modules.composite_generator import generate_composite_candidates
 
-    # Path-traversal guards (all body-field paths)
     host_resolved = safe_upload_path(hostImagePath)
 
     try:
@@ -1623,6 +1635,9 @@ async def composite_generate(
     bg_upload_resolved = (
         safe_upload_path(backgroundUploadPath) if backgroundUploadPath else None
     )
+
+    if temperature is not None and not 0.0 <= temperature <= 2.0:
+        raise HTTPException(status_code=400, detail=f"temperature must be in [0.0, 2.0], got {temperature}")
 
     try:
         result = await generate_composite_candidates(
@@ -1638,6 +1653,7 @@ async def composite_generate(
             angle=angle,
             n=n,
             rembg_products=rembg,
+            temperature=temperature,
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -1660,6 +1676,7 @@ async def composite_generate_stream(
     angle: str = Form("eye"),
     n: int = Form(4),
     rembg: bool = True,
+    temperature: Optional[float] = Form(None),
 ):
     """SSE variant of /api/composite/generate. Emits {type: "init"} with
     translated direction immediately, then one frame per completed candidate,
@@ -1682,6 +1699,9 @@ async def composite_generate_stream(
         safe_upload_path(backgroundUploadPath) if backgroundUploadPath else None
     )
 
+    if temperature is not None and not 0.0 <= temperature <= 2.0:
+        raise HTTPException(status_code=400, detail=f"temperature must be in [0.0, 2.0], got {temperature}")
+
     async def events():
         try:
             async for evt in stream_composite_candidates(
@@ -1697,6 +1717,7 @@ async def composite_generate_stream(
                 angle=angle,
                 n=n,
                 rembg_products=rembg,
+                temperature=temperature,
             ):
                 yield f"data: {json.dumps(evt)}\n\n"
         except ValueError as e:

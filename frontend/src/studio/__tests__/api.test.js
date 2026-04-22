@@ -197,6 +197,20 @@ describe('api.js — buildHostGenerateBody', () => {
     const o = formToObject(body);
     expect(o.mode).toBe('style-ref');
   });
+
+  it('sends temperature when set (UI picked a Segmented value)', () => {
+    const body = buildHostGenerateBody({
+      mode: 'text', prompt: 'x'.repeat(20), temperature: 0.4,
+    });
+    const o = formToObject(body);
+    expect(o.temperature).toBe('0.4');
+  });
+
+  it('omits temperature when not a number (undefined/null)', () => {
+    const body = buildHostGenerateBody({ mode: 'text', prompt: 'x'.repeat(20) });
+    const o = formToObject(body);
+    expect(o.temperature).toBeUndefined();
+  });
 });
 
 describe('api.js — buildCompositeBody', () => {
@@ -261,6 +275,25 @@ describe('api.js — buildCompositeBody', () => {
       host, products, composition,
       background: { source: 'prompt', prompt: '' },
     })).toThrow(/배경 설명/);
+  });
+
+  it('sends composition.temperature when set', () => {
+    const body = buildCompositeBody({
+      host, products,
+      composition: { ...composition, temperature: 1.0 },
+      background: { source: 'prompt', prompt: 'studio' },
+    });
+    const o = formToObject(body);
+    expect(o.temperature).toBe('1');
+  });
+
+  it('omits temperature when composition.temperature is not a number', () => {
+    const body = buildCompositeBody({
+      host, products, composition,
+      background: { source: 'prompt', prompt: 'studio' },
+    });
+    const o = formToObject(body);
+    expect(o.temperature).toBeUndefined();
   });
 });
 

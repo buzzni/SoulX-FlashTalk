@@ -40,6 +40,7 @@ async def generate_host_candidates(
     timeout_per_call: float = 45.0,
     min_success: int = 2,
     output_dir: Optional[str] = None,
+    temperature: Optional[float] = None,
 ) -> Dict:
     """Generate N=4 parallel host candidates. Returns partial success if ≥min_success.
 
@@ -92,6 +93,7 @@ async def generate_host_candidates(
             outfit_strength=outfit_strength,
             timeout=timeout_per_call,
             output_dir=out_dir,
+            temperature=temperature,
         )
         for s in seeds
     ]
@@ -143,6 +145,7 @@ async def stream_host_candidates(
     timeout_per_call: float = 45.0,
     min_success: int = 2,
     output_dir: Optional[str] = None,
+    temperature: Optional[float] = None,
 ) -> AsyncIterator[Dict]:
     """Async generator — yields one event per candidate as it completes.
 
@@ -176,6 +179,7 @@ async def stream_host_candidates(
                 outfit_strength=outfit_strength,
                 timeout=timeout_per_call,
                 output_dir=out_dir,
+                temperature=temperature,
             )
             return (seed, path, None)
         except Exception as e:
@@ -238,6 +242,7 @@ async def _generate_one(
     outfit_strength: float,
     timeout: float,
     output_dir: str,
+    temperature: Optional[float] = None,
 ) -> Optional[str]:
     """Single Gemini call with per-call timeout + semaphore-bounded concurrency."""
     async with _gemini_semaphore:
@@ -255,6 +260,7 @@ async def _generate_one(
                 face_strength=face_strength,
                 outfit_strength=outfit_strength,
                 output_dir=output_dir,
+                temperature=temperature,
             ),
             timeout=timeout,
         )
@@ -273,6 +279,7 @@ async def _run_gemini(
     face_strength: float,
     outfit_strength: float,
     output_dir: str,
+    temperature: Optional[float] = None,
 ) -> Optional[str]:
     """Wrap the (sync) Gemini client call in an executor."""
     loop = asyncio.get_running_loop()
@@ -282,6 +289,7 @@ async def _run_gemini(
             seed, mode, text_prompt, face_ref_path, outfit_ref_path,
             style_ref_path, extra_prompt, builder, negative_prompt,
             face_strength, outfit_strength, output_dir,
+            temperature=temperature,
         ),
     )
 
@@ -290,6 +298,7 @@ def _sync_generate(
     seed, mode, text_prompt, face_ref_path, outfit_ref_path,
     style_ref_path, extra_prompt, builder, negative_prompt,
     face_strength, outfit_strength, output_dir,
+    temperature: Optional[float] = None,
 ) -> Optional[str]:
     from io import BytesIO
 
@@ -317,14 +326,28 @@ def _sync_generate(
 
     client = _get_gemini_client()
     contents = [prompt]
+    has_ref = False
     for ref in (face_ref_path, outfit_ref_path, style_ref_path):
         if ref and os.path.exists(ref):
             contents.append(Image.open(ref).convert("RGB"))
+            has_ref = True
+
+    # face-outfit / style-ref modes rely on reference detail — HIGH media res
+    # preserves more of that input. Pure text mode gets MEDIUM (default-ish)
+    # since there's no ref image to study.
+    media_res = "MEDIA_RESOLUTION_HIGH" if has_ref else "MEDIA_RESOLUTION_MEDIUM"
 
     response = client.models.generate_content(
         model=GEMINI_IMAGE_MODEL,
         contents=contents,
-        config=_build_gemini_image_config(target_size, sys_instruction),
+        config=_build_gemini_image_config(
+            target_size,
+            sys_instruction,
+            person_generation="ALLOW_ADULT",
+            seed=seed,
+            media_resolution=media_res,
+            temperature=temperature,
+        ),
     )
 
     for part in response.candidates[0].content.parts:

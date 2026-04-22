@@ -167,6 +167,7 @@ async def generate_composite_candidates(
     min_success: int = 2,
     output_dir: Optional[str] = None,
     target_size: Tuple[int, int] = (720, 1280),
+    temperature: Optional[float] = None,
 ) -> Dict:
     """Generate N composite candidates. Returns partial success if ≥min_success.
 
@@ -235,6 +236,7 @@ async def generate_composite_candidates(
             target_size=target_size,
             output_dir=out_dir,
             timeout=timeout_per_call,
+            temperature=temperature,
         )
         for s in seeds
     ]
@@ -288,6 +290,7 @@ async def stream_composite_candidates(
     min_success: int = 2,
     output_dir: Optional[str] = None,
     target_size: Tuple[int, int] = (720, 1280),
+    temperature: Optional[float] = None,
 ) -> AsyncIterator[Dict]:
     """Async generator twin of generate_composite_candidates.
 
@@ -349,6 +352,7 @@ async def stream_composite_candidates(
                 target_size=target_size,
                 output_dir=out_dir,
                 timeout=timeout_per_call,
+                temperature=temperature,
             )
             return (seed, path, None)
         except Exception as e:
@@ -394,6 +398,7 @@ async def _generate_one(
     target_size: Tuple[int, int],
     output_dir: str,
     timeout: float,
+    temperature: Optional[float] = None,
 ) -> Optional[str]:
     """Single Gemini call with per-call timeout + semaphore-bounded concurrency."""
     async with _gemini_semaphore:
@@ -406,6 +411,7 @@ async def _generate_one(
                 scene_prompt=scene_prompt,
                 target_size=target_size,
                 output_dir=output_dir,
+                temperature=temperature,
             ),
             timeout=timeout,
         )
@@ -419,6 +425,7 @@ async def _run_gemini(
     scene_prompt: str,
     target_size: Tuple[int, int],
     output_dir: str,
+    temperature: Optional[float] = None,
 ) -> Optional[str]:
     """Wrap the sync Gemini call in an executor."""
     loop = asyncio.get_running_loop()
@@ -427,6 +434,7 @@ async def _run_gemini(
         lambda: _sync_generate(
             seed, host_image_path, product_image_paths,
             background_upload_path, scene_prompt, target_size, output_dir,
+            temperature=temperature,
         ),
     )
 
@@ -439,6 +447,7 @@ def _sync_generate(
     scene_prompt: str,
     target_size: Tuple[int, int],
     output_dir: str,
+    temperature: Optional[float] = None,
 ) -> Optional[str]:
     """Run one Gemini image generation; return saved PNG path (or None)."""
     from modules.image_compositor import (
@@ -460,7 +469,8 @@ def _sync_generate(
         ref_images.append(Image.open(background_upload_path).convert("RGB"))
 
     result = _gemini_generate_scene(
-        people_canvas, scene_prompt, target_size, ref_images or None
+        people_canvas, scene_prompt, target_size, ref_images or None,
+        seed=seed, temperature=temperature,
     )
     if result is None:
         return None

@@ -237,6 +237,9 @@ export function buildHostGenerateBody(host) {
   if (typeof host.faceStrength === 'number') body.append('faceStrength', String(host.faceStrength));
   if (typeof host.outfitStrength === 'number') body.append('outfitStrength', String(host.outfitStrength));
   body.append('n', '4');
+  // Backend accepts temperature ∈ [0.0, 2.0]. UI exposes three preset values
+  // (0.4 / 0.7 / 1.0). Pass through only when user actually picked one.
+  if (typeof host.temperature === 'number') body.append('temperature', String(host.temperature));
 
   return body;
 }
@@ -327,6 +330,9 @@ export function buildCompositeBody({ host, products, background, composition }) 
   body.append('shot', composition?.shot || 'bust');
   body.append('angle', composition?.angle || 'eye');
   body.append('n', '4');
+  if (typeof composition?.temperature === 'number') {
+    body.append('temperature', String(composition.temperature));
+  }
   return body;
 }
 

@@ -58,11 +58,28 @@ def _build_gemini_image_config(
     target_size: Tuple[int, int],
     system_instruction: Optional[str] = None,
     thinking_minimal: bool = True,
+    person_generation: Optional[str] = "ALLOW_ADULT",
+    seed: Optional[int] = None,
+    media_resolution: Optional[str] = None,
+    temperature: Optional[float] = None,
 ):
-    """Phase 0 T-GM2/3/3b/4: centralized Gemini config for image generation.
+    """Centralized Gemini image-gen config. Phase 0 T-GM2/3/3b/4 + param audit.
 
-    Always sets aspect_ratio (derived), safety_settings (BLOCK_MEDIUM_AND_ABOVE on
-    all 4 categories), and thinking_level='minimal' for Flash.
+    Args:
+        target_size: (width, height) — derives aspect_ratio.
+        system_instruction: per-call system prompt (anti-injection + behavioral).
+        thinking_minimal: always True for Flash; kept as param for Pro swap.
+        person_generation: ALLOW_ADULT (host/composite) | ALLOW_NONE (bg-only) |
+            ALLOW_ALL (unused). Default ALLOW_ADULT covers the 95% case.
+        seed: Gemini sampling seed — same seed + same inputs = same output.
+            None → stochastic. Pass the per-candidate seed here for
+            reproducibility across re-runs.
+        media_resolution: how the model processes INPUT reference images.
+            None → model default (~MEDIUM). Set "MEDIA_RESOLUTION_HIGH" when
+            reference face/outfit detail matters (Step 1 face-outfit mode).
+        temperature: sampling variance. None → model default (~1.0).
+            Lower = more predictable, higher = more variation. UI exposes
+            this as 0.4 / 0.7 / 1.0 Segmented.
     """
     from google.genai import types
 
@@ -79,15 +96,25 @@ def _build_gemini_image_config(
             types.HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT,
         )
     ]
+    image_config_kwargs = dict(aspect_ratio=aspect, image_size="1K")
+    if person_generation:
+        image_config_kwargs["person_generation"] = person_generation
+
     kwargs = dict(
         response_modalities=["Text", "Image"],
-        image_config=types.ImageConfig(aspect_ratio=aspect, image_size="1K"),
+        image_config=types.ImageConfig(**image_config_kwargs),
         safety_settings=safety,
     )
     if thinking_minimal:
         kwargs["thinking_config"] = types.ThinkingConfig(thinking_level="minimal")
     if system_instruction:
         kwargs["system_instruction"] = system_instruction
+    if seed is not None:
+        kwargs["seed"] = int(seed)
+    if media_resolution is not None:
+        kwargs["media_resolution"] = media_resolution
+    if temperature is not None:
+        kwargs["temperature"] = float(temperature)
     return types.GenerateContentConfig(**kwargs)
 
 
@@ -237,6 +264,8 @@ def _gemini_generate_scene(
     scene_prompt: str,
     target_size: Tuple[int, int],
     reference_images: Optional[List[Image.Image]] = None,
+    seed: Optional[int] = None,
+    temperature: Optional[float] = None,
 ) -> Optional[Image.Image]:
     """Send people image + prompt + optional reference images to Gemini."""
     from google.genai import types
@@ -317,7 +346,14 @@ def _gemini_generate_scene(
         response = client.models.generate_content(
             model=GEMINI_IMAGE_MODEL,
             contents=contents,
-            config=_build_gemini_image_config(target_size, system_instruction),
+            config=_build_gemini_image_config(
+                target_size,
+                system_instruction,
+                person_generation="ALLOW_ADULT",
+                seed=seed,
+                media_resolution="MEDIA_RESOLUTION_MEDIUM",
+                temperature=temperature,
+            ),
         )
 
         for part in response.candidates[0].content.parts:
@@ -564,7 +600,13 @@ def generate_background_only(
         response = client.models.generate_content(
             model=GEMINI_IMAGE_MODEL,
             contents=contents,
-            config=_build_gemini_image_config(target_size, system_instruction),
+            config=_build_gemini_image_config(
+                target_size,
+                system_instruction,
+                # Background-only: explicitly forbid any person generation.
+                person_generation="ALLOW_NONE",
+                media_resolution="MEDIA_RESOLUTION_LOW",
+            ),
         )
 
         for part in response.candidates[0].content.parts:

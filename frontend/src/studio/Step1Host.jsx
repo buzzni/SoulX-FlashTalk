@@ -284,6 +284,21 @@ const Step1Host = ({ state, update }) => {
 
         <hr className="hr" />
 
+        <Field
+          label="변동성"
+          hint="같은 입력으로 생성해도 얼마나 다양하게 나올지 — 안정적이면 비슷한 4장, 창의적이면 제각각"
+        >
+          <Segmented
+            value={host.temperature ?? 0.7}
+            onChange={v => setField('temperature', v)}
+            options={[
+              { value: 0.4, label: '안정적' },
+              { value: 0.7, label: '보통' },
+              { value: 1.0, label: '창의적' },
+            ]}
+          />
+        </Field>
+
         {errorMsg && (
           <div style={{ padding: '10px 12px', marginBottom: 10, background: 'var(--danger-soft)', border: '1px solid var(--danger)', borderRadius: 'var(--r-sm)', color: 'var(--danger)', fontSize: 12 }}>
             <Icon name="alert_circle" size={13} style={{ marginRight: 6 }} />
