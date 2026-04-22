@@ -10,6 +10,8 @@ export default function ServerFilePicker({ open, onClose, onSelect, kind = 'imag
   const [files, setFiles] = useState(null);
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [query, setQuery] = useState('');
+  const [recentOnly, setRecentOnly] = useState(false);
 
   const refresh = async () => {
     setLoading(true);
@@ -30,6 +32,14 @@ export default function ServerFilePicker({ open, onClose, onSelect, kind = 'imag
   }, [open, kind]);
 
   if (!open) return null;
+
+  const ONE_HOUR = 60 * 60;
+  const nowSec = Date.now() / 1000;
+  const filtered = (files || []).filter(f => {
+    if (recentOnly && nowSec - f.modified > ONE_HOUR) return false;
+    if (query && !f.filename.toLowerCase().includes(query.toLowerCase())) return false;
+    return true;
+  });
 
   const formatSize = (b) => {
     if (b < 1024) return `${b} B`;
@@ -58,6 +68,32 @@ export default function ServerFilePicker({ open, onClose, onSelect, kind = 'imag
           </div>
         </div>
 
+        <div style={{ padding: '12px 20px', borderBottom: '1px solid var(--border)', background: 'var(--bg-sunken)', display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+          <input
+            type="text"
+            placeholder="파일명 검색…"
+            value={query}
+            onChange={e => setQuery(e.target.value)}
+            autoFocus
+            style={{
+              flex: 1,
+              minWidth: 200,
+              padding: '6px 10px',
+              border: '1px solid var(--border)',
+              borderRadius: 'var(--r-sm)',
+              fontSize: 13,
+              background: 'var(--bg-elev)',
+            }}
+          />
+          <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--text-secondary)', cursor: 'pointer' }}>
+            <input type="checkbox" checked={recentOnly} onChange={e => setRecentOnly(e.target.checked)} />
+            최근 1시간만
+          </label>
+          <span style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>
+            {files ? `${filtered.length} / ${files.length} 개` : ''}
+          </span>
+        </div>
+
         <div style={{ padding: 20, overflow: 'auto', flex: 1, minHeight: 0 }}>
           {loading && (
             <div style={{ padding: 40, textAlign: 'center', color: 'var(--text-tertiary)' }}>
@@ -79,9 +115,15 @@ export default function ServerFilePicker({ open, onClose, onSelect, kind = 'imag
             </div>
           )}
 
-          {!loading && !error && files && files.length > 0 && (
+          {!loading && !error && files && files.length > 0 && filtered.length === 0 && (
+            <div style={{ padding: 40, textAlign: 'center', color: 'var(--text-tertiary)', fontSize: 13 }}>
+              검색 결과가 없어요. 검색어를 지우거나 "최근 1시간만" 체크를 해제해보세요.
+            </div>
+          )}
+
+          {!loading && !error && filtered.length > 0 && (
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))', gap: 12 }}>
-              {files.map(f => (
+              {filtered.map(f => (
                 <button
                   key={f.path}
                   onClick={() => { onSelect(f); onClose(); }}
