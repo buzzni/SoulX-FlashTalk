@@ -89,6 +89,11 @@ class ElevenLabsTTS:
             "text": text,
             "model_id": self.model_id,
             "language_code": language_code,
+            # v3 supports auto normalization of numbers ("12,000원"), emoji, and
+            # abbreviations before TTS. "on" forces it; Korean commerce scripts
+            # lean heavily on numerics so this is the right default. Users never
+            # touch this — it's a quality default, not a creative knob.
+            "apply_text_normalization": "on",
             "voice_settings": {
                 "stability": stability,
                 "similarity_boost": similarity_boost,

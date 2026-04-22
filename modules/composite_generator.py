@@ -84,17 +84,27 @@ def translate_direction_ko_to_en(direction_ko: str) -> str:
         return ""
 
     try:
+        from google.genai import types
         from modules.image_compositor import _get_gemini_client
 
         client = _get_gemini_client()
+        # Translation is a short, deterministic task — skip the Flash model's
+        # "thinking" pass (saves ~200-400ms per call) and cap output so a
+        # runaway response can't blow up cost/latency. 256 tokens ≈ 350 Korean
+        # chars worth of English, well above any reasonable direction line.
+        cfg = types.GenerateContentConfig(
+            thinking_config=types.ThinkingConfig(thinking_level="minimal"),
+            max_output_tokens=256,
+            system_instruction=(
+                "You translate Korean scene directions into concise English for "
+                "image generation. Return ONLY the translation — no quotes, no "
+                "commentary, no leading label."
+            ),
+        )
         response = client.models.generate_content(
             model=GEMINI_TEXT_MODEL,
-            contents=[
-                "Translate the following Korean scene direction to natural, concise English "
-                "suitable for an image-generation prompt. Return ONLY the translated text, "
-                "no quotes, no commentary.\n\n"
-                f"Korean: {direction_ko}\n\nEnglish:"
-            ],
+            contents=[f"Korean: {direction_ko}\n\nEnglish:"],
+            config=cfg,
         )
         text = (response.text or "").strip().strip('"').strip("'")
         if not text:

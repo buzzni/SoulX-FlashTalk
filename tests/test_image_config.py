@@ -67,3 +67,65 @@ def test_aspect_ratio_derives_from_target_size(build_config):
     # square-ish
     cfg_s = build_config((800, 800))
     assert cfg_s.image_config.aspect_ratio == "1:1"
+
+
+# ========================================
+# Gemini TEXT model (translate_direction_ko_to_en) config plumbing
+# ========================================
+
+
+class _FakeClient:
+    """Captures the config kwargs generate_content receives."""
+    def __init__(self):
+        self.captured = None
+
+    @property
+    def models(self):
+        return self  # unified namespace — test uses client.models.generate_content
+
+    def generate_content(self, model, contents, config=None):
+        self.captured = {"model": model, "contents": contents, "config": config}
+        class _Resp:
+            text = "translated english text"
+        return _Resp()
+
+
+def test_translate_ko_to_en_uses_thinking_minimal_and_token_cap(monkeypatch):
+    """Gemini translation call is configured for short, cheap, deterministic output."""
+    # Reset the lru_cache so this test sees a fresh call
+    from modules import composite_generator
+    composite_generator.translate_direction_ko_to_en.cache_clear()
+
+    fake = _FakeClient()
+    monkeypatch.setattr(
+        "modules.image_compositor._get_gemini_client",
+        lambda: fake,
+    )
+
+    result = composite_generator.translate_direction_ko_to_en("밝은 분위기의 스튜디오")
+    assert result == "translated english text"
+
+    cfg = fake.captured["config"]
+    assert cfg is not None, "translation call must pass a GenerateContentConfig"
+    assert cfg.max_output_tokens == 256
+    assert cfg.thinking_config is not None
+    assert cfg.system_instruction is not None
+    assert fake.captured["model"] == "gemini-2.5-flash"
+
+
+def test_translate_ko_to_en_empty_input_returns_empty_without_client_call(monkeypatch):
+    """Empty / whitespace-only direction shouldn't round-trip to Gemini."""
+    from modules import composite_generator
+    composite_generator.translate_direction_ko_to_en.cache_clear()
+
+    called = {"hit": False}
+
+    def _unexpected():
+        called["hit"] = True
+        raise AssertionError("client should not be called for empty input")
+
+    monkeypatch.setattr("modules.image_compositor._get_gemini_client", _unexpected)
+
+    assert composite_generator.translate_direction_ko_to_en("") == ""
+    assert composite_generator.translate_direction_ko_to_en("   ") == ""
+    assert called["hit"] is False
