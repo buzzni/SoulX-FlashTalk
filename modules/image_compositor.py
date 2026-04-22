@@ -8,9 +8,11 @@ Approach:
   3. Gemini: generate a natural scene around the people based on a text prompt
 """
 
+import json
 import os
 import logging
 import re
+import time
 import uuid
 from io import BytesIO
 from PIL import Image
@@ -23,6 +25,52 @@ GEMINI_IMAGE_MODEL = "gemini-3.1-flash-image-preview"
 
 _gemini_client = None
 _rembg_session = None
+
+# Retry config for transient Gemini failures. The caller already has
+# min_success=2 tolerance for the slowest-N-of-4 pattern, but per-candidate
+# retries materially improve the hit rate when Google has a bad minute.
+_GEMINI_RETRY_MAX_ATTEMPTS = 2  # 1 initial + 1 retry
+_GEMINI_RETRY_BACKOFF_S = (1.0, 3.0)  # sleeps before attempts 2, 3, ...
+
+
+def _call_gemini_with_retry(fn, *, attempts: int = _GEMINI_RETRY_MAX_ATTEMPTS):
+    """Invoke a zero-arg Gemini callable with retry on transient errors.
+
+    Retries on category ∈ {quota, transient, timeout}. Does NOT retry on
+    safety/other/empty — those are deterministic for the given input and
+    re-trying wastes cost.
+    """
+    import time as _time
+
+    last_err: Optional[GeminiImageError] = None
+    for i in range(attempts):
+        try:
+            return fn()
+        except GeminiImageError as e:
+            last_err = e
+            if e.category not in ("quota", "transient", "timeout"):
+                raise
+            if i >= attempts - 1:
+                raise
+            sleep = _GEMINI_RETRY_BACKOFF_S[min(i, len(_GEMINI_RETRY_BACKOFF_S) - 1)]
+            logger.warning("Gemini %s — retrying after %.1fs (attempt %d/%d)",
+                           e.category, sleep, i + 2, attempts)
+            _time.sleep(sleep)
+        except Exception as e:
+            # SDK exceptions — wrap and decide
+            classified = _classify_sdk_exception(e)
+            last_err = classified
+            if classified.category not in ("quota", "transient", "timeout"):
+                raise classified
+            if i >= attempts - 1:
+                raise classified
+            sleep = _GEMINI_RETRY_BACKOFF_S[min(i, len(_GEMINI_RETRY_BACKOFF_S) - 1)]
+            logger.warning("Gemini %s (%s) — retrying after %.1fs",
+                           classified.category, type(e).__name__, sleep)
+            _time.sleep(sleep)
+    if last_err:
+        raise last_err
+    raise GeminiImageError("Unknown retry exhaustion", category="other")
 
 
 def _derive_aspect_ratio(target_size: Tuple[int, int]) -> str:
@@ -116,6 +164,120 @@ def _build_gemini_image_config(
     if temperature is not None:
         kwargs["temperature"] = float(temperature)
     return types.GenerateContentConfig(**kwargs)
+
+
+def write_generation_metadata(image_path: str, metadata: Dict) -> Optional[str]:
+    """Write a .meta.json sidecar next to the generated PNG capturing what
+    was actually sent to Gemini. Makes "this candidate came out weird"
+    reports reproducible — replay the exact request with the same seed +
+    temperature + prompt + system_instruction and you'll see the same
+    output (modulo model-side non-determinism beyond the seed).
+
+    `metadata` is a free-form dict; this helper adds a timestamp and uses
+    json.dumps with default=str so Enum/Path values serialize cleanly.
+    Failures are swallowed — metadata is diagnostic-only, should never
+    break the happy path.
+    """
+    if not image_path:
+        return None
+    try:
+        out = {**metadata, "generated_at": time.time(), "generated_iso": time.strftime("%Y-%m-%dT%H:%M:%S%z")}
+        meta_path = image_path + ".meta.json"
+        with open(meta_path, "w", encoding="utf-8") as f:
+            json.dump(out, f, ensure_ascii=False, indent=2, default=str)
+        return meta_path
+    except Exception as e:
+        logger.warning("Failed to write metadata sidecar for %s: %s", image_path, e)
+        return None
+
+
+class GeminiImageError(Exception):
+    """Raised when Gemini image generation fails in a known/categorized way.
+
+    .category is one of: "safety" | "quota" | "timeout" | "empty" | "other".
+    Callers surface this to end users via humanizeError / SSE events so the
+    UI can say "안전 필터에 걸렸어요" vs a generic 503.
+    """
+    def __init__(self, message: str, category: str = "other", detail: dict = None):
+        super().__init__(message)
+        self.category = category
+        self.detail = detail or {}
+
+
+def _diagnose_empty_response(response) -> GeminiImageError:
+    """Inspect a Gemini response that produced no image, return a
+    categorized GeminiImageError with finish_reason + safety ratings.
+
+    Use when the response arrived (no exception) but inline_data is missing —
+    the single most useful debug log we can emit without hitting the API
+    twice. Previously we logged a flat "Gemini returned no image" and users
+    had no idea if it was safety-blocked, truncated, or genuinely empty.
+    """
+    candidates = getattr(response, "candidates", None) or []
+    prompt_feedback = getattr(response, "prompt_feedback", None)
+
+    if not candidates:
+        block_reason = getattr(prompt_feedback, "block_reason", None)
+        logger.warning(
+            "Gemini returned no candidates; prompt_feedback.block_reason=%s",
+            block_reason,
+        )
+        if block_reason:
+            return GeminiImageError(
+                f"Prompt blocked by Gemini: {block_reason}",
+                category="safety",
+                detail={"block_reason": str(block_reason)},
+            )
+        return GeminiImageError(
+            "Gemini returned no candidates",
+            category="empty",
+        )
+
+    cand = candidates[0]
+    finish = getattr(cand, "finish_reason", None)
+    safety = getattr(cand, "safety_ratings", None) or []
+    safety_summary = [
+        {"category": str(getattr(r, "category", None)), "probability": str(getattr(r, "probability", None))}
+        for r in safety
+    ]
+    logger.warning(
+        "Gemini produced no image data: finish_reason=%s, safety_ratings=%s",
+        finish,
+        safety_summary,
+    )
+
+    finish_str = str(finish) if finish else ""
+    if "SAFETY" in finish_str.upper():
+        return GeminiImageError(
+            "Image blocked by safety filter",
+            category="safety",
+            detail={"finish_reason": finish_str, "safety": safety_summary},
+        )
+    if "MAX_TOKENS" in finish_str.upper():
+        return GeminiImageError(
+            "Output truncated",
+            category="truncated",
+            detail={"finish_reason": finish_str},
+        )
+    return GeminiImageError(
+        f"No image in response (finish_reason={finish_str or 'unknown'})",
+        category="empty",
+        detail={"finish_reason": finish_str},
+    )
+
+
+def _classify_sdk_exception(exc: BaseException) -> GeminiImageError:
+    """Map google.genai SDK exceptions to our category taxonomy."""
+    name = type(exc).__name__
+    msg = str(exc)
+    lower = msg.lower()
+    if "429" in msg or "rate" in lower or "quota" in lower:
+        return GeminiImageError(f"Rate limit / quota: {msg}", category="quota")
+    if "timeout" in lower or "deadline" in lower or name == "TimeoutError":
+        return GeminiImageError(f"Gemini timeout: {msg}", category="timeout")
+    if "503" in msg or "unavailable" in lower:
+        return GeminiImageError(f"Gemini temporarily unavailable: {msg}", category="transient")
+    return GeminiImageError(f"{name}: {msg}", category="other")
 
 
 def _get_gemini_client():
@@ -343,31 +505,38 @@ def _gemini_generate_scene(
             "around them. Do not add any text, watermarks, or logos. "
             "Keep lighting and shadows consistent across all subjects."
         )
-        response = client.models.generate_content(
-            model=GEMINI_IMAGE_MODEL,
-            contents=contents,
-            config=_build_gemini_image_config(
-                target_size,
-                system_instruction,
-                person_generation="ALLOW_ADULT",
-                seed=seed,
-                media_resolution="MEDIA_RESOLUTION_MEDIUM",
-                temperature=temperature,
-            ),
-        )
+        def _do():
+            return client.models.generate_content(
+                model=GEMINI_IMAGE_MODEL,
+                contents=contents,
+                config=_build_gemini_image_config(
+                    target_size,
+                    system_instruction,
+                    person_generation="ALLOW_ADULT",
+                    seed=seed,
+                    media_resolution="MEDIA_RESOLUTION_MEDIUM",
+                    temperature=temperature,
+                ),
+            )
+        response = _call_gemini_with_retry(_do)
 
-        for part in response.candidates[0].content.parts:
-            if part.inline_data is not None:
-                result = Image.open(BytesIO(part.inline_data.data)).convert("RGB")
-                result = _resize_and_crop(result, target_size)
-                logger.info("Gemini scene generation successful")
-                return result
+        candidates = getattr(response, "candidates", None) or []
+        if candidates:
+            for part in candidates[0].content.parts:
+                if part.inline_data is not None:
+                    result = Image.open(BytesIO(part.inline_data.data)).convert("RGB")
+                    result = _resize_and_crop(result, target_size)
+                    logger.info("Gemini scene generation successful")
+                    return result
 
-        logger.warning("Gemini response contained no image")
-        return None
+        # Response arrived but no image — diagnose + raise structured error so
+        # callers can distinguish safety blocks from generic "no image".
+        raise _diagnose_empty_response(response)
+    except GeminiImageError:
+        raise
     except Exception as e:
         logger.error(f"Gemini scene generation failed: {e}")
-        return None
+        raise _classify_sdk_exception(e)
 
 
 def compose_agents_together(
@@ -597,32 +766,36 @@ def generate_background_only(
             "Generate only a background scene. No people, no text, no logos. "
             "Match the requested aspect ratio precisely."
         )
-        response = client.models.generate_content(
-            model=GEMINI_IMAGE_MODEL,
-            contents=contents,
-            config=_build_gemini_image_config(
-                target_size,
-                system_instruction,
-                # Background-only: explicitly forbid any person generation.
-                person_generation="ALLOW_NONE",
-                media_resolution="MEDIA_RESOLUTION_LOW",
-            ),
-        )
+        def _do():
+            return client.models.generate_content(
+                model=GEMINI_IMAGE_MODEL,
+                contents=contents,
+                config=_build_gemini_image_config(
+                    target_size,
+                    system_instruction,
+                    person_generation="ALLOW_NONE",
+                    media_resolution="MEDIA_RESOLUTION_LOW",
+                ),
+            )
+        response = _call_gemini_with_retry(_do)
 
-        for part in response.candidates[0].content.parts:
-            if part.inline_data is not None:
-                result = Image.open(BytesIO(part.inline_data.data)).convert("RGB")
-                result = _resize_and_crop(result, target_size)
-                out_path = os.path.join(output_dir, f"bg_only_{uuid.uuid4().hex[:8]}.png")
-                result.save(out_path, "PNG")
-                logger.info(f"Background-only image generated: {out_path}")
-                return out_path
+        candidates = getattr(response, "candidates", None) or []
+        if candidates:
+            for part in candidates[0].content.parts:
+                if part.inline_data is not None:
+                    result = Image.open(BytesIO(part.inline_data.data)).convert("RGB")
+                    result = _resize_and_crop(result, target_size)
+                    out_path = os.path.join(output_dir, f"bg_only_{uuid.uuid4().hex[:8]}.png")
+                    result.save(out_path, "PNG")
+                    logger.info(f"Background-only image generated: {out_path}")
+                    return out_path
 
-        logger.warning("Gemini returned no image for background-only generation")
-        return None
+        raise _diagnose_empty_response(response)
+    except GeminiImageError:
+        raise
     except Exception as e:
         logger.error(f"Background-only generation failed: {e}")
-        return None
+        raise _classify_sdk_exception(e)
 
 
 def release_models():

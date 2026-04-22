@@ -364,19 +364,27 @@ async def stream_composite_candidates(
                 timeout=timeout_per_call,
                 temperature=temperature,
             )
-            return (seed, path, None)
+            return (seed, path, None, None)
         except Exception as e:
-            return (seed, None, f"{type(e).__name__}: {e}")
+            cat = getattr(e, "category", "other")
+            return (seed, None, f"{type(e).__name__}: {e}", cat)
 
     pending = [_run_tagged(s) for s in seeds]
     done_count = 0
     success_count = 0
     for coro in asyncio.as_completed(pending):
-        seed, path, err = await coro
+        seed, path, err, category = await coro
         done_count += 1
         if err:
-            logger.warning("Composite candidate seed=%s failed: %s", seed, err)
-            yield {"type": "error", "seed": seed, "error": err, "done": done_count, "total": n}
+            logger.warning("Composite candidate seed=%s failed (%s): %s", seed, category, err)
+            yield {
+                "type": "error",
+                "seed": seed,
+                "error": err,
+                "category": category,
+                "done": done_count,
+                "total": n,
+            }
         elif path:
             success_count += 1
             yield {
@@ -461,9 +469,11 @@ def _sync_generate(
 ) -> Optional[str]:
     """Run one Gemini image generation; return saved PNG path (or None)."""
     from modules.image_compositor import (
+        GEMINI_IMAGE_MODEL,
         _build_people_canvas,
         _gemini_generate_scene,
         _remove_bg,
+        write_generation_metadata,
     )
 
     # Extract host foreground
@@ -478,6 +488,8 @@ def _sync_generate(
     if background_upload_path and os.path.exists(background_upload_path):
         ref_images.append(Image.open(background_upload_path).convert("RGB"))
 
+    # _gemini_generate_scene now raises GeminiImageError on failure (was
+    # returning None before). Propagate so the stream layer shows category.
     result = _gemini_generate_scene(
         people_canvas, scene_prompt, target_size, ref_images or None,
         seed=seed, temperature=temperature,
@@ -487,5 +499,16 @@ def _sync_generate(
 
     out_path = os.path.join(output_dir, f"composite_s{seed}_{uuid.uuid4().hex[:8]}.png")
     result.save(out_path, "PNG")
+    write_generation_metadata(out_path, {
+        "step": "2-composite",
+        "model": GEMINI_IMAGE_MODEL,
+        "seed": seed,
+        "temperature": temperature,
+        "scene_prompt": scene_prompt,
+        "host_image": host_image_path,
+        "products": product_image_paths,
+        "background_upload": background_upload_path,
+        "target_size": list(target_size),
+    })
     logger.info("Composite saved: %s", out_path)
     return out_path

@@ -181,19 +181,27 @@ async def stream_host_candidates(
                 output_dir=out_dir,
                 temperature=temperature,
             )
-            return (seed, path, None)
+            return (seed, path, None, None)
         except Exception as e:
-            return (seed, None, f"{type(e).__name__}: {e}")
+            cat = getattr(e, "category", "other")
+            return (seed, None, f"{type(e).__name__}: {e}", cat)
 
     pending = [_run_tagged(s) for s in seeds]
     done_count = 0
     success_count = 0
     for coro in asyncio.as_completed(pending):
-        seed, path, err = await coro
+        seed, path, err, category = await coro
         done_count += 1
         if err:
-            logger.warning("Host candidate seed=%s failed: %s", seed, err)
-            yield {"type": "error", "seed": seed, "error": err, "done": done_count, "total": n}
+            logger.warning("Host candidate seed=%s failed (%s): %s", seed, category, err)
+            yield {
+                "type": "error",
+                "seed": seed,
+                "error": err,
+                "category": category,
+                "done": done_count,
+                "total": n,
+            }
         elif path:
             success_count += 1
             yield {
@@ -305,8 +313,13 @@ def _sync_generate(
     from modules.image_compositor import (
         GEMINI_IMAGE_MODEL,
         _build_gemini_image_config,
+        _call_gemini_with_retry,
+        _classify_sdk_exception,
+        _diagnose_empty_response,
         _get_gemini_client,
         _sanitize_user_prompt,
+        GeminiImageError,
+        write_generation_metadata,
     )
 
     # Portrait 9:16 for show-host (matches HostStudio design)
@@ -337,28 +350,52 @@ def _sync_generate(
     # since there's no ref image to study.
     media_res = "MEDIA_RESOLUTION_HIGH" if has_ref else "MEDIA_RESOLUTION_MEDIUM"
 
-    response = client.models.generate_content(
-        model=GEMINI_IMAGE_MODEL,
-        contents=contents,
-        config=_build_gemini_image_config(
-            target_size,
-            sys_instruction,
-            person_generation="ALLOW_ADULT",
-            seed=seed,
-            media_resolution=media_res,
-            temperature=temperature,
-        ),
-    )
+    def _do():
+        return client.models.generate_content(
+            model=GEMINI_IMAGE_MODEL,
+            contents=contents,
+            config=_build_gemini_image_config(
+                target_size,
+                sys_instruction,
+                person_generation="ALLOW_ADULT",
+                seed=seed,
+                media_resolution=media_res,
+                temperature=temperature,
+            ),
+        )
+    try:
+        response = _call_gemini_with_retry(_do)
+    except GeminiImageError:
+        raise
+    except Exception as e:
+        raise _classify_sdk_exception(e)
 
-    for part in response.candidates[0].content.parts:
-        if part.inline_data is not None:
-            result = Image.open(BytesIO(part.inline_data.data)).convert("RGB")
-            out_path = os.path.join(output_dir, f"host_{uuid.uuid4().hex[:8]}_s{seed}.png")
-            result.save(out_path, "PNG")
-            return out_path
+    candidates = getattr(response, "candidates", None) or []
+    if candidates:
+        for part in candidates[0].content.parts:
+            if part.inline_data is not None:
+                result = Image.open(BytesIO(part.inline_data.data)).convert("RGB")
+                out_path = os.path.join(output_dir, f"host_{uuid.uuid4().hex[:8]}_s{seed}.png")
+                result.save(out_path, "PNG")
+                write_generation_metadata(out_path, {
+                    "step": "1-host",
+                    "model": GEMINI_IMAGE_MODEL,
+                    "seed": seed,
+                    "temperature": temperature,
+                    "media_resolution": media_res,
+                    "mode": mode,
+                    "prompt": prompt,
+                    "system_instruction": sys_instruction,
+                    "has_face_ref": bool(face_ref_path),
+                    "has_outfit_ref": bool(outfit_ref_path),
+                    "has_style_ref": bool(style_ref_path),
+                    "face_strength": face_strength,
+                    "outfit_strength": outfit_strength,
+                })
+                return out_path
 
     logger.warning("Gemini returned no image for host seed=%s", seed)
-    return None
+    raise _diagnose_empty_response(response)
 
 
 def _build_host_prompt(

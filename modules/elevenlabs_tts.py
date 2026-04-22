@@ -103,31 +103,30 @@ class ElevenLabsTTS:
             },
         }
 
+        # Request 16kHz PCM directly via the `output_format` query param — no
+        # MP3 → ffmpeg conversion. FlashTalk needs 16kHz mono WAV, which is
+        # exactly what pcm_16000 gives us (just missing the WAV header,
+        # which we add below). This saves ~1-3s of subprocess latency and
+        # drops the ffmpeg runtime dep from this code path.
         with httpx.Client(timeout=120) as client:
             resp = client.post(
                 f"{ELEVENLABS_BASE_URL}/text-to-speech/{voice_id}",
-                headers={**self.headers, "Content-Type": "application/json", "Accept": "audio/mpeg"},
+                headers={**self.headers, "Content-Type": "application/json", "Accept": "audio/wav"},
+                params={"output_format": "pcm_16000"},
                 json=payload,
             )
             resp.raise_for_status()
+            pcm_bytes = resp.content
 
-            # Save as mp3 first, then convert to wav
-            mp3_path = output_path.replace(".wav", ".mp3")
-            with open(mp3_path, "wb") as f:
-                f.write(resp.content)
-
-        # Convert mp3 to 16kHz mono WAV using ffmpeg (required for FlashTalk)
-        import subprocess
-        cmd = [
-            "ffmpeg", "-y", "-i", mp3_path,
-            "-ar", "16000", "-ac", "1", "-f", "wav",
-            output_path,
-        ]
-        subprocess.run(cmd, check=True, capture_output=True)
-
-        # Cleanup mp3
-        if os.path.exists(mp3_path):
-            os.remove(mp3_path)
+        # pcm_16000 is raw 16-bit little-endian mono PCM at 16 kHz — wrap it
+        # in a WAV header so the output_path stays a valid .wav that any
+        # downstream tool (FlashTalk, browser <audio>) can play.
+        sample_rate = 16000
+        with wave.open(output_path, "wb") as wf:
+            wf.setnchannels(1)
+            wf.setsampwidth(2)  # 16-bit
+            wf.setframerate(sample_rate)
+            wf.writeframes(pcm_bytes)
 
         logger.info(f"Speech generated: {output_path}")
         return output_path

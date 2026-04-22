@@ -72,19 +72,24 @@ def test_config_max_chars_matches_v3_limit():
 # ---- Placeholders (need httpx mock to verify payload shape) ----
 
 
-def _capture_generate_payload(monkeypatch, **kwargs):
+def _capture_generate_payload(monkeypatch, tmp_path=None, **kwargs):
     """Invoke ElevenLabsTTS.generate_speech while intercepting the outgoing
     httpx POST — returns the JSON payload the real API would have received.
-    Skips the subsequent ffmpeg conversion by stubbing subprocess.run.
+
+    Returns a real pcm_16000 frame stream (16-bit LE zeros) so the WAV
+    wrapping inside generate_speech succeeds without any file mocks.
     """
     import httpx
     from modules.elevenlabs_tts import ElevenLabsTTS
 
     captured = {}
+    # 800 zero-bytes = 400 samples = 25ms of silence at 16kHz mono 16-bit —
+    # enough for `wave.open(...).writeframes(...)` to produce a valid WAV.
+    fake_pcm = b"\x00" * 800
 
     class _Resp:
         status_code = 200
-        content = b"fake-mp3-bytes"
+        content = fake_pcm
         def raise_for_status(self):
             return None
 
@@ -95,42 +100,28 @@ def _capture_generate_payload(monkeypatch, **kwargs):
             return self
         def __exit__(self, *exc):
             return False
-        def post(self, url, headers=None, json=None, **kw):
+        def post(self, url, headers=None, json=None, params=None, **kw):
             captured["url"] = url
             captured["json"] = json
+            captured["params"] = params
+            captured["headers"] = headers
             return _Resp()
 
     monkeypatch.setattr(httpx, "Client", _FakeClient)
 
-    # Stub ffmpeg
-    import subprocess
-    monkeypatch.setattr(subprocess, "run", lambda *a, **kw: None)
+    # Scratch output path in pytest's tmp_path when available, else /tmp.
+    out_path = kwargs.get("output_path")
+    if out_path is None:
+        if tmp_path is not None:
+            out_path = str(tmp_path / "out.wav")
+        else:
+            out_path = "/tmp/_tts_test_out.wav"
 
-    # Stub file writes so we don't create /tmp artifacts
-    import builtins
-    real_open = builtins.open
-
-    class _NullFile:
-        def __enter__(self):
-            return self
-        def __exit__(self, *exc):
-            return False
-        def write(self, *a, **kw):
-            return None
-
-    def _open(path, mode="r", *a, **kw):
-        if "w" in mode or "a" in mode:
-            return _NullFile()
-        return real_open(path, mode, *a, **kw)
-
-    monkeypatch.setattr(builtins, "open", _open)
-
-    # os.path.exists+remove both called on the mp3 path; let real calls run
     tts = ElevenLabsTTS(api_key="test", model_id="eleven_v3")
     tts.generate_speech(
         text=kwargs.get("text", "안녕"),
         voice_id=kwargs.get("voice_id", "v1"),
-        output_path=kwargs.get("output_path", "/tmp/out.wav"),
+        output_path=out_path,
         stability=kwargs.get("stability", 0.5),
         similarity_boost=kwargs.get("similarity_boost", 0.75),
         style=kwargs.get("style", 0.0),
