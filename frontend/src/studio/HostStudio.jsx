@@ -189,35 +189,32 @@ const HostStudio = () => {
     'data-density': density,
   };
 
-  if (rendering) {
-    return (
-      <QueueProvider>
-        <div {...shellProps}>
-          <div className="app-shell" data-screen-label="05 Render">
-            <TopBar onReset={reset} step={null} onTweaksToggle={() => setTweaksOpen(o => !o)} />
-            <RenderDashboard
-              // Re-mount when attachToTaskId changes so clicking a different
-              // queue item from QueueStatus while already on the render view
-              // tears down the old SSE subscription and starts a fresh one
-              // for the newly-clicked task. 'fresh' = dispatch-new path.
-              key={attachToTaskId || 'fresh'}
-              state={state}
-              attachToTaskId={attachToTaskId}
-              onBack={exitRenderView}
-              onReset={reset}
-            />
-            <QueueStatus onTaskClick={openTaskInRenderView} />
-            {tweaksOpen && (
-              <TweaksPanel density={density} setDensity={setDensity} onClose={() => setTweaksOpen(false)} />
-            )}
-          </div>
-        </div>
-      </QueueProvider>
-    );
-  }
-
-  return (
-    <QueueProvider>
+  // QueueProvider hoisted to the SINGLE outermost wrapper so its 4s polling
+  // interval survives wizard ↔ render view switches. Previously each branch
+  // had its own QueueProvider — the polling restarted every transition,
+  // which looked like "polling stopped" right after a click-to-attach.
+  const renderShell = rendering ? (
+    <div {...shellProps}>
+      <div className="app-shell" data-screen-label="05 Render">
+        <TopBar onReset={reset} step={null} onTweaksToggle={() => setTweaksOpen(o => !o)} />
+        <RenderDashboard
+          // Re-mount when attachToTaskId changes so clicking a different
+          // queue item from QueueStatus while already on the render view
+          // tears down the old SSE subscription and starts a fresh one
+          // for the newly-clicked task. 'fresh' = dispatch-new path.
+          key={attachToTaskId || 'fresh'}
+          state={state}
+          attachToTaskId={attachToTaskId}
+          onBack={exitRenderView}
+          onReset={reset}
+        />
+        <QueueStatus onTaskClick={openTaskInRenderView} />
+        {tweaksOpen && (
+          <TweaksPanel density={density} setDensity={setDensity} onClose={() => setTweaksOpen(false)} />
+        )}
+      </div>
+    </div>
+  ) : (
     <div {...shellProps}>
       <div className="app-shell" data-screen-label={`0${step} ${STEPS[step - 1].name}`}>
         <TopBar onReset={reset} step={step} valid={valid} onStepClick={setStep} onTweaksToggle={() => setTweaksOpen(o => !o)} />
@@ -262,8 +259,9 @@ const HostStudio = () => {
         )}
       </div>
     </div>
-    </QueueProvider>
   );
+
+  return <QueueProvider>{renderShell}</QueueProvider>;
 };
 
 const TweaksPanel = ({ density, setDensity, onClose }) => (

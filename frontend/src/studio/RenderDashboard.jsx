@@ -243,8 +243,24 @@ const RenderDashboard = ({ state, attachToTaskId = null, onBack, onReset }) => {
         </div>
 
         <div className="card" style={{ padding: 24 }}>
-          <div style={{ display: 'grid', gridTemplateColumns: '180px 1fr', gap: 28, alignItems: 'stretch' }}>
-            <div style={{ borderRadius: 12, overflow: 'hidden', background: '#0b0d12', aspectRatio: '9/16', position: 'relative', border: '1px solid var(--border)' }}>
+          {/* alignItems: 'start' (NOT 'stretch') — when stretch was on, the
+              long right column forced the grid row height way past 180×320,
+              and the video container's aspect-ratio: 9/16 then computed
+              WIDTH from that taller height (16/9×height ≈ 600px wide),
+              spilling into the right column. align-self:start on the video
+              container is belt-and-braces — even if a future change re-adds
+              stretch, the video keeps its intrinsic 9:16 box. */}
+          <div style={{ display: 'grid', gridTemplateColumns: '220px 1fr', gap: 28, alignItems: 'start' }}>
+            <div style={{
+              width: 220,
+              aspectRatio: '9/16',
+              borderRadius: 12,
+              overflow: 'hidden',
+              background: '#0b0d12',
+              position: 'relative',
+              border: '1px solid var(--border)',
+              alignSelf: 'start',
+            }}>
               {job.status === 'done' && playableVideoUrl ? (
                 <video
                   src={playableVideoUrl}
