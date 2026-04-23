@@ -100,6 +100,41 @@ const Step1Host = ({ state, update }) => {
 
   const setField = (k, v) => update(s => ({ ...s, host: { ...s.host, [k]: v } }));
 
+  // Upload face/outfit to the server the moment the user picks them, instead
+  // of waiting for "쇼호스트 만들기". Two wins: (1) the reference photo
+  // survives a browser refresh (server URL is persistable, File handles +
+  // data URLs aren't), and (2) the generate click doesn't also block on
+  // upload, so it feels snappier. On upload success we swap faceRef.url
+  // from the transient data URL to the serveable /api/files/… URL so the
+  // preview tile keeps working forever.
+  const onRefFilePicked = (kind) => async (f) => {
+    // First write — instant preview via the data URL UploadTile handed us.
+    setField(kind, f);
+    if (!f || !f._file) return;  // _fake sample OR no actual File handle
+    try {
+      const r = await uploadReferenceImage(f._file);
+      update(s => ({
+        ...s,
+        host: {
+          ...s.host,
+          [kind]: { name: f.name, size: f.size, type: f.type, url: r.url, _file: undefined },
+          [`${kind}Path`]: r.path,
+        },
+      }));
+    } catch (err) {
+      console.warn(`auto-upload ${kind} failed`, err);
+      // Leave faceRef._file in place so the generate click retries upload.
+    }
+  };
+
+  const onRefFileRemoved = (kind) => () => {
+    // Clear both the preview object and the stored server path.
+    update(s => ({
+      ...s,
+      host: { ...s.host, [kind]: null, [`${kind}Path`]: null },
+    }));
+  };
+
   // 결과 카드가 나타나면 자동으로 스크롤 (좌측 폼 컬럼 내부 스크롤)
   useEffect(() => {
     if (!(generating || variants.length > 0) || !resultsRef.current) return;
@@ -276,8 +311,8 @@ const Step1Host = ({ state, update }) => {
               <Field label="얼굴" hint="꼭 필요해요">
                 <RefInput
                   file={host.faceRef}
-                  onFile={f => setField('faceRef', f)}
-                  onRemove={() => setField('faceRef', null)}
+                  onFile={onRefFilePicked('faceRef')}
+                  onRemove={onRefFileRemoved('faceRef')}
                   label="얼굴이 나온 사진 올리기"
                   sub="정면·밝은 사진 추천"
                 />
@@ -285,8 +320,8 @@ const Step1Host = ({ state, update }) => {
               <Field label="의상" hint="사진이나 글, 둘 다 가능 · 없어도 돼요">
                 <RefInput
                   file={host.outfitRef}
-                  onFile={f => setField('outfitRef', f)}
-                  onRemove={() => setField('outfitRef', null)}
+                  onFile={onRefFilePicked('outfitRef')}
+                  onRemove={onRefFileRemoved('outfitRef')}
                   label="입힐 옷 사진 올리기"
                   sub="원하는 옷차림이 있을 때"
                 />

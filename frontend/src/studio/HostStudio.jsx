@@ -55,14 +55,21 @@ function sanitizeForPersist(s) {
   // Strip any URL that can't survive a refresh (blob: dies with the tab,
   // data: is fine but can blow past localStorage quota with multi-MB uploads).
   const isTransientUrl = (u) => typeof u === 'string' && (u.startsWith('blob:') || u.startsWith('data:'));
+  // Keep a reference-image entry only if its url is a real server URL. Pre-
+  // upload entries (data:/blob:) are transient — the File handle dies on
+  // refresh, so resurrecting the preview without a File would just confuse
+  // the generate flow. Server URLs (via /api/files/...) are stable forever.
+  const cleanRef = (ref) => {
+    if (!ref || !ref.url || isTransientUrl(ref.url)) return null;
+    return { name: ref.name, size: ref.size, type: ref.type, url: ref.url, _file: undefined };
+  };
   // Strip placeholder/error variants — those only make sense during the
   // in-flight stream. Finished entries (with url + path) survive refresh.
   const cleanVariants = (arr) => (arr || []).filter(v => v && !v.placeholder && !v.error && v.url);
   const cleanHost = {
     ...s.host,
-    faceRef: null,
-    outfitRef: null,
-    _file: undefined,
+    faceRef: cleanRef(s.host?.faceRef),
+    outfitRef: cleanRef(s.host?.outfitRef),
     variants: cleanVariants(s.host?.variants),
   };
   const cleanComposition = {
@@ -108,6 +115,10 @@ function hydrateState(raw) {
   }
   return merged;
 }
+
+// Exported for tests — round-trip coverage in __tests__/state_persist.test.js
+// ensures the variants + face/outfit refs survive a reload.
+export { sanitizeForPersist, hydrateState, INITIAL_STATE };
 
 const HostStudio = () => {
   const [state, setState] = useState(() => {
