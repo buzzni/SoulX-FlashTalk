@@ -75,13 +75,27 @@ const RefInput = ({ file, onFile, onRemove, label, sub }) => {
 const Step1Host = ({ state, update }) => {
   const { host } = state;
   const [generating, setGenerating] = useState(false);
-  const [variants, setVariants] = useState([]);
+  // variants live on host state so they survive a reload — local useState
+  // lost them every refresh. setVariants here becomes a thin wrapper around
+  // setField('variants', ...) but keeps the "callback updater" shape used
+  // in the stream loop (vs => vs.map(...)).
+  const variants = host.variants || [];
+  const setVariants = (nextOrFn) => {
+    update(s => {
+      const current = s.host.variants || [];
+      const next = typeof nextOrFn === 'function' ? nextOrFn(current) : nextOrFn;
+      return { ...s, host: { ...s.host, variants: next } };
+    });
+  };
   const [errorMsg, setErrorMsg] = useState(null);
   // Counts every successful "쇼호스트 만들기" press (including 다시 만들기).
   // attempt #0 uses the default fixed seed set so two users with the same
   // prompt see comparable outputs; attempt #1+ uses random seeds so retry
   // actually produces different results — see api.makeRandomSeeds.
-  const [attempts, setAttempts] = useState(0);
+  // If variants were persisted from a previous session, start at 1 so the
+  // user's next "다시 만들기" produces fresh randoms instead of re-running
+  // the same deterministic set.
+  const [attempts, setAttempts] = useState((host.variants || []).length > 0 ? 1 : 0);
   const resultsRef = useRef(null);
 
   const setField = (k, v) => update(s => ({ ...s, host: { ...s.host, [k]: v } }));

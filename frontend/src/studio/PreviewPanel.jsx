@@ -1,34 +1,31 @@
-// Preview panel — 9:16 phone frame. Ported from prototype PreviewPanel.jsx.
-import { useMemo } from 'react';
+// Preview panel — right-column 9:16 phone frame.
+// Step 1: not rendered (the candidate grid on the left IS the preview; a second
+//         copy in the right column was redundant and ate screen space). Host
+//         confirmation happens via the selection check on the grid tile.
+// Step 2: shows the Step 1 host you picked as a reference card — "who am I
+//         composing with" — rather than the composite output (which is already
+//         previewed as you click grid candidates).
+// Step 3: shows the final composite + ready badges.
 import Icon from './Icon.jsx';
 import { Badge } from './primitives.jsx';
 
 const PreviewPanel = ({ state, step = 1 }) => {
-  const { host, background, products, voice, resolution, composition = {} } = state;
+  // Step 1: render nothing. Caller collapses the .main grid to a single column
+  // so the left form gets the full width.
+  if (step === 1) return null;
+
+  const { host, background, voice, resolution, composition = {} } = state;
 
   const hostReady = host.imageUrl || host.generated;
-  const bgReady = background.imageUrl || background.preset || background.prompt || background.url;
   const compositeReady = composition.generated;
-  // After Step 2 candidate selection, selectedUrl is the actual generated PNG.
-  // Mirror Step 1's host.imageUrl flow so the right preview shows the real
-  // image, not the gradient/silhouette placeholder we used pre-generation.
   const compositeImageUrl = composition.selectedUrl || null;
 
-  const waveBars = useMemo(() => Array.from({ length: 24 }, (_, i) => 0.3 + Math.abs(Math.sin(i * 0.7)) * 0.7), []);
-
-  const showLiveOverlay = false;
-  const showWaveform = false;
-
-  const previewTitle = step === 1 ? '쇼호스트 미리보기'
-    : step === 2 ? '합성 이미지 미리보기'
+  const previewTitle = step === 2 ? '선택한 쇼호스트'
     : '영상에 들어갈 한 장';
-  const previewSub = step === 1 ? '세로 · 9:16'
-    : step === 2 ? '다음 단계(음성·영상)의 바탕이 되는 한 장'
+  const previewSub = step === 2 ? '1단계에서 고른 쇼호스트 · 이 인물로 합성돼요'
     : `${resolution.label} · ${resolution.width}×${resolution.height} · 최종 영상은 만들기 버튼을 눌러주세요`;
 
-  const showComposite = compositeReady && step >= 2;
-  const showHostOnly = step === 1 && hostReady;
-  const hasAnyLayer = showComposite || showHostOnly || (step >= 2 && (hostReady || bgReady));
+  const showComposite = compositeReady && step >= 3;
 
   return (
     <div className="right-col">
@@ -44,7 +41,10 @@ const PreviewPanel = ({ state, step = 1 }) => {
       <div className="preview-body">
         <div className="phone-frame">
           <div className="phone-content">
-            {step === 1 && hostReady && (
+            {step === 2 && hostReady && (
+              // Step 2 reference card: the Step 1 host the user selected.
+              // Matches Step 1's own visual style (beige studio backdrop)
+              // so it reads as "this is who you picked".
               <>
                 <div className="preview-bg" style={{ background: 'linear-gradient(180deg, oklch(0.96 0.005 90), oklch(0.88 0.008 90))' }} />
                 {host.imageUrl ? (
@@ -57,7 +57,14 @@ const PreviewPanel = ({ state, step = 1 }) => {
               </>
             )}
 
-            {step >= 2 && showComposite && compositeImageUrl && (
+            {step === 2 && !hostReady && (
+              <div className="preview-empty">
+                <Icon name="sparkles" size={22} />
+                <div>1단계에서 쇼호스트를 먼저<br/>만들고 선택해주세요</div>
+              </div>
+            )}
+
+            {step === 3 && showComposite && compositeImageUrl && (
               <div
                 className="preview-host"
                 style={{
@@ -70,88 +77,10 @@ const PreviewPanel = ({ state, step = 1 }) => {
               />
             )}
 
-            {step >= 2 && showComposite && !compositeImageUrl && (
-              // Fallback: Step 2 marked composition.generated=true but for some
-              // reason we have no selectedUrl (legacy state, race, etc.) — keep
-              // the old silhouette placeholder so the panel doesn't go blank.
-              <>
-                <div className="preview-bg" style={{ background: composition._previewBg || background._gradient }} />
-                <div style={{
-                  position: 'absolute',
-                  bottom: 0,
-                  left: `${composition._hostX ?? 50}%`,
-                  transform: `translateX(-50%) scale(${composition._hostScale ?? 0.85})`,
-                  transformOrigin: 'bottom center',
-                  width: '55%',
-                  height: '88%',
-                  background: composition._previewHost || host._gradient,
-                  borderRadius: '40% 40% 10% 10% / 50% 50% 10% 10%',
-                  opacity: 0.92,
-                }} />
-              </>
-            )}
-
-            {step === 2 && !showComposite && (bgReady || hostReady) && (
-              <>
-                {bgReady && (
-                  <div className="preview-bg" style={{
-                    background: background._gradient || 'linear-gradient(180deg, oklch(0.85 0.02 90), oklch(0.6 0.03 90))',
-                    backgroundImage: background.imageUrl ? `url(${background.imageUrl})` : undefined,
-                    backgroundSize: 'cover',
-                    backgroundPosition: 'center',
-                  }} />
-                )}
-                {hostReady && (
-                  <div className="preview-host" style={{
-                    backgroundImage: host.imageUrl ? `url(${host.imageUrl})` : undefined,
-                    background: !host.imageUrl ? (host._gradient || undefined) : undefined,
-                    backgroundSize: 'cover',
-                    backgroundPosition: 'center top',
-                    opacity: 0.9,
-                  }} />
-                )}
-                <div style={{
-                  position: 'absolute',
-                  inset: 0,
-                  display: 'grid',
-                  placeItems: 'center',
-                  background: 'oklch(0 0 0 / 0.35)',
-                  color: 'white',
-                  fontSize: 12,
-                  textAlign: 'center',
-                  padding: 20,
-                  lineHeight: 1.5,
-                }}>
-                  <div>
-                    <Icon name="sparkles" size={22} /><br/>
-                    <span style={{ opacity: 0.9 }}>"합성 이미지 만들기" 버튼을 눌러<br/>한 장으로 합쳐주세요</span>
-                  </div>
-                </div>
-              </>
-            )}
-
-            {!hasAnyLayer && (
+            {step === 3 && !showComposite && (
               <div className="preview-empty">
                 <Icon name="sparkles" size={22} />
-                <div>
-                  {step === 1 && <>왼쪽에서 쇼호스트를 만들면<br/>여기에 미리보기가 나타나요</>}
-                  {step === 2 && <>제품과 배경을 넣고 합성하면<br/>여기에 결과가 나타나요</>}
-                  {step === 3 && <>앞 단계를 먼저 완료해주세요</>}
-                  {step === 4 && <>앞 단계를 먼저 완료해주세요</>}
-                </div>
-              </div>
-            )}
-
-            {showLiveOverlay && hasAnyLayer && (
-              <div className="preview-topbar">
-                <div className="live-pill"><span className="live-dot"/>라이브</div>
-                <div className="viewer-pill">👁 1,284명 시청 중</div>
-              </div>
-            )}
-
-            {showWaveform && (
-              <div className="preview-waveform">
-                {waveBars.map((h, i) => <span key={i} className="wave-bar" style={{ height: `${h * 100}%` }} />)}
+                <div>앞 단계를 먼저 완료해주세요</div>
               </div>
             )}
           </div>

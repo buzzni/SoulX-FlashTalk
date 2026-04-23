@@ -50,10 +50,20 @@ const Step2Composite = ({ state, update }) => {
   const [bgSource, setBgSource] = useState(background.source || 'preset');
   const [dragIdx, setDragIdx] = useState(null);
   const [generating, setGenerating] = useState(false);
-  const [variants, setVariants] = useState([]);
+  // Persisted on composition state so they survive a reload (same reason as
+  // host.variants — nothing sadder than losing 4 composites to a refresh).
+  const variants = composition.variants || [];
+  const setVariants = (nextOrFn) => {
+    update(s => {
+      const current = s.composition.variants || [];
+      const next = typeof nextOrFn === 'function' ? nextOrFn(current) : nextOrFn;
+      return { ...s, composition: { ...s.composition, variants: next } };
+    });
+  };
   // Same retry-seed contract as Step 1 — first call uses defaults, retries
-  // get fresh randoms so "다시 만들기" yields actually-different output.
-  const [attempts, setAttempts] = useState(0);
+  // get fresh randoms. If we restored persisted variants, skip the "first
+  // attempt" path so users don't get the same 4 composites again.
+  const [attempts, setAttempts] = useState((composition.variants || []).length > 0 ? 1 : 0);
   const resultsRef = useRef(null);
   const directionRef = useRef(null);
 

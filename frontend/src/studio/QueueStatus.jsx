@@ -144,8 +144,12 @@ export default function QueueStatus({ onTaskClick }) {
     );
   };
 
+  // Moved from fixed bottom-left to inline — intended to sit inside the
+  // TopBar's right group. Container is position: relative so the dropdown
+  // panel can absolute-position off the button; caller controls outer
+  // layout / margins.
   return (
-    <div style={{ position: 'fixed', left: 16, bottom: 16, zIndex: 45 }}>
+    <div style={{ position: 'relative', display: 'inline-block', zIndex: 45 }}>
       <button
         onClick={() => setExpanded(e => !e)}
         style={{
@@ -180,7 +184,8 @@ export default function QueueStatus({ onTaskClick }) {
       {expanded && (
         <div style={{
           position: 'absolute',
-          left: 0, bottom: 38,
+          right: 0,
+          top: 'calc(100% + 6px)',
           width: 340,
           background: 'var(--bg-elev)',
           border: '1px solid var(--border)',
@@ -251,17 +256,37 @@ export default function QueueStatus({ onTaskClick }) {
           {queueData.recent?.length > 0 && (
             <div style={sectionStyle}>
               <div style={sectionHeaderStyle}>최근 완료</div>
-              {queueData.recent.slice(0, 5).map(t => (
-                <div key={t.task_id} style={itemStyle}>
-                  <div style={{ minWidth: 0, overflow: 'hidden' }}>
-                    <div style={{ fontWeight: 500 }} className="truncate">{typeLabel(t.type)}</div>
-                    <div style={{ fontSize: 10, color: 'var(--text-tertiary)' }} className="mono truncate">{t.label || t.task_id.slice(0, 8)}</div>
-                  </div>
-                  <div style={{ textAlign: 'right', fontSize: 10, color: t.status === 'error' ? 'var(--danger)' : 'var(--text-tertiary)' }}>
-                    {statusLabel(t.status)}
-                  </div>
-                </div>
-              ))}
+              {queueData.recent.slice(0, 5).map(t => {
+                // Completed tasks → clickable so users can see the finished
+                // video. Error/cancelled tasks have no result to show.
+                const canOpen = clickable && t.status === 'completed';
+                const Wrapper = canOpen ? 'button' : 'div';
+                const wrapperProps = canOpen ? {
+                  type: 'button',
+                  onClick: () => handleItemClick(t.task_id),
+                  style: {
+                    ...itemStyle,
+                    width: '100%',
+                    cursor: 'pointer',
+                    color: 'inherit',
+                    fontFamily: 'inherit',
+                    fontSize: 12,
+                    textAlign: 'left',
+                  },
+                  title: '결과 영상 보기',
+                } : { style: itemStyle };
+                return (
+                  <Wrapper key={t.task_id} {...wrapperProps}>
+                    <div style={{ minWidth: 0, overflow: 'hidden' }}>
+                      <div style={{ fontWeight: 500 }} className="truncate">{typeLabel(t.type)}</div>
+                      <div style={{ fontSize: 10, color: 'var(--text-tertiary)' }} className="mono truncate">{t.label || t.task_id.slice(0, 8)}</div>
+                    </div>
+                    <div style={{ textAlign: 'right', fontSize: 10, color: t.status === 'error' ? 'var(--danger)' : 'var(--text-tertiary)' }}>
+                      {statusLabel(t.status)}
+                    </div>
+                  </Wrapper>
+                );
+              })}
             </div>
           )}
 

@@ -88,4 +88,43 @@ describe('QueueStatus click-to-navigate', () => {
     expect(cancelBtns[0].disabled).toBe(true);
     expect(cancelBtns[0].getAttribute('title')).toMatch(/실행 중/);
   });
+
+  it('completed recent items are clickable and forward task_id', async () => {
+    fetchQueue.mockReset();
+    fetchQueue.mockResolvedValue({
+      running: [],
+      pending: [],
+      recent: [
+        { task_id: 'done-1', type: 'generate', label: 'finished clip', status: 'completed', completed_at: '2026-04-23T11:00:00' },
+      ],
+      total_running: 0,
+      total_pending: 0,
+    });
+    const onTaskClick = vi.fn();
+    await renderAndExpand({ onTaskClick });
+
+    const finishedRow = screen.getByText('finished clip').closest('button');
+    expect(finishedRow).toBeTruthy();
+    expect(finishedRow.getAttribute('title')).toMatch(/결과 영상/);
+    fireEvent.click(finishedRow);
+    expect(onTaskClick).toHaveBeenCalledWith('done-1');
+  });
+
+  it('errored recent items are NOT clickable (no result to show)', async () => {
+    fetchQueue.mockReset();
+    fetchQueue.mockResolvedValue({
+      running: [],
+      pending: [],
+      recent: [
+        { task_id: 'err-1', type: 'generate', label: 'failed clip', status: 'error', completed_at: '2026-04-23T11:01:00' },
+      ],
+      total_running: 0,
+      total_pending: 0,
+    });
+    await renderAndExpand({ onTaskClick: vi.fn() });
+
+    // Errored row renders but as <div>, not <button> — confirm no button wraps it
+    const label = screen.getByText('failed clip');
+    expect(label.closest('button')).toBeNull();
+  });
 });

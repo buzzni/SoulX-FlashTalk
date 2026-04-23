@@ -1,14 +1,12 @@
-// HostStudio main app — state, stepper, validation, tweak panel.
-// Ported from prototype App.jsx. Key divergences from prototype:
-//   1. postMessage density handshake (prototype App.jsx:40-61) REMOVED — that only
-//      existed so the design tool could edit density from a parent frame. Replaced
-//      with a localStorage-backed 'showhost_density' key.
-//   2. Mounts under div.studio-root (not #root), so it coexists with the existing
-//      VideoGenerator / ConversationGenerator app shell.
-//   3. Named export HostStudio instead of writing to window / direct ReactDOM.render.
+// HostStudio main app — state, stepper, validation.
+// Mounts under div.studio-root (not #root), so it coexists with the existing
+// VideoGenerator / ConversationGenerator app shell. Density "comfortable"
+// is now the only mode — the tweaks panel + settings button + localStorage
+// density key were removed (2026-04-23) because nobody used the "compact"
+// option and the panel cluttered the header.
 import { Fragment, useEffect, useMemo, useState } from 'react';
 import Icon from './Icon.jsx';
-import { Button, Field, Segmented } from './primitives.jsx';
+import { Button } from './primitives.jsx';
 import Step1Host from './Step1Host.jsx';
 import Step2Composite from './Step2Composite.jsx';
 import Step3Audio from './Step3Audio.jsx';
@@ -33,10 +31,13 @@ const STEPS = [
 // The prototype's sliders for those widgets were cargo-culted from mockups that
 // didn't consider the actual Gemini / ElevenLabs / FlashTalk model capabilities.
 const INITIAL_STATE = {
-  host: { mode: 'text', prompt: '', negativePrompt: '', builder: {}, generated: false, selectedSeed: null, _gradient: null, faceRef: null, outfitRef: null, outfitText: '', faceStrength: 0.7, outfitStrength: 0.5, temperature: 0.7 },
+  // `variants` holds the 4 generated candidates for each image stage so a
+  // reload doesn't wipe them. Entries have { seed, id, url, path } once
+  // complete; placeholder/error entries are scrubbed before persist.
+  host: { mode: 'text', prompt: '', negativePrompt: '', builder: {}, generated: false, selectedSeed: null, _gradient: null, faceRef: null, outfitRef: null, outfitText: '', faceStrength: 0.7, outfitStrength: 0.5, temperature: 0.7, variants: [] },
   products: [],
   background: { source: 'preset', preset: null, url: '', prompt: '', imageUrl: null, _gradient: null, _file: null },
-  composition: { direction: '', shot: 'medium', angle: 'eye', generated: false, selectedSeed: null, temperature: 0.7 },
+  composition: { direction: '', shot: 'medium', angle: 'eye', generated: false, selectedSeed: null, temperature: 0.7, variants: [] },
   voice: { source: 'tts', voiceId: null, voiceName: null, paragraphs: [''], script: '', stability: 0.5, style: 0.3, similarity: 0.75, speed: 1, generated: false, uploadedAudio: null, cloneSample: null },
   script: '',
   resolution: { key: '448p', label: '448p', width: 448, height: 768, size: '~8MB', speed: '빠름', default: true },
@@ -46,8 +47,6 @@ const INITIAL_STATE = {
   imageQuality: '1K',
 };
 
-const DENSITY_KEY = 'showhost_density';
-
 // Drop File handles and blob: URLs before localStorage. Server-side path
 // strings (host.selectedPath, products[].path, background.uploadPath) and
 // everything else stays so step navigation + validation still work after
@@ -56,7 +55,20 @@ function sanitizeForPersist(s) {
   // Strip any URL that can't survive a refresh (blob: dies with the tab,
   // data: is fine but can blow past localStorage quota with multi-MB uploads).
   const isTransientUrl = (u) => typeof u === 'string' && (u.startsWith('blob:') || u.startsWith('data:'));
-  const cleanHost = { ...s.host, faceRef: null, outfitRef: null, _file: undefined };
+  // Strip placeholder/error variants — those only make sense during the
+  // in-flight stream. Finished entries (with url + path) survive refresh.
+  const cleanVariants = (arr) => (arr || []).filter(v => v && !v.placeholder && !v.error && v.url);
+  const cleanHost = {
+    ...s.host,
+    faceRef: null,
+    outfitRef: null,
+    _file: undefined,
+    variants: cleanVariants(s.host?.variants),
+  };
+  const cleanComposition = {
+    ...s.composition,
+    variants: cleanVariants(s.composition?.variants),
+  };
   const cleanBg = { ...s.background, _file: null, imageUrl: isTransientUrl(s.background?.imageUrl) ? null : s.background?.imageUrl };
   const cleanProducts = (s.products || []).map(p => ({
     ...p,
@@ -71,6 +83,7 @@ function sanitizeForPersist(s) {
   return {
     ...s,
     host: cleanHost,
+    composition: cleanComposition,
     background: cleanBg,
     products: cleanProducts,
     voice: cleanVoice,
@@ -113,7 +126,6 @@ const HostStudio = () => {
   // When set, RenderDashboard attaches to an existing in-flight task instead
   // of dispatching a new /api/generate. Click-from-queue jumps here.
   const [attachToTaskId, setAttachToTaskId] = useState(null);
-  const [tweaksOpen, setTweaksOpen] = useState(false);
 
   // Open RenderDashboard for an already-running/pending task (clicked in
   // QueueStatus). Different entry from the wizard's "영상 만들기 시작" path
@@ -129,17 +141,6 @@ const HostStudio = () => {
     setAttachToTaskId(null);
   };
 
-  // Density — localStorage instead of prototype's postMessage handshake.
-  const [density, setDensity] = useState(() => {
-    try {
-      return localStorage.getItem(DENSITY_KEY) || 'comfortable';
-    } catch (e) {
-      return 'comfortable';
-    }
-  });
-  useEffect(() => {
-    try { localStorage.setItem(DENSITY_KEY, density); } catch (e) { /* ignore */ }
-  }, [density]);
 
   useEffect(() => {
     // Strip transient fields that can't survive a page refresh:
@@ -190,17 +191,23 @@ const HostStudio = () => {
 
   const shellProps = {
     className: 'studio-root',
-    'data-density': density,
+    // density was a knob in the prototype; only "comfortable" survived real
+    // use, so we hardcode it rather than carrying state for one value.
+    'data-density': 'comfortable',
   };
 
+  // QueueStatus is rendered inside the TopBar's right group now (via the
+  // `queueSlot` prop) so it lives in the header instead of floating at the
+  // bottom-left. Same instance across wizard and render views — passes the
+  // click-to-attach handler through so finished tasks can open too.
+  const queueSlot = <QueueStatus onTaskClick={openTaskInRenderView} />;
+
   // QueueProvider hoisted to the SINGLE outermost wrapper so its 4s polling
-  // interval survives wizard ↔ render view switches. Previously each branch
-  // had its own QueueProvider — the polling restarted every transition,
-  // which looked like "polling stopped" right after a click-to-attach.
+  // interval survives wizard ↔ render view switches.
   const renderShell = rendering ? (
     <div {...shellProps}>
       <div className="app-shell" data-screen-label="05 Render">
-        <TopBar onReset={reset} step={null} onTweaksToggle={() => setTweaksOpen(o => !o)} />
+        <TopBar onReset={reset} step={null} queueSlot={queueSlot} />
         <RenderDashboard
           // Re-mount when attachToTaskId changes so clicking a different
           // queue item from QueueStatus while already on the render view
@@ -212,18 +219,16 @@ const HostStudio = () => {
           onBack={exitRenderView}
           onReset={reset}
         />
-        <QueueStatus onTaskClick={openTaskInRenderView} />
-        {tweaksOpen && (
-          <TweaksPanel density={density} setDensity={setDensity} onClose={() => setTweaksOpen(false)} />
-        )}
       </div>
     </div>
   ) : (
     <div {...shellProps}>
       <div className="app-shell" data-screen-label={`0${step} ${STEPS[step - 1].name}`}>
-        <TopBar onReset={reset} step={step} valid={valid} onStepClick={setStep} onTweaksToggle={() => setTweaksOpen(o => !o)} />
-        <div className="main">
-          <div className="left-col">
+        <TopBar onReset={reset} step={step} valid={valid} onStepClick={setStep} queueSlot={queueSlot} />
+        {/* Step 1 hides the right PreviewPanel (candidate grid IS the preview);
+            collapse the main grid to a single column so the form gets full width. */}
+        <div className="main" style={step === 1 ? { gridTemplateColumns: '1fr' } : undefined}>
+          <div className="left-col" style={step === 1 ? { borderRight: 'none' } : undefined}>
             {step === 1 && <Step1Host state={state} update={update} />}
             {step === 2 && <Step2Composite state={state} update={update} />}
             {step === 3 && <Step3Audio state={state} update={update} />}
@@ -256,11 +261,6 @@ const HostStudio = () => {
 
           <PreviewPanel state={state} step={step} />
         </div>
-
-        <QueueStatus onTaskClick={openTaskInRenderView} />
-        {tweaksOpen && (
-          <TweaksPanel density={density} setDensity={setDensity} onClose={() => setTweaksOpen(false)} />
-        )}
       </div>
     </div>
   );
@@ -268,23 +268,7 @@ const HostStudio = () => {
   return <QueueProvider>{renderShell}</QueueProvider>;
 };
 
-const TweaksPanel = ({ density, setDensity, onClose }) => (
-  <div className="tweaks-panel">
-    <div className="tweaks-header">
-      <h4>화면 설정</h4>
-      <button className="btn btn-ghost btn-icon btn-sm" onClick={onClose} aria-label="닫기"><Icon name="close" size={12} /></button>
-    </div>
-    <Field label="간격" hint="화면이 답답하게 느껴지면 좁게로 바꿔보세요">
-      <Segmented
-        value={density}
-        onChange={v => setDensity(v)}
-        options={[{ value: 'comfortable', label: '넓게' }, { value: 'compact', label: '좁게' }]}
-      />
-    </Field>
-  </div>
-);
-
-const TopBar = ({ step, valid, onStepClick, onReset, onTweaksToggle }) => (
+const TopBar = ({ step, valid, onStepClick, onReset, queueSlot }) => (
   <header className="topbar">
     <div style={{ display: 'flex', alignItems: 'center', gap: 20 }}>
       <div className="brand">
@@ -317,7 +301,7 @@ const TopBar = ({ step, valid, onStepClick, onReset, onTweaksToggle }) => (
     </div>
     <div className="topbar-right">
       <span className="meta">자동 저장됨</span>
-      <Button size="sm" icon="settings" onClick={onTweaksToggle}>설정</Button>
+      {queueSlot}
       <Button size="sm" icon="refresh" onClick={onReset}>처음부터 다시</Button>
     </div>
   </header>

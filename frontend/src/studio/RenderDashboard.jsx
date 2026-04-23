@@ -118,16 +118,20 @@ const RenderDashboard = ({ state, attachToTaskId = null, onBack, onReset }) => {
         const progress = typeof raw === 'number'
           ? (raw <= 1 ? Math.round(raw * 100) : Math.round(raw))
           : null;
+        // The worker's update_task only emits {stage, progress, message} —
+        // there is no `status` field. Transition client job.status from
+        // stage instead ("complete" / "error" are the terminal stages).
+        const stage = evt.stage || null;
         setJob(j => ({
           ...j,
           progress: progress != null ? progress : j.progress,
-          stage: evt.stage || j.stage,
+          stage: stage || j.stage,
           message: evt.message || j.message,
-          status: evt.status === 'completed' ? 'done'
-            : evt.status === 'error' ? 'error'
+          status: stage === 'complete' ? 'done'
+            : stage === 'error' ? 'error'
             : j.status,
           videoUrl: evt.video_url || evt.path || j.videoUrl,
-          error: evt.status === 'error' ? (evt.message || '영상 생성 중 오류가 발생했어요') : j.error,
+          error: stage === 'error' ? (evt.message || '영상 생성 중 오류가 발생했어요') : j.error,
         }));
       });
       unsubRef.current = unsub;
