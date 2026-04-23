@@ -101,6 +101,23 @@ def update_task(task_id: str, stage: str, progress: float, message: str):
     })
 
 
+def _snap_resolution_to_16(target_h: int, target_w: int) -> tuple[int, int]:
+    """Snap a (height, width) pair down to the nearest multiple of 16.
+
+    FlashTalk's WAN backbone uses VAE stride 8 × patch_size (2, 2) in spatial
+    dims, so both axes must be divisible by 16 — otherwise the latent grid has
+    a non-integer half on one side and attention fails with
+      "The size of tensor a (N) must match the size of tensor b (M) at ..."
+    (see 2026-04-23 tasks 63aad9a2 / 3b11e977: 1920×1080 → 1080/16=67.5 → crash.)
+
+    Floor rather than round so we never upscale past the user's pick; worst
+    case the output loses ≤15px on an axis, which is imperceptible vs. hard
+    crash. Preset 1920×1080 → 1920×1072 here.
+    """
+    snap = lambda v: max(16, (v // 16) * 16)
+    return snap(target_h), snap(target_w)
+
+
 def _validate_image_size(raw: Optional[str]) -> str:
     """Gemini 3.1 flash-image-preview accepts 1K / 2K / 4K (verified live
     2026-04-23). Actual pixel counts at 9:16:
@@ -353,7 +370,7 @@ async def generate_video_task(
                 ref_paths = reference_image_paths or []
 
                 res_parts = resolution.split("x")
-                target_h, target_w = int(res_parts[0]), int(res_parts[1])
+                target_h, target_w = _snap_resolution_to_16(int(res_parts[0]), int(res_parts[1]))
 
                 from modules.image_compositor import compose_agents_together, release_models
 
@@ -383,9 +400,14 @@ async def generate_video_task(
             update_task(task_id, "loading", 0.1, "모델 로딩 중...")
             await loop.run_in_executor(None, lambda: _ensure_flashtalk_pipeline(cpu_offload))
 
-            # Parse resolution (e.g., "1280x720" -> height=1280, width=720)
+            # Parse resolution (e.g., "1280x720" -> height=1280, width=720).
+            # Snap to 16× — FlashTalk VAE(8) × patch(2) requires both axes be
+            # multiples of 16 or attention dies with a shape mismatch.
             res_parts = resolution.split("x")
-            target_h, target_w = int(res_parts[0]), int(res_parts[1])
+            raw_h, raw_w = int(res_parts[0]), int(res_parts[1])
+            target_h, target_w = _snap_resolution_to_16(raw_h, raw_w)
+            if (target_h, target_w) != (raw_h, raw_w):
+                logger.info(f"Task {task_id}: snapped resolution {raw_w}x{raw_h} -> {target_w}x{target_h} (16× alignment)")
             update_task(task_id, "preparing", 0.2, f"데이터 준비 중... ({target_w}x{target_h})")
 
             # Stage 2: Prepare base data with custom resolution
@@ -535,6 +557,12 @@ async def generate_video_task(
                     torch.cuda.empty_cache()
             except Exception:
                 pass
+
+            # Re-raise so the queue worker's outer handler records status="error"
+            # in task_queue.json. Without this, swallowed exceptions looked like
+            # clean completions and the frontend rendered a success UI with
+            # <video src="/api/videos/{id}"> that 404'd on the nonexistent file.
+            raise
 
 
 # ========================================
@@ -1203,9 +1231,10 @@ async def progress_stream(task_id: str):
     return StreamingResponse(_progress_event_generator(task_id), media_type="text/event-stream")
 
 
-@app.get("/api/videos/{task_id}")
+@app.api_route("/api/videos/{task_id}", methods=["GET", "HEAD"])
 async def get_video(task_id: str, download: bool = False):
-    """Serve generated video"""
+    """Serve generated video. HEAD returns headers only (used by the
+    RenderDashboard to pull Content-Length without downloading the mp4)."""
     # Check task state
     state = task_states.get(task_id)
     if state and state.get("output_path") and os.path.exists(state["output_path"]):
@@ -1269,9 +1298,10 @@ async def generate_conversation_task(
             def progress_cb(stage, progress, message):
                 update_task(task_id, stage, progress, message)
 
-            # Determine composite mode for 2-person split
+            # Determine composite mode for 2-person split. Snap resolution to
+            # 16× for the same FlashTalk VAE×patch alignment constraint.
             res_parts = resolution.split("x")
-            target_h, target_w = int(res_parts[0]), int(res_parts[1])
+            target_h, target_w = _snap_resolution_to_16(int(res_parts[0]), int(res_parts[1]))
             composite_mode = config.COMPOSITE_MODE if (layout == "split" and len(dialog.agents) == 2) else "hstack"
             use_multitalk = (composite_mode == "multitalk")
             use_alpha = (composite_mode == "alpha")
@@ -1473,6 +1503,10 @@ async def generate_conversation_task(
                     torch.cuda.empty_cache()
             except Exception:
                 pass
+
+            # Re-raise so the queue worker records status="error" (same reason
+            # as generate_video_task — prevents "completed + 404" ghost state).
+            raise
 
 
 @app.post("/api/generate-conversation")
