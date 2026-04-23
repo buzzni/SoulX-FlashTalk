@@ -79,15 +79,18 @@ const Confetti = () => {
 const RenderDashboard = ({ state, attachToTaskId = null, onBack, onReset }) => {
   // Two entry modes:
   //   - dispatch: attachToTaskId is null → POST /api/generate then subscribe
-  //   - attach:   attachToTaskId is a string → skip dispatch, subscribe directly
-  // Attach is what powers QueueStatus click-to-monitor.
+  //   - attach:   attachToTaskId is a string → read queue entry → branch on
+  //               status (pending/running → subscribe SSE; completed/error/
+  //               cancelled → render terminal state without SSE).
   const [job, setJob] = useState(() => ({
     id: attachToTaskId ? `job_${attachToTaskId.slice(0, 8)}` : 'job_' + Date.now(),
     taskId: attachToTaskId || null,
     status: attachToTaskId ? 'rendering' : 'dispatching',
     progress: 0,
-    stage: 'queued',
-    message: attachToTaskId ? '실행 중인 작업에 연결 중…' : '영상 만들기 요청 중…',
+    // Attach mode starts in a "loading" limbo stage until we can read the
+    // queue entry and branch. Dispatch mode starts properly "queued".
+    stage: attachToTaskId ? 'loading' : 'queued',
+    message: attachToTaskId ? '작업 정보 불러오는 중…' : '영상 만들기 요청 중…',
     videoUrl: null,
     error: null,
     startedAt: Date.now(),
@@ -101,51 +104,46 @@ const RenderDashboard = ({ state, attachToTaskId = null, onBack, onReset }) => {
   const queueEntry = useQueueEntry(job.taskId);
   const unsubRef = useRef(null);
   const dispatchedRef = useRef(false);
+  const attachInitRef = useRef(false);
 
-  // 1) On mount: either dispatch a new /api/generate or attach to an existing
-  // task_id, then subscribe to SSE progress in both cases.
+  // Lifted out of the useEffects so both branches share the same progress
+  // handler without re-capturing stale state.
+  const subscribeForUpdates = (taskId) => {
+    const unsub = subscribeProgress(taskId, (evt) => {
+      if (evt.error) {
+        setJob(j => ({ ...j, status: 'error', error: '진행 상황 구독이 끊겼어요' }));
+        return;
+      }
+      const raw = evt.progress;
+      const progress = typeof raw === 'number'
+        ? (raw <= 1 ? Math.round(raw * 100) : Math.round(raw))
+        : null;
+      // The worker's update_task only emits {stage, progress, message} —
+      // there is no `status` field. Transition client job.status from
+      // stage instead ("complete" / "error" are the terminal stages).
+      const stage = evt.stage || null;
+      setJob(j => ({
+        ...j,
+        progress: progress != null ? progress : j.progress,
+        stage: stage || j.stage,
+        message: evt.message || j.message,
+        status: stage === 'complete' ? 'done'
+          : stage === 'error' ? 'error'
+          : j.status,
+        videoUrl: evt.video_url || evt.path || j.videoUrl,
+        error: stage === 'error' ? (evt.message || '영상 생성 중 오류가 발생했어요') : j.error,
+      }));
+    });
+    unsubRef.current = unsub;
+  };
+
+  // 1a) Dispatch mode: POST /api/generate once on mount, then subscribe.
   useEffect(() => {
+    if (attachToTaskId) return;         // handled by the attach-mode effect below
     if (dispatchedRef.current) return;
     dispatchedRef.current = true;
 
-    const subscribeForUpdates = (taskId) => {
-      const unsub = subscribeProgress(taskId, (evt) => {
-        if (evt.error) {
-          setJob(j => ({ ...j, status: 'error', error: '진행 상황 구독이 끊겼어요' }));
-          return;
-        }
-        const raw = evt.progress;
-        const progress = typeof raw === 'number'
-          ? (raw <= 1 ? Math.round(raw * 100) : Math.round(raw))
-          : null;
-        // The worker's update_task only emits {stage, progress, message} —
-        // there is no `status` field. Transition client job.status from
-        // stage instead ("complete" / "error" are the terminal stages).
-        const stage = evt.stage || null;
-        setJob(j => ({
-          ...j,
-          progress: progress != null ? progress : j.progress,
-          stage: stage || j.stage,
-          message: evt.message || j.message,
-          status: stage === 'complete' ? 'done'
-            : stage === 'error' ? 'error'
-            : j.status,
-          videoUrl: evt.video_url || evt.path || j.videoUrl,
-          error: stage === 'error' ? (evt.message || '영상 생성 중 오류가 발생했어요') : j.error,
-        }));
-      });
-      unsubRef.current = unsub;
-    };
-
     (async () => {
-      // Attach mode: skip dispatch, hook straight into the existing task's
-      // progress stream. The task entry stays the source of truth for
-      // resolution/script/etc.; we only watch progress here.
-      if (attachToTaskId) {
-        subscribeForUpdates(attachToTaskId);
-        return;
-      }
-
       try {
         const audio_path = state.voice.generatedAudioPath
           || state.voice.uploadedAudio?.path
@@ -175,6 +173,63 @@ const RenderDashboard = ({ state, attachToTaskId = null, onBack, onReset }) => {
       if (unsubRef.current) unsubRef.current();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // 1b) Attach mode: wait for the queue snapshot to contain this task_id,
+  // then branch on queueEntry.status so we don't show "대기열 등록" for a
+  // task that was completed hours ago. Runs at most once per taskId.
+  useEffect(() => {
+    if (!attachToTaskId) return;
+    if (attachInitRef.current) return;
+    if (!queueEntry) return;  // snapshot hasn't caught up yet
+
+    attachInitRef.current = true;
+    const qstatus = queueEntry.status;
+
+    if (qstatus === 'completed') {
+      // Terminal: show the finished video immediately, don't replay SSE.
+      setJob(j => ({
+        ...j,
+        status: 'done',
+        stage: 'complete',
+        progress: 100,
+        message: '완성된 영상이에요',
+      }));
+      return;
+    }
+    if (qstatus === 'error') {
+      setJob(j => ({
+        ...j,
+        status: 'error',
+        stage: 'error',
+        error: queueEntry.error || '작업이 실패했어요',
+      }));
+      return;
+    }
+    if (qstatus === 'cancelled') {
+      setJob(j => ({
+        ...j,
+        status: 'error',
+        stage: 'error',
+        error: '취소된 작업이에요',
+      }));
+      return;
+    }
+    // pending / running → subscribe for live updates. Seed message/stage
+    // from the queue snapshot so we're not stuck on "작업 정보 불러오는 중".
+    setJob(j => ({
+      ...j,
+      status: 'rendering',
+      stage: qstatus === 'pending' ? 'queued' : (j.stage === 'loading' ? 'generating' : j.stage),
+      message: qstatus === 'pending' ? '대기 중이에요' : '영상 만드는 중이에요',
+    }));
+    subscribeForUpdates(attachToTaskId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [attachToTaskId, queueEntry]);
+
+  // Cleanup the SSE subscription on unmount (shared across both branches).
+  useEffect(() => () => {
+    if (unsubRef.current) unsubRef.current();
   }, []);
 
   // Pick the right "elapsed since" anchor:
