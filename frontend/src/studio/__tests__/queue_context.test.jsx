@@ -16,16 +16,21 @@ vi.mock('../api.js', () => ({
 }));
 
 import { fetchQueue } from '../api.js';
-import { QueueProvider, useQueue, useQueuePosition } from '../QueueContext.jsx';
+import { QueueProvider, useQueue, useQueueEntry, useQueuePosition } from '../QueueContext.jsx';
 
 afterEach(() => { cleanup(); vi.clearAllMocks(); vi.useRealTimers(); });
 
 beforeEach(() => {
   vi.useFakeTimers();
   fetchQueue.mockResolvedValue({
-    running: [{ task_id: 'r1' }],
-    pending: [{ task_id: 'p1' }, { task_id: 'p2' }],
-    recent: [],
+    running: [{ task_id: 'r1', started_at: '2026-04-23T10:00:00', created_at: '2026-04-23T09:59:00' }],
+    pending: [
+      { task_id: 'p1', created_at: '2026-04-23T10:01:00' },
+      { task_id: 'p2', created_at: '2026-04-23T10:02:00' },
+    ],
+    recent: [
+      { task_id: 'rec1', created_at: '2026-04-23T09:00:00', started_at: '2026-04-23T09:01:00', completed_at: '2026-04-23T09:05:00', status: 'completed' },
+    ],
     total_running: 1,
     total_pending: 2,
   });
@@ -91,6 +96,28 @@ describe('QueueContext', () => {
     expect(getByTestId('first-pending').textContent).toBe('1');
     expect(getByTestId('second-pending').textContent).toBe('2');
     expect(getByTestId('not-in-queue').textContent).toBe('null');
+  });
+
+  it('useQueueEntry finds tasks across running/pending/recent and returns null otherwise', async () => {
+    function EntryProbe({ taskId, label }) {
+      const e = useQueueEntry(taskId);
+      return <div data-testid={label}>{e == null ? 'null' : `${e.task_id}|${e.started_at || '-'}|${e.completed_at || '-'}`}</div>;
+    }
+
+    const { getByTestId } = render(
+      <QueueProvider>
+        <EntryProbe taskId="r1" label="running" />
+        <EntryProbe taskId="p1" label="pending" />
+        <EntryProbe taskId="rec1" label="recent" />
+        <EntryProbe taskId="ghost" label="missing" />
+      </QueueProvider>
+    );
+
+    await act(async () => { await Promise.resolve(); });
+    expect(getByTestId('running').textContent).toBe('r1|2026-04-23T10:00:00|-');
+    expect(getByTestId('pending').textContent).toBe('p1|-|-');
+    expect(getByTestId('recent').textContent).toBe('rec1|2026-04-23T09:01:00|2026-04-23T09:05:00');
+    expect(getByTestId('missing').textContent).toBe('null');
   });
 
   it('useQueue outside provider returns safe fallback (no crash)', () => {

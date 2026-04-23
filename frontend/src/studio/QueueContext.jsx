@@ -76,3 +76,18 @@ export function useQueuePosition(taskId) {
   if (pendingIdx >= 0) return pendingIdx + 1;
   return null;
 }
+
+// Returns the full queue entry { task_id, type, label, status, created_at,
+// started_at, completed_at, error, ... } for a given task_id, or null. Looks
+// across running, pending, and recent so RenderDashboard can show consistent
+// timestamps regardless of whether the task is still live or already done.
+export function useQueueEntry(taskId) {
+  const { data } = useQueue();
+  if (!taskId || !data) return null;
+  const lists = [data.running || [], data.pending || [], data.recent || []];
+  for (const list of lists) {
+    const found = list.find(t => t.task_id === taskId);
+    if (found) return found;
+  }
+  return null;
+}

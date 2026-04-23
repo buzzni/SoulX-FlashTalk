@@ -196,6 +196,11 @@ const HostStudio = () => {
           <div className="app-shell" data-screen-label="05 Render">
             <TopBar onReset={reset} step={null} onTweaksToggle={() => setTweaksOpen(o => !o)} />
             <RenderDashboard
+              // Re-mount when attachToTaskId changes so clicking a different
+              // queue item from QueueStatus while already on the render view
+              // tears down the old SSE subscription and starts a fresh one
+              // for the newly-clicked task. 'fresh' = dispatch-new path.
+              key={attachToTaskId || 'fresh'}
               state={state}
               attachToTaskId={attachToTaskId}
               onBack={exitRenderView}

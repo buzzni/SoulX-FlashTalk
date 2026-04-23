@@ -5,7 +5,7 @@ import { useState, useEffect, useRef } from 'react';
 import Icon from './Icon.jsx';
 import { Badge, Button } from './primitives.jsx';
 import { generateVideo, humanizeError, subscribeProgress } from './api.js';
-import { useQueuePosition } from './QueueContext.jsx';
+import { useQueueEntry, useQueuePosition } from './QueueContext.jsx';
 import RenderHistory from './RenderHistory.jsx';
 
 const STAGES = [
@@ -23,6 +23,17 @@ function formatElapsed(ms) {
   const m = Math.floor(total / 60);
   const s = total % 60;
   return `${m}:${s.toString().padStart(2, '0')}`;
+}
+
+function formatDateTime(iso) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  return d.toLocaleString('ko-KR', {
+    month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', second: '2-digit',
+    hour12: false,
+  });
 }
 
 const Confetti = () => {
@@ -81,10 +92,11 @@ const RenderDashboard = ({ state, attachToTaskId = null, onBack, onReset }) => {
   }));
   const [elapsed, setElapsed] = useState(0);
   const [copied, setCopied] = useState(false);
-  // Read queue position from the shared snapshot — no more 4s poll here.
-  // Once the job hits done/error we stop reading (taskId stays but the value
-  // stops mattering for the UI branches).
+  // Read queue position + entry from the shared snapshot — no more 4s poll
+  // here. Entry is the source of truth for created_at/started_at; falls back
+  // to local timestamps for the dispatch path before the queue catches up.
   const queuePos = useQueuePosition(job.taskId);
+  const queueEntry = useQueueEntry(job.taskId);
   const unsubRef = useRef(null);
   const dispatchedRef = useRef(false);
 
@@ -159,12 +171,39 @@ const RenderDashboard = ({ state, attachToTaskId = null, onBack, onReset }) => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // 2) Elapsed ticker (1s)
+  // Pick the right "elapsed since" anchor:
+  //   - queueEntry.started_at (running): authoritative — what the worker
+  //     actually started. Critical for attach mode (the task may have started
+  //     long before this component mounted).
+  //   - job.startedAt (dispatch path before queue snapshot lands): a few
+  //     seconds of inaccuracy is fine.
+  //   - queueEntry.completed_at - started_at (done): freezes the elapsed
+  //     value at the true generation time instead of growing forever.
+  const startedMs = queueEntry?.started_at ? new Date(queueEntry.started_at).getTime() : job.startedAt;
+  const completedMs = queueEntry?.completed_at ? new Date(queueEntry.completed_at).getTime() : null;
+  const isRunning = !!queueEntry?.started_at && !completedMs;
+
+  // 2) Elapsed ticker (1s) — only ticks while the task is actually running;
+  // pending tasks show "—" and finished tasks show the frozen elapsed value.
   useEffect(() => {
     if (job.status === 'done' || job.status === 'error') return;
-    const t = setInterval(() => setElapsed(Date.now() - job.startedAt), 1000);
+    if (!isRunning && !job.startedAt) return;
+    const tick = () => setElapsed(Date.now() - (Number.isFinite(startedMs) ? startedMs : job.startedAt));
+    tick();
+    const t = setInterval(tick, 1000);
     return () => clearInterval(t);
-  }, [job.status, job.startedAt]);
+  }, [job.status, job.startedAt, startedMs, isRunning]);
+
+  // Effective elapsed display value:
+  //   - completed → frozen at (completed_at - started_at)
+  //   - running   → live tick (state above)
+  //   - pending   → null (we render "대기 중" instead of a clock)
+  const displayElapsedMs = (() => {
+    if (completedMs && Number.isFinite(startedMs)) return Math.max(0, completedMs - startedMs);
+    if (isRunning) return elapsed;
+    if (queueEntry && !queueEntry.started_at) return null;  // pending
+    return elapsed;  // dispatch path before queue catches up
+  })();
 
   const currentStageIdx = Math.max(0, STAGE_ORDER.indexOf(job.stage));
 
@@ -260,8 +299,16 @@ const RenderDashboard = ({ state, attachToTaskId = null, onBack, onReset }) => {
                     </div>
                     <div className="progress"><div className="progress-bar" style={{ width: `${job.progress}%` }} /></div>
                   </div>
-                  <div style={{ display: 'flex', gap: 14, fontSize: 11, color: 'var(--text-tertiary)' }}>
-                    <span className="mono num">경과 {formatElapsed(elapsed)}</span>
+                  <div style={{ display: 'flex', gap: 14, fontSize: 11, color: 'var(--text-tertiary)', flexWrap: 'wrap' }}>
+                    <span className="mono num">
+                      {displayElapsedMs == null ? '경과 — (대기 중)' : `경과 ${formatElapsed(displayElapsedMs)}`}
+                    </span>
+                    {queueEntry?.created_at && (
+                      <span title="작업이 큐에 등록된 시각">생성 {formatDateTime(queueEntry.created_at)}</span>
+                    )}
+                    {queueEntry?.started_at && (
+                      <span title="실제 작업이 시작된 시각">시작 {formatDateTime(queueEntry.started_at)}</span>
+                    )}
                     {queuePos != null && queuePos > 0 && (
                       <span>대기열 {queuePos}번째</span>
                     )}
@@ -296,7 +343,10 @@ const RenderDashboard = ({ state, attachToTaskId = null, onBack, onReset }) => {
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12 }}>
                   <div style={{ padding: 12, background: 'var(--bg-sunken)', borderRadius: 6 }}>
                     <div className="card-eyebrow">걸린 시간</div>
-                    <div style={{ fontSize: 16, fontWeight: 600 }} className="num mono">{formatElapsed(elapsed)}</div>
+                    <div style={{ fontSize: 16, fontWeight: 600 }} className="num mono">{formatElapsed(displayElapsedMs ?? 0)}</div>
+                    {queueEntry?.created_at && (
+                      <div className="text-xs text-tertiary" style={{ marginTop: 2 }}>{formatDateTime(queueEntry.created_at)} 등록</div>
+                    )}
                   </div>
                   <div style={{ padding: 12, background: 'var(--bg-sunken)', borderRadius: 6 }}>
                     <div className="card-eyebrow">파일 용량</div>
