@@ -9,9 +9,11 @@ import { render, screen, fireEvent, cleanup, act } from '@testing-library/react'
 
 vi.mock('../api.js', () => ({
   fetchQueue: vi.fn(),
+  cancelQueuedTask: vi.fn(),
+  humanizeError: (e) => (e && e.message) || String(e),
 }));
 
-import { fetchQueue } from '../api.js';
+import { fetchQueue, cancelQueuedTask } from '../api.js';
 import QueueStatus from '../QueueStatus.jsx';
 import { QueueProvider } from '../QueueContext.jsx';
 
@@ -62,5 +64,28 @@ describe('QueueStatus click-to-navigate', () => {
     await renderAndExpand({});
     const btn = screen.getByText('running script').closest('button');
     expect(btn.disabled).toBe(true);
+  });
+
+  it('pending row exposes an enabled cancel button that calls cancelQueuedTask', async () => {
+    cancelQueuedTask.mockResolvedValue({ message: 'cancelled' });
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+
+    await renderAndExpand({});
+    const cancelBtns = screen.getAllByLabelText('작업 취소');
+    // Order: running first (disabled), then 2 pending (enabled)
+    expect(cancelBtns).toHaveLength(3);
+    const [runCancel, firstPendCancel] = cancelBtns;
+    expect(runCancel.disabled).toBe(true);            // running can't be cancelled
+    expect(firstPendCancel.disabled).toBe(false);     // pending CAN
+
+    await act(async () => { fireEvent.click(firstPendCancel); await Promise.resolve(); });
+    expect(cancelQueuedTask).toHaveBeenCalledWith('pend-1');
+  });
+
+  it('cancel button is disabled for running rows (no in-flight cancellation)', async () => {
+    await renderAndExpand({});
+    const cancelBtns = screen.getAllByLabelText('작업 취소');
+    expect(cancelBtns[0].disabled).toBe(true);
+    expect(cancelBtns[0].getAttribute('title')).toMatch(/실행 중/);
   });
 });

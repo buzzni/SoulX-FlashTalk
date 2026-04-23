@@ -4,6 +4,9 @@ import { Badge, Button, Card, Field, Slider, UploadTile } from './primitives.jsx
 import { cloneVoice, generateVoice, humanizeError, listVoices, uploadAudio } from './api.js';
 
 // Step 3 — 목소리 (비개발자 친화)
+// VOICE_PRESETS only kicks in when the live /api/elevenlabs/voices call
+// fails (e.g., backend down) — it's a "something is here" fallback so users
+// see SOMETHING. Loading uses a skeleton, not these.
 const VOICE_PRESETS = [
   { id: 'v_minji', name: '민지', lang: '한국어', desc: '밝고 경쾌한 느낌의 20대 여성', tag: '라이브커머스 추천' },
   { id: 'v_sora', name: '소라', lang: '한국어', desc: '차분하고 부드러운 30대 여성', tag: '뷰티·라이프' },
@@ -12,6 +15,8 @@ const VOICE_PRESETS = [
   { id: 'v_dohyun', name: '도현', lang: '한국어', desc: '안정적이고 신뢰감 있는 40대 남성', tag: '프리미엄' },
   { id: 'v_sena', name: '세나', lang: '한국어', desc: '따뜻하고 자연스러운 30대 여성', tag: '리빙·식품' },
 ];
+
+const VOICE_SKELETON_COUNT = 6;
 
 const BREATH_TAG = ' [breath] '; // 좌우 공백 포함 (9 chars)
 const SCRIPT_LIMIT = 5000;
@@ -48,6 +53,12 @@ const Step3Audio = ({ state, update }) => {
       .catch(err => { if (alive) setVoicesError(err.message || '목소리 목록을 불러오지 못했어요'); });
     return () => { alive = false; };
   }, []);
+  // Three states for the voice list:
+  //   - loading:      remoteVoices=null + voicesError=null → skeletons
+  //   - loaded:       remoteVoices is an array → real list (or PRESETS if API
+  //                                                returned an empty array)
+  //   - load failed:  voicesError set → fallback to PRESETS w/ hint message
+  const voicesLoading = remoteVoices === null && !voicesError;
   const voiceList = remoteVoices && remoteVoices.length > 0
     ? remoteVoices.map(v => ({
         id: v.voice_id,
@@ -215,30 +226,47 @@ const Step3Audio = ({ state, update }) => {
             {voice.source === 'tts' && (
               <Field
                 label="목소리 선택"
-                hint={voicesError ? '백엔드에 연결되면 실제 목소리 목록이 뜹니다' : '재생 버튼으로 미리 들어보세요'}
+                hint={
+                  voicesLoading ? '목소리 목록을 불러오는 중…'
+                    : voicesError ? '백엔드 연결 실패 — 예시 목록을 표시하고 있어요'
+                    : '재생 버튼으로 미리 들어보세요'
+                }
               >
                 <div className="voice-list">
-                  {voiceList.map(v => (
-                    <div
-                      key={v.id}
-                      className={`voice-item ${voice.voiceId === v.id ? 'on' : ''}`}
-                      onClick={() => setV({ voiceId: v.id, voiceName: v.name })}
-                    >
-                      <div className="voice-avatar">{v.name[0]}</div>
-                      <div className="voice-info">
-                        <div className="voice-name">{v.name}</div>
-                        <div className="voice-meta">{v.desc || v.lang || ''}</div>
+                  {voicesLoading ? (
+                    Array.from({ length: VOICE_SKELETON_COUNT }, (_, i) => (
+                      <div key={`sk-${i}`} className="voice-item voice-item--skeleton" aria-hidden>
+                        <div className="voice-avatar skeleton-shimmer" style={{ background: 'var(--bg-sunken)' }} />
+                        <div className="voice-info">
+                          <div className="skeleton-shimmer" style={{ height: 11, width: '40%', borderRadius: 4, marginBottom: 4 }} />
+                          <div className="skeleton-shimmer" style={{ height: 10, width: '70%', borderRadius: 4 }} />
+                        </div>
+                        <div className="skeleton-shimmer" style={{ width: 22, height: 22, borderRadius: 6, flexShrink: 0 }} />
                       </div>
-                      <button
-                        className="btn btn-ghost btn-icon btn-sm voice-play"
-                        title={v.preview_url ? '미리 듣기' : '미리듣기 샘플이 없어요'}
-                        disabled={!v.preview_url}
-                        onClick={e => { e.stopPropagation(); playVoicePreview(v); }}
+                    ))
+                  ) : (
+                    voiceList.map(v => (
+                      <div
+                        key={v.id}
+                        className={`voice-item ${voice.voiceId === v.id ? 'on' : ''}`}
+                        onClick={() => setV({ voiceId: v.id, voiceName: v.name })}
                       >
-                        <Icon name={playingPreview === v.id ? 'pause' : 'play'} size={10} />
-                      </button>
-                    </div>
-                  ))}
+                        <div className="voice-avatar">{v.name[0]}</div>
+                        <div className="voice-info">
+                          <div className="voice-name">{v.name}</div>
+                          <div className="voice-meta">{v.desc || v.lang || ''}</div>
+                        </div>
+                        <button
+                          className="btn btn-ghost btn-icon btn-sm voice-play"
+                          title={v.preview_url ? '미리 듣기' : '미리듣기 샘플이 없어요'}
+                          disabled={!v.preview_url}
+                          onClick={e => { e.stopPropagation(); playVoicePreview(v); }}
+                        >
+                          <Icon name={playingPreview === v.id ? 'pause' : 'play'} size={10} />
+                        </button>
+                      </div>
+                    ))
+                  )}
                 </div>
                 <audio
                   ref={previewAudioRef}

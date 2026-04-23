@@ -3,6 +3,7 @@
 // regardless of how many components display it (this + RenderDashboard).
 import { useState } from 'react';
 import Icon from './Icon.jsx';
+import { cancelQueuedTask, humanizeError } from './api.js';
 import { useQueue } from './QueueContext.jsx';
 
 const typeLabel = (type) => ({
@@ -24,8 +25,10 @@ const formatTime = (isoStr) => {
 };
 
 export default function QueueStatus({ onTaskClick }) {
-  const { data: queueData, error } = useQueue();
+  const { data: queueData, error, refresh } = useQueue();
   const [expanded, setExpanded] = useState(false);
+  const [cancellingIds, setCancellingIds] = useState(new Set());
+  const [cancelError, setCancelError] = useState(null);
 
   if (!queueData) return null;
 
@@ -39,6 +42,20 @@ export default function QueueStatus({ onTaskClick }) {
     }
   };
   const clickable = typeof onTaskClick === 'function';
+
+  const handleCancel = async (taskId, label) => {
+    if (!window.confirm(`이 작업을 취소할까요?\n${label || taskId}`)) return;
+    setCancellingIds(prev => { const next = new Set(prev); next.add(taskId); return next; });
+    setCancelError(null);
+    try {
+      await cancelQueuedTask(taskId);
+      refresh(); // pull fresh queue snapshot so the row drops out
+    } catch (err) {
+      setCancelError(humanizeError(err));
+    } finally {
+      setCancellingIds(prev => { const next = new Set(prev); next.delete(taskId); return next; });
+    }
+  };
 
   const totalActive = (queueData.total_running || 0) + (queueData.total_pending || 0);
 
@@ -55,6 +72,16 @@ export default function QueueStatus({ onTaskClick }) {
     fontSize: 12,
     marginBottom: 4,
   };
+  // Live row layout: clickable body + (optional) cancel button. Using a
+  // wrapping <div> instead of nesting buttons (HTML doesn't allow <button>
+  // inside <button>) — the body is a button, the cancel is a sibling.
+  const liveRowWrapperStyle = {
+    display: 'grid',
+    gridTemplateColumns: '1fr auto',
+    gap: 6,
+    alignItems: 'stretch',
+    marginBottom: 4,
+  };
   const liveItemButtonStyle = {
     ...itemStyle,
     width: '100%',
@@ -63,6 +90,49 @@ export default function QueueStatus({ onTaskClick }) {
     fontFamily: 'inherit',
     fontSize: 12,
     textAlign: 'left',
+    marginBottom: 0,
+  };
+  const cancelBtnStyle = (enabled) => ({
+    width: 28,
+    background: 'var(--bg-sunken)',
+    border: '1px solid var(--border)',
+    borderRadius: 'var(--r-sm)',
+    cursor: enabled ? 'pointer' : 'not-allowed',
+    color: enabled ? 'var(--text-secondary)' : 'var(--text-tertiary)',
+    display: 'grid',
+    placeItems: 'center',
+    padding: 0,
+  });
+
+  const renderLiveRow = (t, { canCancel, cancelTitle, prefix, rightSlot }) => {
+    const cancelling = cancellingIds.has(t.task_id);
+    return (
+      <div key={t.task_id} style={liveRowWrapperStyle}>
+        <button
+          type="button"
+          onClick={() => handleItemClick(t.task_id)}
+          disabled={!clickable}
+          style={liveItemButtonStyle}
+          title={clickable ? '클릭하면 진행 화면으로 이동해요' : undefined}
+        >
+          <div>
+            <div style={{ fontWeight: 500 }}>{prefix}{typeLabel(t.type)}</div>
+            <div style={{ fontSize: 10, color: 'var(--text-tertiary)' }} className="mono truncate">{t.label || t.task_id.slice(0, 8)}</div>
+          </div>
+          {rightSlot}
+        </button>
+        <button
+          type="button"
+          onClick={(e) => { e.stopPropagation(); if (canCancel && !cancelling) handleCancel(t.task_id, t.label); }}
+          disabled={!canCancel || cancelling}
+          aria-label="작업 취소"
+          title={cancelTitle}
+          style={cancelBtnStyle(canCancel && !cancelling)}
+        >
+          {cancelling ? <span className="spinner" style={{ width: 11, height: 11 }} /> : <Icon name="close" size={11} />}
+        </button>
+      </div>
+    );
   };
 
   return (
@@ -127,48 +197,40 @@ export default function QueueStatus({ onTaskClick }) {
           {queueData.running?.length > 0 && (
             <div style={sectionStyle}>
               <div style={sectionHeaderStyle}>실행 중</div>
-              {queueData.running.map(t => (
-                <button
-                  key={t.task_id}
-                  type="button"
-                  onClick={() => handleItemClick(t.task_id)}
-                  disabled={!clickable}
-                  style={liveItemButtonStyle}
-                  title={clickable ? '클릭하면 진행 화면으로 이동해요' : undefined}
-                >
-                  <div>
-                    <div style={{ fontWeight: 500 }}>{typeLabel(t.type)}</div>
-                    <div style={{ fontSize: 10, color: 'var(--text-tertiary)' }} className="mono truncate">{t.label || t.task_id.slice(0, 8)}</div>
-                  </div>
+              {queueData.running.map(t => renderLiveRow(t, {
+                // Backend can't kill a task mid-inference (worker is in a sync
+                // FlashTalk/Gemini call) — surface this honestly with a disabled X.
+                canCancel: false,
+                cancelTitle: '실행 중인 작업은 취소할 수 없어요',
+                prefix: '',
+                rightSlot: (
                   <div style={{ textAlign: 'right', fontSize: 10, color: 'var(--success)' }}>
                     {formatTime(t.started_at)}
                   </div>
-                </button>
-              ))}
+                ),
+              }))}
             </div>
           )}
 
           {queueData.pending?.length > 0 && (
             <div style={sectionStyle}>
               <div style={sectionHeaderStyle}>대기 중 ({queueData.pending.length})</div>
-              {queueData.pending.map((t, idx) => (
-                <button
-                  key={t.task_id}
-                  type="button"
-                  onClick={() => handleItemClick(t.task_id)}
-                  disabled={!clickable}
-                  style={liveItemButtonStyle}
-                  title={clickable ? '클릭하면 진행 화면으로 이동해요' : undefined}
-                >
-                  <div>
-                    <div style={{ fontWeight: 500 }}>#{idx + 1} · {typeLabel(t.type)}</div>
-                    <div style={{ fontSize: 10, color: 'var(--text-tertiary)' }} className="mono truncate">{t.label || t.task_id.slice(0, 8)}</div>
-                  </div>
+              {queueData.pending.map((t, idx) => renderLiveRow(t, {
+                canCancel: true,
+                cancelTitle: '대기 중인 작업 취소',
+                prefix: `#${idx + 1} · `,
+                rightSlot: (
                   <div style={{ textAlign: 'right', fontSize: 10, color: 'var(--text-tertiary)' }}>
                     {formatTime(t.created_at)}
                   </div>
-                </button>
-              ))}
+                ),
+              }))}
+            </div>
+          )}
+
+          {cancelError && (
+            <div style={{ marginTop: 8, padding: '6px 8px', background: 'var(--danger-soft)', color: 'var(--danger)', borderRadius: 'var(--r-sm)', fontSize: 11 }}>
+              {cancelError}
             </div>
           )}
 

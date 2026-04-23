@@ -458,6 +458,14 @@ export async function fetchHistory(limit = 10) {
   return jsonOrThrow(res, '히스토리 조회');
 }
 
+// Cancel a pending queued task. Backend (DELETE /api/queue/{id}) only allows
+// cancelling pending tasks — running ones can't be killed mid-inference
+// without leaking GPU memory. Returns 404 for running/finished.
+export async function cancelQueuedTask(taskId) {
+  const res = await fetch(`${API_BASE}/api/queue/${taskId}`, { method: 'DELETE' });
+  return jsonOrThrow(res, '작업 취소');
+}
+
 // SSE subscription. Returns unsubscribe fn.
 export function subscribeProgress(taskId, onUpdate) {
   const es = new EventSource(`${API_BASE}/api/progress/${taskId}`);

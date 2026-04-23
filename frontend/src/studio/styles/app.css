@@ -458,8 +458,13 @@
 .res-tile .res-meta { font-size: 10px; color: var(--text-tertiary); margin-top: 10px; display: flex; justify-content: space-between; }
 .res-tile.on .res-label { color: var(--accent-text); }
 
-/* Voice card list */
-.voice-list { display: flex; flex-direction: column; gap: 4px; }
+/* Voice card list — capped at ~6 items tall, scroll inside the field */
+.voice-list {
+  display: flex; flex-direction: column; gap: 4px;
+  max-height: 280px;
+  overflow-y: auto;
+  padding-right: 4px; /* room for scrollbar so it doesn't overlap content */
+}
 .voice-item {
   display: flex; align-items: center; gap: 8px; padding: 6px 8px;
   border: 1px solid var(--border); border-radius: var(--r-sm);
@@ -467,6 +472,8 @@
 }
 .voice-item:hover { border-color: var(--border-strong); }
 .voice-item.on { border-color: var(--accent); background: var(--accent-soft); }
+.voice-item--skeleton { cursor: default; pointer-events: none; }
+.voice-item--skeleton:hover { border-color: var(--border); }
 .voice-avatar {
   width: 26px; height: 26px; border-radius: 99px; flex-shrink: 0;
   background: linear-gradient(135deg, oklch(0.75 0.1 30), oklch(0.55 0.15 320));
