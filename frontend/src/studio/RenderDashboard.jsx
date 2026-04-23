@@ -301,7 +301,9 @@ const RenderDashboard = ({ state, attachToTaskId = null, onBack, onReset }) => {
                     </div>
                     <div className="progress"><div className="progress-bar" style={{ width: `${job.progress}%` }} /></div>
                   </div>
-                  <div style={{ display: 'flex', gap: 14, fontSize: 11, color: 'var(--text-tertiary)', flexWrap: 'wrap' }}>
+                  {/* Timestamps stack vertically — labels are long ("작업생성날짜") and
+                       inline they wrapped messily on the narrow card column. */}
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 11, color: 'var(--text-tertiary)' }}>
                     <span className="mono num">
                       {displayElapsedMs == null ? '경과 — (대기 중)' : `경과 ${formatElapsed(displayElapsedMs)}`}
                     </span>
@@ -315,7 +317,10 @@ const RenderDashboard = ({ state, attachToTaskId = null, onBack, onReset }) => {
                       <span>대기열 {queuePos}번째</span>
                     )}
                   </div>
-                  <div style={{ display: 'grid', gridTemplateColumns: `repeat(${STAGES.length}, 1fr)`, gap: 6 }}>
+                  {/* Stage progress also vertical so the per-stage label can read
+                       in full ("쇼호스트 움직임 만드는 중") instead of being squashed
+                       into a 5-column grid. */}
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                     {STAGES.map((s, i) => {
                       const done = i < currentStageIdx;
                       const active = i === currentStageIdx;
@@ -328,11 +333,11 @@ const RenderDashboard = ({ state, attachToTaskId = null, onBack, onReset }) => {
                           fontSize: 11,
                           display: 'flex',
                           alignItems: 'center',
-                          gap: 6,
+                          gap: 8,
                         }}>
-                          {done ? <Icon name="check" size={11} style={{ color: 'var(--success)' }} />
-                            : active ? <span className="spinner" style={{ width: 10, height: 10 }} />
-                            : <div style={{ width: 11, height: 11, borderRadius: 99, border: '1.5px solid var(--border-strong)' }} />}
+                          {done ? <Icon name="check" size={12} style={{ color: 'var(--success)' }} />
+                            : active ? <span className="spinner" style={{ width: 11, height: 11 }} />
+                            : <div style={{ width: 12, height: 12, borderRadius: 99, border: '1.5px solid var(--border-strong)' }} />}
                           <span className={done ? '' : (active ? '' : 'text-tertiary')}>{s.label}</span>
                         </div>
                       );
