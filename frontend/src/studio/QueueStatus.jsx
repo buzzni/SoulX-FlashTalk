@@ -61,9 +61,14 @@ export default function QueueStatus({ onTaskClick }) {
 
   const sectionStyle = { marginTop: 10 };
   const sectionHeaderStyle = { fontSize: 11, fontWeight: 600, color: 'var(--text-tertiary)', textTransform: 'uppercase', letterSpacing: 0.04, marginBottom: 6 };
+  // Note on min-width:0 sprinkled below — CSS Grid's `1fr` track has an
+  // implicit min-width:auto that expands to the longest descendant. Long task
+  // labels (queue_label can hit 80 chars) would push each row past the 340px
+  // panel width and produce horizontal scroll. min-width:0 + overflow:hidden
+  // on grid items lets `truncate` (text-overflow: ellipsis) actually clip.
   const itemStyle = {
     display: 'grid',
-    gridTemplateColumns: '1fr auto',
+    gridTemplateColumns: 'minmax(0, 1fr) auto',
     gap: 8,
     padding: '8px 10px',
     background: 'var(--bg-sunken)',
@@ -71,16 +76,19 @@ export default function QueueStatus({ onTaskClick }) {
     borderRadius: 'var(--r-sm)',
     fontSize: 12,
     marginBottom: 4,
+    minWidth: 0,
+    overflow: 'hidden',
   };
   // Live row layout: clickable body + (optional) cancel button. Using a
   // wrapping <div> instead of nesting buttons (HTML doesn't allow <button>
   // inside <button>) — the body is a button, the cancel is a sibling.
   const liveRowWrapperStyle = {
     display: 'grid',
-    gridTemplateColumns: '1fr auto',
+    gridTemplateColumns: 'minmax(0, 1fr) auto',
     gap: 6,
     alignItems: 'stretch',
     marginBottom: 4,
+    minWidth: 0,
   };
   const liveItemButtonStyle = {
     ...itemStyle,
@@ -91,6 +99,7 @@ export default function QueueStatus({ onTaskClick }) {
     fontSize: 12,
     textAlign: 'left',
     marginBottom: 0,
+    minWidth: 0,
   };
   const cancelBtnStyle = (enabled) => ({
     width: 28,
@@ -115,8 +124,8 @@ export default function QueueStatus({ onTaskClick }) {
           style={liveItemButtonStyle}
           title={clickable ? '클릭하면 진행 화면으로 이동해요' : undefined}
         >
-          <div>
-            <div style={{ fontWeight: 500 }}>{prefix}{typeLabel(t.type)}</div>
+          <div style={{ minWidth: 0, overflow: 'hidden' }}>
+            <div style={{ fontWeight: 500 }} className="truncate">{prefix}{typeLabel(t.type)}</div>
             <div style={{ fontSize: 10, color: 'var(--text-tertiary)' }} className="mono truncate">{t.label || t.task_id.slice(0, 8)}</div>
           </div>
           {rightSlot}
@@ -180,6 +189,11 @@ export default function QueueStatus({ onTaskClick }) {
           padding: 14,
           maxHeight: '70vh',
           overflowY: 'auto',
+          // Belt-and-braces against horizontal scroll: even with the
+          // min-width:0 fixes below, ensure long task labels can't push the
+          // panel wider than 340px.
+          overflowX: 'hidden',
+          boxSizing: 'border-box',
         }}>
           <div className="flex justify-between items-center" style={{ marginBottom: 8 }}>
             <strong style={{ fontSize: 13 }}>작업 큐</strong>
@@ -239,8 +253,8 @@ export default function QueueStatus({ onTaskClick }) {
               <div style={sectionHeaderStyle}>최근 완료</div>
               {queueData.recent.slice(0, 5).map(t => (
                 <div key={t.task_id} style={itemStyle}>
-                  <div>
-                    <div style={{ fontWeight: 500 }}>{typeLabel(t.type)}</div>
+                  <div style={{ minWidth: 0, overflow: 'hidden' }}>
+                    <div style={{ fontWeight: 500 }} className="truncate">{typeLabel(t.type)}</div>
                     <div style={{ fontSize: 10, color: 'var(--text-tertiary)' }} className="mono truncate">{t.label || t.task_id.slice(0, 8)}</div>
                   </div>
                   <div style={{ textAlign: 'right', fontSize: 10, color: t.status === 'error' ? 'var(--danger)' : 'var(--text-tertiary)' }}>
