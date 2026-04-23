@@ -106,7 +106,6 @@ def _build_gemini_image_config(
     target_size: Tuple[int, int],
     system_instruction: Optional[str] = None,
     thinking_minimal: bool = True,
-    person_generation: Optional[str] = "ALLOW_ADULT",
     seed: Optional[int] = None,
     media_resolution: Optional[str] = None,
     temperature: Optional[float] = None,
@@ -117,8 +116,6 @@ def _build_gemini_image_config(
         target_size: (width, height) — derives aspect_ratio.
         system_instruction: per-call system prompt (anti-injection + behavioral).
         thinking_minimal: always True for Flash; kept as param for Pro swap.
-        person_generation: ALLOW_ADULT (host/composite) | ALLOW_NONE (bg-only) |
-            ALLOW_ALL (unused). Default ALLOW_ADULT covers the 95% case.
         seed: Gemini sampling seed — same seed + same inputs = same output.
             None → stochastic. Pass the per-candidate seed here for
             reproducibility across re-runs.
@@ -128,6 +125,9 @@ def _build_gemini_image_config(
         temperature: sampling variance. None → model default (~1.0).
             Lower = more predictable, higher = more variation. UI exposes
             this as 0.4 / 0.7 / 1.0 Segmented.
+
+    Note: person_generation is intentionally absent — the Gemini API backend
+    rejects it (Vertex-only). Safety is handled via safety_settings instead.
     """
     from google.genai import types
 
@@ -144,13 +144,9 @@ def _build_gemini_image_config(
             types.HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT,
         )
     ]
-    image_config_kwargs = dict(aspect_ratio=aspect, image_size="1K")
-    if person_generation:
-        image_config_kwargs["person_generation"] = person_generation
-
     kwargs = dict(
         response_modalities=["Text", "Image"],
-        image_config=types.ImageConfig(**image_config_kwargs),
+        image_config=types.ImageConfig(aspect_ratio=aspect, image_size="1K"),
         safety_settings=safety,
     )
     if thinking_minimal:
@@ -512,7 +508,6 @@ def _gemini_generate_scene(
                 config=_build_gemini_image_config(
                     target_size,
                     system_instruction,
-                    person_generation="ALLOW_ADULT",
                     seed=seed,
                     media_resolution="MEDIA_RESOLUTION_MEDIUM",
                     temperature=temperature,
@@ -773,7 +768,6 @@ def generate_background_only(
                 config=_build_gemini_image_config(
                     target_size,
                     system_instruction,
-                    person_generation="ALLOW_NONE",
                     media_resolution="MEDIA_RESOLUTION_LOW",
                 ),
             )

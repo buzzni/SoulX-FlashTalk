@@ -20,8 +20,8 @@ def test_defaults_include_safety_and_aspect_ratio(build_config):
     # portrait 9:16 derived from target_size
     assert cfg.image_config.aspect_ratio == "9:16"
     assert cfg.image_config.image_size == "1K"
-    # default person_generation is ALLOW_ADULT
-    assert cfg.image_config.person_generation == "ALLOW_ADULT"
+    # person_generation is intentionally absent — Gemini API rejects it (Vertex-only)
+    assert cfg.image_config.person_generation is None
     # safety settings set on 4 categories
     assert len(cfg.safety_settings) == 4
     # response_modalities forces image return
@@ -44,11 +44,6 @@ def test_temperature_is_forwarded_as_float(build_config):
     assert cfg.temperature == pytest.approx(0.7)
 
 
-def test_person_generation_allow_none_for_bg_only(build_config):
-    cfg = build_config((1280, 720), person_generation="ALLOW_NONE")
-    assert cfg.image_config.person_generation == "ALLOW_NONE"
-
-
 def test_media_resolution_is_forwarded(build_config):
     cfg = build_config((720, 1280), media_resolution="MEDIA_RESOLUTION_HIGH")
     # SDK normalizes string to enum; accept both shapes
@@ -58,6 +53,25 @@ def test_media_resolution_is_forwarded(build_config):
 def test_system_instruction_passthrough(build_config):
     cfg = build_config((720, 1280), system_instruction="you are a scene generator")
     assert cfg.system_instruction is not None
+
+
+def test_config_serializes_for_mldev_backend(build_config):
+    """Regression: the Gemini API (mldev) backend rejects person_generation,
+    prominent_people, etc. Make sure the config we build can actually round-
+    trip through the SDK's _GenerateContentConfig_to_mldev serializer without
+    raising — otherwise every generate call dies before leaving the process.
+    """
+    from google.genai.models import _GenerateContentConfig_to_mldev
+
+    cfg = build_config(
+        (720, 1280),
+        system_instruction="test",
+        seed=42,
+        media_resolution="MEDIA_RESOLUTION_MEDIUM",
+        temperature=0.7,
+    )
+    # Should NOT raise — if it does, the live API call would also fail.
+    _GenerateContentConfig_to_mldev(api_client=None, from_object=cfg, parent_object={})
 
 
 def test_aspect_ratio_derives_from_target_size(build_config):

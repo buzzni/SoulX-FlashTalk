@@ -357,7 +357,6 @@ def _sync_generate(
             config=_build_gemini_image_config(
                 target_size,
                 sys_instruction,
-                person_generation="ALLOW_ADULT",
                 seed=seed,
                 media_resolution=media_res,
                 temperature=temperature,
