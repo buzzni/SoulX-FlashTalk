@@ -202,6 +202,14 @@ export async function listServerFiles(kind = 'image') {
  * the systemSuffix is currently folded into extraPrompt since the
  * backend doesn't accept a separate system_instruction override yet.
  */
+// Generate 4 fresh random seeds for "다시 만들기" — the backend default
+// (FIXED_DEFAULT_SEEDS) gives the same 4 outputs every time for the same
+// input, which makes "retry" feel broken. Range cap at 2^31-1 so they
+// fit comfortably in any int32 path.
+export function makeRandomSeeds(n = 4) {
+  return Array.from({ length: n }, () => Math.floor(Math.random() * 2_147_483_647));
+}
+
 export function buildHostGenerateBody(host) {
   const mode = host.mode === 'text' ? 'text'
     : host.faceRef && host.outfitRef ? 'face-outfit'
@@ -241,6 +249,12 @@ export function buildHostGenerateBody(host) {
   // labels so Gemini knows which is the outfit reference.
   if (host.outfitText && host.outfitText.trim()) {
     body.append('outfitText', host.outfitText.trim());
+  }
+  // Caller passes `seeds` (array of ints) to override the backend's fixed
+  // default set — used by "다시 만들기" so retry produces NEW variants
+  // rather than re-running the same 4 deterministic seeds.
+  if (Array.isArray(host._seeds) && host._seeds.length > 0) {
+    body.append('seeds', JSON.stringify(host._seeds));
   }
   body.append('n', '4');
   // Backend accepts temperature ∈ [0.0, 2.0]. UI exposes three preset values
@@ -338,6 +352,10 @@ export function buildCompositeBody({ host, products, background, composition }) 
   body.append('n', '4');
   if (typeof composition?.temperature === 'number') {
     body.append('temperature', String(composition.temperature));
+  }
+  // Same retry-seed contract as the host endpoint — see buildHostGenerateBody.
+  if (Array.isArray(composition?._seeds) && composition._seeds.length > 0) {
+    body.append('seeds', JSON.stringify(composition._seeds));
   }
   return body;
 }

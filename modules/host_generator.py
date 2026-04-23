@@ -24,6 +24,27 @@ Mode = Literal["text", "face-outfit", "style-ref"]
 # Concurrent Gemini call cap (Phase 0 R9: prevents singleton tear-down races)
 _gemini_semaphore = asyncio.Semaphore(8)
 
+# Seed policy
+# -----------
+# FIXED_DEFAULT_SEEDS gives a deterministic first-time experience: two users
+# with identical prompts see the same 4 candidates. This trades "every run
+# feels fresh" for "shareability + A/B comparability" on first click.
+#
+# On "다시 만들기" the frontend bypasses these defaults by sending its own
+# random seeds — users expect retry to produce NEW variants, not the same
+# 4 again. _resolve_seeds handles the override.
+FIXED_DEFAULT_SEEDS = [10, 42, 77, 128, 256, 512, 1024, 2048]
+
+
+def _resolve_seeds(provided: Optional[List[int]], n: int) -> List[int]:
+    """Caller seeds win; otherwise fall back to FIXED_DEFAULT_SEEDS."""
+    if provided:
+        coerced = [int(s) for s in provided[:n]]
+        if len(coerced) < n:
+            coerced += FIXED_DEFAULT_SEEDS[len(coerced):n]
+        return coerced
+    return FIXED_DEFAULT_SEEDS[:n]
+
 
 async def generate_host_candidates(
     mode: Mode,
@@ -40,6 +61,10 @@ async def generate_host_candidates(
     # outfit reference image. Lets users say "베이지 니트, 청바지" without
     # having to find an outfit photo.
     outfit_text: Optional[str] = None,
+    # Optional explicit seeds — caller passes these on "다시 만들기" to force
+    # fresh outputs instead of the deterministic default set. None falls back
+    # to FIXED_DEFAULT_SEEDS (reproducible first-time experience).
+    seeds: Optional[List[int]] = None,
     n: int = 4,
     timeout_per_call: float = 45.0,
     min_success: int = 2,
@@ -79,8 +104,12 @@ async def generate_host_candidates(
     out_dir = output_dir or config.HOSTS_DIR
     os.makedirs(out_dir, exist_ok=True)
 
-    # Fixed seeds for reproducibility parity with prototype (10, 42, 77, 128...)
-    seeds = [10, 42, 77, 128, 256, 512, 1024, 2048][:n]
+    # Seed policy: first generate uses FIXED_DEFAULT_SEEDS for reproducibility
+    # (so two users with the same prompt see the same 4 candidates on first
+    # try). On "다시 만들기" the frontend passes fresh random seeds so the
+    # user actually gets different output — see seed_policy note in
+    # modules/host_generator.py at FIXED_DEFAULT_SEEDS.
+    seeds = _resolve_seeds(seeds, n)
 
     tasks = [
         _generate_one(
@@ -147,6 +176,7 @@ async def stream_host_candidates(
     face_strength: float = 0.7,
     outfit_strength: float = 0.7,
     outfit_text: Optional[str] = None,
+    seeds: Optional[List[int]] = None,
     n: int = 4,
     timeout_per_call: float = 45.0,
     min_success: int = 2,
@@ -167,7 +197,7 @@ async def stream_host_candidates(
 
     out_dir = output_dir or config.HOSTS_DIR
     os.makedirs(out_dir, exist_ok=True)
-    seeds = [10, 42, 77, 128, 256, 512, 1024, 2048][:n]
+    seeds = _resolve_seeds(seeds, n)
 
     async def _run_tagged(seed: int):
         try:

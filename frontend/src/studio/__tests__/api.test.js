@@ -17,6 +17,7 @@ import {
   buildCompositeBody,
   uploadHostImage,
   listServerFiles,
+  makeRandomSeeds,
 } from '../api.js';
 
 describe('api.js — builder ko→en suffix', () => {
@@ -361,5 +362,55 @@ describe('api.js — listServerFiles (DLP/VPN bypass)', () => {
       json: async () => ({ detail: 'boom' }),
     });
     await expect(listServerFiles('image')).rejects.toThrow(/boom/);
+  });
+});
+
+
+describe('api.js — seed override on retry', () => {
+  it('makeRandomSeeds returns N positive ints', () => {
+    const out = makeRandomSeeds(4);
+    expect(out).toHaveLength(4);
+    out.forEach(s => {
+      expect(Number.isInteger(s)).toBe(true);
+      expect(s).toBeGreaterThanOrEqual(0);
+      expect(s).toBeLessThan(2_147_483_647);
+    });
+  });
+
+  it('makeRandomSeeds produces different sets on consecutive calls', () => {
+    // Vanishingly unlikely to collide on all 4 seeds with 31-bit range.
+    const a = makeRandomSeeds(4);
+    const b = makeRandomSeeds(4);
+    expect(JSON.stringify(a)).not.toBe(JSON.stringify(b));
+  });
+
+  it('buildHostGenerateBody omits seeds when host._seeds is absent (first attempt)', () => {
+    const body = buildHostGenerateBody({ mode: 'text', prompt: 'x' });
+    expect(body.get('seeds')).toBeNull();
+  });
+
+  it('buildHostGenerateBody serializes host._seeds as JSON string when present', () => {
+    const body = buildHostGenerateBody({ mode: 'text', prompt: 'x', _seeds: [11, 22, 33, 44] });
+    expect(body.get('seeds')).toBe('[11,22,33,44]');
+  });
+
+  it('buildCompositeBody omits seeds without composition._seeds', () => {
+    const body = buildCompositeBody({
+      host: { selectedPath: '/x/host.png' },
+      products: [],
+      background: { source: 'prompt', prompt: 'studio' },
+      composition: { direction: 'pose' },
+    });
+    expect(body.get('seeds')).toBeNull();
+  });
+
+  it('buildCompositeBody serializes composition._seeds when present', () => {
+    const body = buildCompositeBody({
+      host: { selectedPath: '/x/host.png' },
+      products: [],
+      background: { source: 'prompt', prompt: 'studio' },
+      composition: { direction: 'pose', _seeds: [5, 6, 7, 8] },
+    });
+    expect(body.get('seeds')).toBe('[5,6,7,8]');
   });
 });

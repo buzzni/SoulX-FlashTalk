@@ -3,6 +3,7 @@ import Icon from './Icon.jsx';
 import { Badge, Button, Card, Chip, Field, Segmented, UploadTile } from './primitives.jsx';
 import {
   humanizeError,
+  makeRandomSeeds,
   streamComposite,
   uploadBackgroundImage,
   uploadReferenceImage,
@@ -50,6 +51,9 @@ const Step2Composite = ({ state, update }) => {
   const [dragIdx, setDragIdx] = useState(null);
   const [generating, setGenerating] = useState(false);
   const [variants, setVariants] = useState([]);
+  // Same retry-seed contract as Step 1 — first call uses defaults, retries
+  // get fresh randoms so "다시 만들기" yields actually-different output.
+  const [attempts, setAttempts] = useState(0);
   const resultsRef = useRef(null);
   const directionRef = useRef(null);
 
@@ -146,8 +150,10 @@ const Step2Composite = ({ state, update }) => {
   const generateComposite = async () => {
     setGenerating(true);
     setErrorMsg(null);
-    // Fixed slot order matches backend seed order — tiles fill left→right.
-    const SEEDS = [10, 42, 77, 128];
+    // First call: deterministic seeds for shareable starting set. Retries:
+    // fresh randoms so the user actually sees new compositions instead of
+    // the same 4 every time they hit "다시 만들기".
+    const SEEDS = attempts === 0 ? [10, 42, 77, 128] : makeRandomSeeds(4);
     setVariants(SEEDS.map(s => ({ seed: s, id: `c${s}`, placeholder: true })));
     try {
       const uploadedProducts = await Promise.all((products || []).map(async (p) => {
@@ -176,11 +182,15 @@ const Step2Composite = ({ state, update }) => {
       let successCount = 0;
       let errorCount = 0;
       const errs = [];
+      // Pass _seeds only on retry — first call uses backend default set.
+      const composeReq = attempts > 0
+        ? { ...composition, _seeds: SEEDS }
+        : composition;
       for await (const evt of streamComposite({
         host: { selectedPath: state.host?.selectedPath },
         products: uploadedProducts.filter(p => p.path),
         background: bgWithPath,
-        composition,
+        composition: composeReq,
         rembg: composition.rembg !== false,
       })) {
         if (evt.type === 'init') {
@@ -219,6 +229,7 @@ const Step2Composite = ({ state, update }) => {
       setErrorMsg(humanizeError(err));
     } finally {
       setGenerating(false);
+      setAttempts(a => a + 1);
     }
   };
 

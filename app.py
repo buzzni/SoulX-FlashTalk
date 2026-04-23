@@ -101,6 +101,23 @@ def update_task(task_id: str, stage: str, progress: float, message: str):
     })
 
 
+def _parse_seeds_form(raw: Optional[str]) -> Optional[List[int]]:
+    """Parse the `seeds` form field (JSON array of ints) or return None.
+
+    Rejects malformed JSON / non-int elements with 400 — it's cheaper to
+    fail fast than to let the Gemini client blow up mid-generation.
+    """
+    if not raw:
+        return None
+    try:
+        data = json.loads(raw)
+        if not isinstance(data, list):
+            raise ValueError("seeds must be a JSON array")
+        return [int(x) for x in data]
+    except (json.JSONDecodeError, ValueError, TypeError) as e:
+        raise HTTPException(status_code=400, detail=f"Invalid seeds: {e}")
+
+
 def _build_queue_label(
     explicit: Optional[str],
     script_text: Optional[str],
@@ -1551,6 +1568,10 @@ async def host_generate(
     # outfit reference image. Lets users describe the outfit when they have
     # no reference photo handy.
     outfitText: Optional[str] = Form(None),
+    # JSON array of seeds. Frontend passes fresh randoms on "다시 만들기"
+    # so retry produces new variants instead of the deterministic default
+    # set. None → backend falls back to FIXED_DEFAULT_SEEDS.
+    seeds: Optional[str] = Form(None),
     n: int = Form(4),
     temperature: Optional[float] = Form(None),
 ):
@@ -1578,6 +1599,8 @@ async def host_generate(
     if temperature is not None and not 0.0 <= temperature <= 2.0:
         raise HTTPException(status_code=400, detail=f"temperature must be in [0.0, 2.0], got {temperature}")
 
+    parsed_seeds = _parse_seeds_form(seeds)
+
     try:
         result = await generate_host_candidates(
             mode=mode,
@@ -1591,6 +1614,7 @@ async def host_generate(
             face_strength=faceStrength,
             outfit_strength=outfitStrength,
             outfit_text=outfitText,
+            seeds=parsed_seeds,
             n=n,
             temperature=temperature,
         )
@@ -1614,6 +1638,7 @@ async def host_generate_stream(
     faceStrength: float = Form(0.7),
     outfitStrength: float = Form(0.7),
     outfitText: Optional[str] = Form(None),
+    seeds: Optional[str] = Form(None),
     n: int = Form(4),
     temperature: Optional[float] = Form(None),
 ):
@@ -1656,6 +1681,7 @@ async def host_generate_stream(
                 face_strength=faceStrength,
                 outfit_strength=outfitStrength,
                 outfit_text=outfitText,
+                seeds=_parse_seeds_form(seeds),
                 n=n,
                 temperature=temperature,
             ):
@@ -1693,6 +1719,7 @@ async def composite_generate(
     n: int = Form(4),
     rembg: bool = True,  # query param: ?rembg=false to skip
     temperature: Optional[float] = Form(None),
+    seeds: Optional[str] = Form(None),
 ):
     """Generate N=4 composite candidates (host + products + background scene) via Gemini.
 
@@ -1733,6 +1760,7 @@ async def composite_generate(
             n=n,
             rembg_products=rembg,
             temperature=temperature,
+            seeds=_parse_seeds_form(seeds),
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -1756,6 +1784,7 @@ async def composite_generate_stream(
     n: int = Form(4),
     rembg: bool = True,
     temperature: Optional[float] = Form(None),
+    seeds: Optional[str] = Form(None),
 ):
     """SSE variant of /api/composite/generate. Emits {type: "init"} with
     translated direction immediately, then one frame per completed candidate,
@@ -1797,6 +1826,7 @@ async def composite_generate_stream(
                 n=n,
                 rembg_products=rembg,
                 temperature=temperature,
+                seeds=_parse_seeds_form(seeds),
             ):
                 yield f"data: {json.dumps(evt)}\n\n"
         except ValueError as e:

@@ -25,6 +25,10 @@ from typing import AsyncIterator, Dict, List, Literal, Optional, Tuple
 from PIL import Image
 
 import config
+# Reuse the host generator's seed-resolution policy so both stages behave
+# identically — first click = deterministic default set, "다시 만들기" =
+# caller-supplied randoms.
+from modules.host_generator import FIXED_DEFAULT_SEEDS, _resolve_seeds
 
 logger = logging.getLogger(__name__)
 
@@ -180,6 +184,9 @@ async def generate_composite_candidates(
     output_dir: Optional[str] = None,
     target_size: Tuple[int, int] = (720, 1280),
     temperature: Optional[float] = None,
+    # Seeds override — same contract as host_generator: None falls back to
+    # the fixed default list; frontend passes fresh randoms on 다시 만들기.
+    seeds: Optional[List[int]] = None,
 ) -> Dict:
     """Generate N composite candidates. Returns partial success if ≥min_success.
 
@@ -235,8 +242,9 @@ async def generate_composite_candidates(
         background_preset_label=background_preset_label,
     )
 
-    # Fixed seeds for filename reproducibility (Gemini sampling still differs per call)
-    seeds = [10, 42, 77, 128, 256, 512, 1024, 2048][:n]
+    # Seeds: caller override wins; else the fixed default set. See host_generator
+    # for the rationale behind the dual-mode contract.
+    seeds = _resolve_seeds(seeds, n)
 
     tasks = [
         _generate_one(
@@ -303,6 +311,7 @@ async def stream_composite_candidates(
     output_dir: Optional[str] = None,
     target_size: Tuple[int, int] = (720, 1280),
     temperature: Optional[float] = None,
+    seeds: Optional[List[int]] = None,
 ) -> AsyncIterator[Dict]:
     """Async generator twin of generate_composite_candidates.
 
@@ -351,7 +360,7 @@ async def stream_composite_candidates(
         background_preset_label=background_preset_label,
     )
 
-    seeds = [10, 42, 77, 128, 256, 512, 1024, 2048][:n]
+    seeds = _resolve_seeds(seeds, n)
 
     async def _run_tagged(seed: int):
         try:

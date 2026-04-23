@@ -240,6 +240,31 @@ def test_sync_generate_includes_outfit_text_when_no_outfit_image(tmp_path, monke
     assert "Reference image — OUTFIT" not in label_blob
 
 
+# ---- Seed policy (regression for "다시 만들기 = same 4 results" complaint) ----
+
+
+def test_resolve_seeds_falls_back_to_fixed_defaults():
+    """No caller seeds → deterministic FIXED_DEFAULT_SEEDS for the first run."""
+    from modules.host_generator import _resolve_seeds, FIXED_DEFAULT_SEEDS
+    assert _resolve_seeds(None, 4) == FIXED_DEFAULT_SEEDS[:4]
+    assert _resolve_seeds([], 4) == FIXED_DEFAULT_SEEDS[:4]
+
+
+def test_resolve_seeds_uses_caller_supplied_when_provided():
+    """Frontend passes random seeds on retry — they win over the defaults."""
+    from modules.host_generator import _resolve_seeds
+    assert _resolve_seeds([111, 222, 333, 444], 4) == [111, 222, 333, 444]
+
+
+def test_resolve_seeds_pads_short_caller_lists():
+    """If frontend somehow sends fewer seeds than n, pad with defaults so
+    we still hit the requested candidate count."""
+    from modules.host_generator import _resolve_seeds, FIXED_DEFAULT_SEEDS
+    out = _resolve_seeds([999], 4)
+    assert out[0] == 999
+    assert out[1:] == FIXED_DEFAULT_SEEDS[1:4]
+
+
 def _png_bytes(size, color):
     """Tiny PNG byte payload for fake Gemini responses."""
     from io import BytesIO

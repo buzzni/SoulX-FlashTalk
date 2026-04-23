@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import Icon from './Icon.jsx';
 import { Badge, Button, Card, Chip, Field, Segmented, UploadTile } from './primitives.jsx';
-import { humanizeError, streamHost, uploadReferenceImage } from './api.js';
+import { humanizeError, makeRandomSeeds, streamHost, uploadReferenceImage } from './api.js';
 
 // Face/outfit strength is not a real Gemini parameter — the mapping layer (§5.1.2)
 // collapses 0–1 into one of four English prompt clauses. A slider pretends to be
@@ -77,6 +77,11 @@ const Step1Host = ({ state, update }) => {
   const [generating, setGenerating] = useState(false);
   const [variants, setVariants] = useState([]);
   const [errorMsg, setErrorMsg] = useState(null);
+  // Counts every successful "쇼호스트 만들기" press (including 다시 만들기).
+  // attempt #0 uses the default fixed seed set so two users with the same
+  // prompt see comparable outputs; attempt #1+ uses random seeds so retry
+  // actually produces different results — see api.makeRandomSeeds.
+  const [attempts, setAttempts] = useState(0);
   const resultsRef = useRef(null);
 
   const setField = (k, v) => update(s => ({ ...s, host: { ...s.host, [k]: v } }));
@@ -94,9 +99,10 @@ const Step1Host = ({ state, update }) => {
   const generate = async () => {
     setGenerating(true);
     setErrorMsg(null);
-    // Fixed slot order matches backend seed order so tiles fill left→right
-    // consistently regardless of Gemini completion order.
-    const SEEDS = [10, 42, 77, 128];
+    // First press: use the deterministic [10, 42, 77, 128]. Retries: pick
+    // fresh randoms so the user actually sees new output (otherwise same
+    // input + same seeds = same 4 images, and "다시 만들기" feels broken).
+    const SEEDS = attempts === 0 ? [10, 42, 77, 128] : makeRandomSeeds(4);
     setVariants(SEEDS.map(s => ({ seed: s, id: `v${s}`, placeholder: true })));
     try {
       let faceRefPath = host.faceRefPath || null;
@@ -113,7 +119,10 @@ const Step1Host = ({ state, update }) => {
           setField('outfitRefPath', r.path);
         }
       }
+      // Pass _seeds only on retry — first call lets the backend default win
+      // for the explicit "two users see the same starting set" contract.
       const req = { ...host, faceRefPath, outfitRefPath };
+      if (attempts > 0) req._seeds = SEEDS;
 
       let successCount = 0;
       let errorCount = 0;
@@ -152,6 +161,9 @@ const Step1Host = ({ state, update }) => {
       setErrorMsg(humanizeError(err));
     } finally {
       setGenerating(false);
+      // Increment regardless of outcome — even a partial-failure attempt
+      // shouldn't re-use the deterministic seeds on the next click.
+      setAttempts(a => a + 1);
     }
   };
 
