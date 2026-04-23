@@ -345,11 +345,6 @@ def _sync_generate(
             contents.append(Image.open(ref).convert("RGB"))
             has_ref = True
 
-    # face-outfit / style-ref modes rely on reference detail — HIGH media res
-    # preserves more of that input. Pure text mode gets MEDIUM (default-ish)
-    # since there's no ref image to study.
-    media_res = "MEDIA_RESOLUTION_HIGH" if has_ref else "MEDIA_RESOLUTION_MEDIUM"
-
     def _do():
         return client.models.generate_content(
             model=GEMINI_IMAGE_MODEL,
@@ -358,7 +353,6 @@ def _sync_generate(
                 target_size,
                 sys_instruction,
                 seed=seed,
-                media_resolution=media_res,
                 temperature=temperature,
             ),
         )
@@ -381,7 +375,6 @@ def _sync_generate(
                     "model": GEMINI_IMAGE_MODEL,
                     "seed": seed,
                     "temperature": temperature,
-                    "media_resolution": media_res,
                     "mode": mode,
                     "prompt": prompt,
                     "system_instruction": sys_instruction,

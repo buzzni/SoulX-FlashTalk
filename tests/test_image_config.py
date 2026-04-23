@@ -30,7 +30,6 @@ def test_defaults_include_safety_and_aspect_ratio(build_config):
     assert cfg.thinking_config is not None
     # optional params default unset
     assert cfg.seed is None
-    assert cfg.media_resolution is None
     assert cfg.temperature is None
 
 
@@ -42,12 +41,6 @@ def test_seed_is_forwarded_as_int(build_config):
 def test_temperature_is_forwarded_as_float(build_config):
     cfg = build_config((720, 1280), temperature=0.7)
     assert cfg.temperature == pytest.approx(0.7)
-
-
-def test_media_resolution_is_forwarded(build_config):
-    cfg = build_config((720, 1280), media_resolution="MEDIA_RESOLUTION_HIGH")
-    # SDK normalizes string to enum; accept both shapes
-    assert str(cfg.media_resolution).endswith("HIGH") or cfg.media_resolution == "MEDIA_RESOLUTION_HIGH"
 
 
 def test_system_instruction_passthrough(build_config):
@@ -67,7 +60,6 @@ def test_config_serializes_for_mldev_backend(build_config):
         (720, 1280),
         system_instruction="test",
         seed=42,
-        media_resolution="MEDIA_RESOLUTION_MEDIUM",
         temperature=0.7,
     )
     # Should NOT raise — if it does, the live API call would also fail.

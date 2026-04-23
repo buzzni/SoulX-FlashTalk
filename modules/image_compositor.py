@@ -107,7 +107,6 @@ def _build_gemini_image_config(
     system_instruction: Optional[str] = None,
     thinking_minimal: bool = True,
     seed: Optional[int] = None,
-    media_resolution: Optional[str] = None,
     temperature: Optional[float] = None,
 ):
     """Centralized Gemini image-gen config. Phase 0 T-GM2/3/3b/4 + param audit.
@@ -119,15 +118,14 @@ def _build_gemini_image_config(
         seed: Gemini sampling seed — same seed + same inputs = same output.
             None → stochastic. Pass the per-candidate seed here for
             reproducibility across re-runs.
-        media_resolution: how the model processes INPUT reference images.
-            None → model default (~MEDIUM). Set "MEDIA_RESOLUTION_HIGH" when
-            reference face/outfit detail matters (Step 1 face-outfit mode).
         temperature: sampling variance. None → model default (~1.0).
             Lower = more predictable, higher = more variation. UI exposes
             this as 0.4 / 0.7 / 1.0 Segmented.
 
-    Note: person_generation is intentionally absent — the Gemini API backend
-    rejects it (Vertex-only). Safety is handled via safety_settings instead.
+    Note: person_generation and media_resolution are intentionally absent —
+    the Gemini API backend rejects the former (Vertex-only) and the
+    gemini-3.1-flash-image-preview model rejects the latter (400
+    INVALID_ARGUMENT on all values). Safety via safety_settings.
     """
     from google.genai import types
 
@@ -155,8 +153,6 @@ def _build_gemini_image_config(
         kwargs["system_instruction"] = system_instruction
     if seed is not None:
         kwargs["seed"] = int(seed)
-    if media_resolution is not None:
-        kwargs["media_resolution"] = media_resolution
     if temperature is not None:
         kwargs["temperature"] = float(temperature)
     return types.GenerateContentConfig(**kwargs)
@@ -509,7 +505,6 @@ def _gemini_generate_scene(
                     target_size,
                     system_instruction,
                     seed=seed,
-                    media_resolution="MEDIA_RESOLUTION_MEDIUM",
                     temperature=temperature,
                 ),
             )
@@ -768,7 +763,6 @@ def generate_background_only(
                 config=_build_gemini_image_config(
                     target_size,
                     system_instruction,
-                    media_resolution="MEDIA_RESOLUTION_LOW",
                 ),
             )
         response = _call_gemini_with_retry(_do)

@@ -93,7 +93,9 @@ def translate_direction_ko_to_en(direction_ko: str) -> str:
         # runaway response can't blow up cost/latency. 256 tokens ≈ 350 Korean
         # chars worth of English, well above any reasonable direction line.
         cfg = types.GenerateContentConfig(
-            thinking_config=types.ThinkingConfig(thinking_level="minimal"),
+            # gemini-2.5-flash rejects thinking_level but accepts thinking_budget=0
+            # for the same "skip the thinking pass" effect (verified 2026-04-23).
+            thinking_config=types.ThinkingConfig(thinking_budget=0),
             max_output_tokens=256,
             system_instruction=(
                 "You translate Korean scene directions into concise English for "
