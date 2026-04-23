@@ -4,7 +4,10 @@ import { useState, useEffect, useCallback } from 'react';
 import Icon from './Icon.jsx';
 import { fetchQueue } from './api.js';
 
-const typeLabel = (type) => (type === 'generate' ? 'Single' : 'Multi-Agent');
+const typeLabel = (type) => ({
+  generate: '쇼호스트 영상',
+  conversation: '멀티 대화',
+}[type] || (type || '작업'));
 const statusLabel = (status) => ({
   pending: '대기 중',
   running: '실행 중',

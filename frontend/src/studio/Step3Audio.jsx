@@ -78,10 +78,15 @@ const Step3Audio = ({ state, update }) => {
 
   const playGenerated = () => {
     const el = generatedAudioRef.current;
-    if (!el || !voice.generatedAudioPath) return;
-    el.src = voice.generatedAudioPath.startsWith('http')
-      ? voice.generatedAudioPath
-      : `${window.location.protocol}//${window.location.hostname}:8001/api/files/${voice.generatedAudioPath}`;
+    // Prefer the relative URL the backend now hands back — it routes through
+    // the Vite proxy so we don't have to hardcode :8001 (which broke when the
+    // dev server moved ports + when remote browsers couldn't reach localhost).
+    const src = voice.generatedAudioUrl
+      || (voice.generatedAudioPath && voice.generatedAudioPath.startsWith('http')
+          ? voice.generatedAudioPath
+          : null);
+    if (!el || !src) return;
+    el.src = src;
     el.play().catch(() => {});
   };
 
@@ -172,7 +177,12 @@ const Step3Audio = ({ state, update }) => {
 
       const voiceForGen = { ...voice, voiceId: voiceIdForGen };
       const result = await generateVoice({ voice: voiceForGen });
-      setV({ generated: true, generatedAudioPath: result.path || result.audio_path, voiceId: voiceIdForGen });
+      setV({
+        generated: true,
+        generatedAudioPath: result.path || result.audio_path,
+        generatedAudioUrl: result.url || null,
+        voiceId: voiceIdForGen,
+      });
     } catch (err) {
       console.error('voice generate failed', err);
       setErrorMsg(humanizeError(err));

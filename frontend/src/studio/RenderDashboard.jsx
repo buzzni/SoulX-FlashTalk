@@ -5,6 +5,7 @@ import { useState, useEffect, useRef } from 'react';
 import Icon from './Icon.jsx';
 import { Badge, Button } from './primitives.jsx';
 import { fetchQueue, generateVideo, humanizeError, subscribeProgress } from './api.js';
+import RenderHistory from './RenderHistory.jsx';
 
 const STAGES = [
   { key: 'queued', label: '대기열 등록 중' },
@@ -21,12 +22,6 @@ function formatElapsed(ms) {
   const m = Math.floor(total / 60);
   const s = total % 60;
   return `${m}:${s.toString().padStart(2, '0')}`;
-}
-
-function computeEta(elapsedMs, progress) {
-  if (progress <= 0 || progress >= 100) return null;
-  const est = (elapsedMs / progress) * (100 - progress);
-  return est;
 }
 
 const Confetti = () => {
@@ -173,7 +168,6 @@ const RenderDashboard = ({ state, onBack, onReset }) => {
   }, [job.taskId, job.status]);
 
   const currentStageIdx = Math.max(0, STAGE_ORDER.indexOf(job.stage));
-  const etaMs = computeEta(elapsed, job.progress);
 
   const handleCopyShare = async () => {
     if (!job.videoUrl) return;
@@ -263,9 +257,6 @@ const RenderDashboard = ({ state, onBack, onReset }) => {
                   </div>
                   <div style={{ display: 'flex', gap: 14, fontSize: 11, color: 'var(--text-tertiary)' }}>
                     <span className="mono num">경과 {formatElapsed(elapsed)}</span>
-                    {etaMs != null && (
-                      <span className="mono num">남은 시간 약 {formatElapsed(etaMs)}</span>
-                    )}
                     {queuePos != null && queuePos > 0 && (
                       <span>대기열 {queuePos}번째</span>
                     )}
@@ -341,6 +332,10 @@ const RenderDashboard = ({ state, onBack, onReset }) => {
             </div>
           </div>
         </div>
+
+        {job.status !== 'done' && job.status !== 'error' && (
+          <RenderHistory excludeTaskId={job.taskId} />
+        )}
 
         <div className="card mt-4">
           <div className="card-eyebrow">이렇게 만들었어요</div>

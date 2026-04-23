@@ -426,6 +426,20 @@ export async function generateVideo({ state, audio }) {
   body.append('audio_path', audio.audio_path);
   body.append('audio_source', 'upload');
   body.append('resolution', stringifyResolution(state.resolution));
+
+  // Queue label — what the user sees in the QueueStatus panel. Priority:
+  // explicit script preview > voice id > generic. Without this, every job
+  // landed as "Video generation" in the queue with no way to tell them apart.
+  const scriptPreview = (state.voice?.script || '').replace(/\[breath\]/g, ' ').replace(/\s+/g, ' ').trim();
+  const labelParts = [];
+  if (scriptPreview) {
+    labelParts.push(scriptPreview.slice(0, 60));
+  } else if (state.voice?.voiceName) {
+    labelParts.push(`목소리: ${state.voice.voiceName}`);
+  }
+  if (state.resolution?.label) labelParts.push(state.resolution.label);
+  if (labelParts.length) body.append('queue_label', labelParts.join(' · '));
+
   const res = await fetch(`${API_BASE}/api/generate`, { method: 'POST', body });
   return jsonOrThrow(res, '영상 생성');
 }
@@ -434,6 +448,14 @@ export async function generateVideo({ state, audio }) {
 export async function fetchQueue() {
   const res = await fetch(`${API_BASE}/api/queue`);
   return jsonOrThrow(res, '큐 상태 조회');
+}
+
+// Video history — returns { total, videos }. Used by RenderHistory while the
+// user waits for the current job (so they have something to do besides watch
+// a spinner).
+export async function fetchHistory(limit = 10) {
+  const res = await fetch(`${API_BASE}/api/history?limit=${limit}`);
+  return jsonOrThrow(res, '히스토리 조회');
 }
 
 // SSE subscription. Returns unsubscribe fn.

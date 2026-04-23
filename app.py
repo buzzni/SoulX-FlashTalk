@@ -101,6 +101,33 @@ def update_task(task_id: str, stage: str, progress: float, message: str):
     })
 
 
+def _build_queue_label(
+    explicit: Optional[str],
+    script_text: Optional[str],
+    resolution: Optional[str],
+    host_image_path: Optional[str],
+) -> str:
+    """Compose a meaningful queue label.
+
+    Priority: client-supplied > script preview > resolution + host filename
+    > generic fallback. Caps at 80 chars so the queue UI doesn't wrap.
+    Previously every job displayed "Video generation" because the frontend
+    didn't pass script_text on /api/generate, leaving the original fallback
+    as the only label users ever saw.
+    """
+    if explicit and explicit.strip():
+        return explicit.strip()[:80]
+    if script_text and script_text.strip():
+        clean = " ".join(script_text.split())
+        return clean[:80]
+    parts = []
+    if resolution:
+        parts.append(resolution.replace("x", "×"))
+    if host_image_path:
+        parts.append(os.path.basename(host_image_path))
+    return " · ".join(parts) if parts else "쇼호스트 영상"
+
+
 def set_task_error(task_id: str, error: str):
     if task_id not in task_states:
         return
@@ -872,8 +899,12 @@ async def generate_elevenlabs_speech(
             model_id=config.ELEVENLABS_OPTIONS["model_id"],
         )
 
+        # Write to OUTPUTS_DIR (already in SAFE_ROOTS) so /api/files/<name> can
+        # serve it for the Step 3 preview <audio>. TEMP_DIR is excluded from
+        # SAFE_ROOTS for security and earlier we returned absolute paths the
+        # frontend tried to URL-encode — both broke preview playback.
         filename = f"tts_{uuid.uuid4().hex[:8]}.wav"
-        output_path = os.path.join(config.TEMP_DIR, filename)
+        output_path = os.path.join(config.OUTPUTS_DIR, filename)
 
         loop = asyncio.get_event_loop()
         await loop.run_in_executor(
@@ -891,7 +922,11 @@ async def generate_elevenlabs_speech(
             ),
         )
 
-        return {"filename": filename, "path": output_path}
+        return {
+            "filename": filename,
+            "path": output_path,           # filesystem path — used by /api/generate as audio_path
+            "url": f"/api/files/{filename}",  # serveable URL — used by Step 3 <audio> preview
+        }
     except Exception as e:
         logger.error(f"ElevenLabs TTS failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -949,6 +984,9 @@ async def generate_video(
     # Gemini background generation
     scene_prompt: str = Form(""),
     reference_image_paths: str = Form("[]"),
+    # Queue display label — frontend sends a human-readable summary so the
+    # queue panel doesn't just show "Video generation" for every job.
+    queue_label: Optional[str] = Form(None),
 ):
     """Generate video from host image + audio"""
     from utils.security import safe_upload_path
@@ -1044,7 +1082,7 @@ async def generate_video(
             "scene_prompt": scene_prompt,
             "reference_image_paths": ref_paths,
         },
-        label=script_text[:50] if script_text else "Video generation",
+        label=_build_queue_label(queue_label, script_text, resolution, host_image_path),
     )
 
     queue_status = await task_queue.get_status()
@@ -1053,31 +1091,65 @@ async def generate_video(
     return {"task_id": task_id, "message": "Video generation queued", "queue_position": position}
 
 
+# SSE keep-alive constants. The Vite dev proxy idles connections out at 120s
+# (vite.config.js `proxyTimeout`); during MultiTalk inference there can be 60-
+# 180s between progress updates, so we send `: heartbeat` comment frames to
+# keep the chunked stream alive. Comments don't trigger EventSource.onmessage
+# on the browser but DO reset the proxy's idle timer. Constants are module
+# scope so tests can monkeypatch a smaller HEARTBEAT_SEC.
+SSE_HEARTBEAT_SEC = 15.0
+SSE_POLL_SEC = 0.5
+
+
+async def _progress_event_generator(task_id: str):
+    """Yield SSE frames for a single task until it reaches a terminal stage.
+
+    Pulled out of progress_stream so tests can drive it directly without
+    spinning up uvicorn / TestClient. Stops when the task vanishes from
+    task_states OR reaches stage in {"complete", "error"} AND all queued
+    updates have been flushed.
+
+    The "flush before break" rule matters because the worker can append the
+    final update and set state.stage="complete" in two non-atomic steps —
+    if we broke purely on stage we'd race past the user-visible "완료!"
+    message. Re-fetching state after each yield closes that race.
+    """
+    import time as _t
+    last_count = 0
+    last_send = _t.monotonic()
+    while True:
+        state = task_states.get(task_id)
+        if not state:
+            break
+
+        updates = state["updates"]
+        if len(updates) > last_count:
+            for u in updates[last_count:]:
+                yield f"data: {json.dumps(u)}\n\n"
+            last_count = len(updates)
+            last_send = _t.monotonic()
+        elif _t.monotonic() - last_send >= SSE_HEARTBEAT_SEC:
+            yield ": heartbeat\n\n"
+            last_send = _t.monotonic()
+
+        # Re-fetch state and re-check pending-updates before deciding to
+        # exit — protects against the worker writing "final update + complete
+        # stage" between our yield and our break check.
+        state = task_states.get(task_id)
+        if not state:
+            break
+        if state["stage"] in ("complete", "error") and len(state["updates"]) <= last_count:
+            break
+
+        await asyncio.sleep(SSE_POLL_SEC)
+
+
 @app.get("/api/progress/{task_id}")
 async def progress_stream(task_id: str):
-    """SSE endpoint for real-time progress"""
+    """SSE endpoint for real-time progress."""
     if task_id not in task_states:
         raise HTTPException(status_code=404, detail="Task not found")
-
-    async def event_generator():
-        last_count = 0
-        while True:
-            state = task_states.get(task_id)
-            if not state:
-                break
-
-            updates = state["updates"]
-            if len(updates) > last_count:
-                for u in updates[last_count:]:
-                    yield f"data: {json.dumps(u)}\n\n"
-                last_count = len(updates)
-
-            if state["stage"] in ["complete", "error"]:
-                break
-
-            await asyncio.sleep(0.5)
-
-    return StreamingResponse(event_generator(), media_type="text/event-stream")
+    return StreamingResponse(_progress_event_generator(task_id), media_type="text/event-stream")
 
 
 @app.get("/api/videos/{task_id}")
