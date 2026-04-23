@@ -108,6 +108,7 @@ def _build_gemini_image_config(
     thinking_minimal: bool = True,
     seed: Optional[int] = None,
     temperature: Optional[float] = None,
+    image_size: str = "1K",
 ):
     """Centralized Gemini image-gen config. Phase 0 T-GM2/3/3b/4 + param audit.
 
@@ -142,9 +143,12 @@ def _build_gemini_image_config(
             types.HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT,
         )
     ]
+    # image_size="1K" is Gemini default (~1024px long edge); "2K" ~2048px for
+    # sharper output at ~2-4× cost + latency. Users pick via the Step 1
+    # "이미지 품질" selector which shares state with Step 2.
     kwargs = dict(
         response_modalities=["Text", "Image"],
-        image_config=types.ImageConfig(aspect_ratio=aspect, image_size="1K"),
+        image_config=types.ImageConfig(aspect_ratio=aspect, image_size=image_size),
         safety_settings=safety,
     )
     if thinking_minimal:
@@ -420,6 +424,7 @@ def _gemini_generate_scene(
     reference_images: Optional[List[Image.Image]] = None,
     seed: Optional[int] = None,
     temperature: Optional[float] = None,
+    image_size: str = "1K",
 ) -> Optional[Image.Image]:
     """Send people image + prompt + optional reference images to Gemini."""
     from google.genai import types
@@ -506,6 +511,7 @@ def _gemini_generate_scene(
                     system_instruction,
                     seed=seed,
                     temperature=temperature,
+                    image_size=image_size,
                 ),
             )
         response = _call_gemini_with_retry(_do)

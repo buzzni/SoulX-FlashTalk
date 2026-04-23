@@ -48,6 +48,16 @@ def test_system_instruction_passthrough(build_config):
     assert cfg.system_instruction is not None
 
 
+def test_image_size_defaults_to_1K_and_accepts_2K(build_config):
+    """image_size is passed through to ImageConfig; "1K" default and "2K"
+    both serialize OK. This is the knob Step 1's 이미지 품질 selector toggles."""
+    default = build_config((720, 1280))
+    assert default.image_config.image_size == "1K"
+
+    hd = build_config((720, 1280), image_size="2K")
+    assert hd.image_config.image_size == "2K"
+
+
 def test_config_serializes_for_mldev_backend(build_config):
     """Regression: the Gemini API (mldev) backend rejects person_generation,
     prominent_people, etc. Make sure the config we build can actually round-

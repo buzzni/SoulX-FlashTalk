@@ -187,6 +187,9 @@ async def generate_composite_candidates(
     # Seeds override — same contract as host_generator: None falls back to
     # the fixed default list; frontend passes fresh randoms on 다시 만들기.
     seeds: Optional[List[int]] = None,
+    # Gemini image_size: "1K" or "2K". Should match Step 1's image_size so
+    # reference/output resolutions don't mismatch and force upscaling.
+    image_size: str = "1K",
 ) -> Dict:
     """Generate N composite candidates. Returns partial success if ≥min_success.
 
@@ -257,6 +260,7 @@ async def generate_composite_candidates(
             output_dir=out_dir,
             timeout=timeout_per_call,
             temperature=temperature,
+            image_size=image_size,
         )
         for s in seeds
     ]
@@ -312,6 +316,7 @@ async def stream_composite_candidates(
     target_size: Tuple[int, int] = (720, 1280),
     temperature: Optional[float] = None,
     seeds: Optional[List[int]] = None,
+    image_size: str = "1K",
 ) -> AsyncIterator[Dict]:
     """Async generator twin of generate_composite_candidates.
 
@@ -374,6 +379,7 @@ async def stream_composite_candidates(
                 output_dir=out_dir,
                 timeout=timeout_per_call,
                 temperature=temperature,
+                image_size=image_size,
             )
             return (seed, path, None, None)
         except Exception as e:
@@ -428,6 +434,7 @@ async def _generate_one(
     output_dir: str,
     timeout: float,
     temperature: Optional[float] = None,
+    image_size: str = "1K",
 ) -> Optional[str]:
     """Single Gemini call with per-call timeout + semaphore-bounded concurrency."""
     async with _gemini_semaphore:
@@ -441,6 +448,7 @@ async def _generate_one(
                 target_size=target_size,
                 output_dir=output_dir,
                 temperature=temperature,
+                image_size=image_size,
             ),
             timeout=timeout,
         )
@@ -455,6 +463,7 @@ async def _run_gemini(
     target_size: Tuple[int, int],
     output_dir: str,
     temperature: Optional[float] = None,
+    image_size: str = "1K",
 ) -> Optional[str]:
     """Wrap the sync Gemini call in an executor."""
     loop = asyncio.get_running_loop()
@@ -464,6 +473,7 @@ async def _run_gemini(
             seed, host_image_path, product_image_paths,
             background_upload_path, scene_prompt, target_size, output_dir,
             temperature=temperature,
+            image_size=image_size,
         ),
     )
 
@@ -477,6 +487,7 @@ def _sync_generate(
     target_size: Tuple[int, int],
     output_dir: str,
     temperature: Optional[float] = None,
+    image_size: str = "1K",
 ) -> Optional[str]:
     """Run one Gemini image generation; return saved PNG path (or None)."""
     from modules.image_compositor import (
@@ -503,7 +514,7 @@ def _sync_generate(
     # returning None before). Propagate so the stream layer shows category.
     result = _gemini_generate_scene(
         people_canvas, scene_prompt, target_size, ref_images or None,
-        seed=seed, temperature=temperature,
+        seed=seed, temperature=temperature, image_size=image_size,
     )
     if result is None:
         return None

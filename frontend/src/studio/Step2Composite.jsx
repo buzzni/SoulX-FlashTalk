@@ -183,9 +183,12 @@ const Step2Composite = ({ state, update }) => {
       let errorCount = 0;
       const errs = [];
       // Pass _seeds only on retry — first call uses backend default set.
-      const composeReq = attempts > 0
-        ? { ...composition, _seeds: SEEDS }
-        : composition;
+      // imageSize piggybacks on composition so the body builder picks it up.
+      const composeReq = {
+        ...composition,
+        imageSize: state.imageQuality,
+        ...(attempts > 0 ? { _seeds: SEEDS } : {}),
+      };
       for await (const evt of streamComposite({
         host: { selectedPath: state.host?.selectedPath },
         products: uploadedProducts.filter(p => p.path),

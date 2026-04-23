@@ -414,3 +414,26 @@ describe('api.js — seed override on retry', () => {
     expect(body.get('seeds')).toBe('[5,6,7,8]');
   });
 });
+
+
+describe('api.js — shared imageSize on both body builders', () => {
+  it('buildHostGenerateBody omits imageSize when absent', () => {
+    const body = buildHostGenerateBody({ mode: 'text', prompt: 'x' });
+    expect(body.get('imageSize')).toBeNull();
+  });
+
+  it('buildHostGenerateBody sends imageSize when present (2K)', () => {
+    const body = buildHostGenerateBody({ mode: 'text', prompt: 'x', imageSize: '2K' });
+    expect(body.get('imageSize')).toBe('2K');
+  });
+
+  it('buildCompositeBody sends imageSize piggybacked on composition', () => {
+    const body = buildCompositeBody({
+      host: { selectedPath: '/x/host.png' },
+      products: [],
+      background: { source: 'prompt', prompt: 'studio' },
+      composition: { direction: 'pose', imageSize: '2K' },
+    });
+    expect(body.get('imageSize')).toBe('2K');
+  });
+});

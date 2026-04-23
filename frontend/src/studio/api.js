@@ -256,6 +256,9 @@ export function buildHostGenerateBody(host) {
   if (Array.isArray(host._seeds) && host._seeds.length > 0) {
     body.append('seeds', JSON.stringify(host._seeds));
   }
+  // imageSize "1K" | "2K" — shared with Step 2 via state.imageQuality.
+  // Caller pokes host.imageSize before calling.
+  if (host.imageSize) body.append('imageSize', host.imageSize);
   body.append('n', '4');
   // Backend accepts temperature ∈ [0.0, 2.0]. UI exposes three preset values
   // (0.4 / 0.7 / 1.0). Pass through only when user actually picked one.
@@ -357,6 +360,7 @@ export function buildCompositeBody({ host, products, background, composition }) 
   if (Array.isArray(composition?._seeds) && composition._seeds.length > 0) {
     body.append('seeds', JSON.stringify(composition._seeds));
   }
+  if (composition?.imageSize) body.append('imageSize', composition.imageSize);
   return body;
 }
 

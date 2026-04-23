@@ -65,6 +65,10 @@ async def generate_host_candidates(
     # fresh outputs instead of the deterministic default set. None falls back
     # to FIXED_DEFAULT_SEEDS (reproducible first-time experience).
     seeds: Optional[List[int]] = None,
+    # Gemini image_size: "1K" (default, fast) or "2K" (sharper, ~2-4× cost).
+    # Shared with Step 2 so the host reference resolution matches what Step 2
+    # composes against — mismatched sizes risk hallucinated face detail.
+    image_size: str = "1K",
     n: int = 4,
     timeout_per_call: float = 45.0,
     min_success: int = 2,
@@ -128,6 +132,7 @@ async def generate_host_candidates(
             timeout=timeout_per_call,
             output_dir=out_dir,
             temperature=temperature,
+            image_size=image_size,
         )
         for s in seeds
     ]
@@ -177,6 +182,7 @@ async def stream_host_candidates(
     outfit_strength: float = 0.7,
     outfit_text: Optional[str] = None,
     seeds: Optional[List[int]] = None,
+    image_size: str = "1K",
     n: int = 4,
     timeout_per_call: float = 45.0,
     min_success: int = 2,
@@ -224,6 +230,7 @@ async def stream_host_candidates(
                 timeout=timeout_per_call,
                 output_dir=out_dir,
                 temperature=temperature,
+                image_size=image_size,
             )
             return (seed, path, None, None)
         except Exception as e:
@@ -304,6 +311,7 @@ async def _generate_one(
     output_dir: str,
     temperature: Optional[float] = None,
     outfit_text: Optional[str] = None,
+    image_size: str = "1K",
 ) -> Optional[str]:
     """Single Gemini call with per-call timeout + semaphore-bounded concurrency."""
     async with _gemini_semaphore:
@@ -323,6 +331,7 @@ async def _generate_one(
                 outfit_text=outfit_text,
                 output_dir=output_dir,
                 temperature=temperature,
+                image_size=image_size,
             ),
             timeout=timeout,
         )
@@ -343,6 +352,7 @@ async def _run_gemini(
     output_dir: str,
     temperature: Optional[float] = None,
     outfit_text: Optional[str] = None,
+    image_size: str = "1K",
 ) -> Optional[str]:
     """Wrap the (sync) Gemini client call in an executor."""
     loop = asyncio.get_running_loop()
@@ -354,6 +364,7 @@ async def _run_gemini(
             face_strength, outfit_strength, output_dir,
             temperature=temperature,
             outfit_text=outfit_text,
+            image_size=image_size,
         ),
     )
 
@@ -364,6 +375,7 @@ def _sync_generate(
     face_strength, outfit_strength, output_dir,
     temperature: Optional[float] = None,
     outfit_text: Optional[str] = None,
+    image_size: str = "1K",
 ) -> Optional[str]:
     from io import BytesIO
 
@@ -443,6 +455,7 @@ def _sync_generate(
                 sys_instruction,
                 seed=seed,
                 temperature=temperature,
+                image_size=image_size,
             ),
         )
     try:
@@ -498,6 +511,13 @@ def _build_host_prompt(
     parts = [
         "AI 쇼호스트 인물 사진, 9:16 세로 프레임, 스튜디오 조명, 사실적 인물사진. "
         "배경은 반드시 베이지·크림 톤의 깔끔한 단색 배경. 소품·가구·텍스트·로고 없음. "
+        # Medium shot is the sweet spot for the downstream FlashTalk pipeline:
+        # face takes ~30% of frame (strong lip-sync signal) AND upper-body
+        # motion reads natural. Full body shrinks the face so lip-sync drops,
+        # and closeup leaves Step 2 re-framing no room to pull back. Pinning
+        # it here stops Gemini's default from drifting between candidates.
+        "샷 프레이밍: 무릎 위 미디엄 샷 (medium shot, knee-up). "
+        "얼굴과 상체가 프레임의 중심을 차지하고, 자연스러운 정면 포즈. "
         "인물 한 명만 등장."
     ]
     if text_prompt:

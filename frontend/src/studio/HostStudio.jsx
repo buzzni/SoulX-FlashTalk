@@ -40,6 +40,10 @@ const INITIAL_STATE = {
   voice: { source: 'tts', voiceId: null, voiceName: null, paragraphs: [''], script: '', stability: 0.5, style: 0.3, similarity: 0.75, speed: 1, generated: false, uploadedAudio: null, cloneSample: null },
   script: '',
   resolution: { key: '448p', label: '448p', width: 448, height: 768, size: '~8MB', speed: '빠름', default: true },
+  // Shared Gemini image_size ("1K" | "2K") — applied to both Step 1 host
+  // and Step 2 composite so reference + output resolutions match. Users
+  // set it once in Step 1; Step 2 just follows. 2K is ~2-4× slower.
+  imageQuality: '1K',
 };
 
 const DENSITY_KEY = 'showhost_density';

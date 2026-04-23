@@ -125,7 +125,8 @@ const Step1Host = ({ state, update }) => {
       }
       // Pass _seeds only on retry — first call lets the backend default win
       // for the explicit "two users see the same starting set" contract.
-      const req = { ...host, faceRefPath, outfitRefPath };
+      // imageSize comes from the shared state.imageQuality so Step 2 follows.
+      const req = { ...host, faceRefPath, outfitRefPath, imageSize: state.imageQuality };
       if (attempts > 0) req._seeds = SEEDS;
 
       let successCount = 0;
@@ -323,6 +324,20 @@ const Step1Host = ({ state, update }) => {
               { value: 0.4, label: '안정적' },
               { value: 0.7, label: '보통' },
               { value: 1.0, label: '창의적' },
+            ]}
+          />
+        </Field>
+
+        <Field
+          label="이미지 품질"
+          hint="1단계와 2단계 모두에 적용돼요 · 고화질은 생성 시간이 약 2배 걸려요"
+        >
+          <Segmented
+            value={state.imageQuality || '1K'}
+            onChange={v => update(s => ({ ...s, imageQuality: v }))}
+            options={[
+              { value: '1K', label: '표준 (1K)' },
+              { value: '2K', label: '고화질 (2K)' },
             ]}
           />
         </Field>

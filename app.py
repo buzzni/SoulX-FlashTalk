@@ -101,6 +101,19 @@ def update_task(task_id: str, stage: str, progress: float, message: str):
     })
 
 
+def _validate_image_size(raw: Optional[str]) -> str:
+    """Only {"1K", "2K"} are valid Gemini image_size values for this model.
+    Anything else would silently degrade to 1K or error on the API side —
+    reject up front so the user gets a clear 400."""
+    normalized = (raw or "1K").strip().upper()
+    if normalized not in {"1K", "2K"}:
+        raise HTTPException(
+            status_code=400,
+            detail=f"imageSize must be '1K' or '2K', got {raw!r}"
+        )
+    return normalized
+
+
 def _parse_seeds_form(raw: Optional[str]) -> Optional[List[int]]:
     """Parse the `seeds` form field (JSON array of ints) or return None.
 
@@ -1572,6 +1585,7 @@ async def host_generate(
     # so retry produces new variants instead of the deterministic default
     # set. None → backend falls back to FIXED_DEFAULT_SEEDS.
     seeds: Optional[str] = Form(None),
+    imageSize: str = Form("1K"),
     n: int = Form(4),
     temperature: Optional[float] = Form(None),
 ):
@@ -1615,6 +1629,7 @@ async def host_generate(
             outfit_strength=outfitStrength,
             outfit_text=outfitText,
             seeds=parsed_seeds,
+            image_size=_validate_image_size(imageSize),
             n=n,
             temperature=temperature,
         )
@@ -1639,6 +1654,10 @@ async def host_generate_stream(
     outfitStrength: float = Form(0.7),
     outfitText: Optional[str] = Form(None),
     seeds: Optional[str] = Form(None),
+    # Gemini image_size — shared between Step 1 and Step 2 so the reference
+    # resolution matches the target. "1K" (default, fast) | "2K" (sharper,
+    # ~2-4× time). Rejected for any other value.
+    imageSize: str = Form("1K"),
     n: int = Form(4),
     temperature: Optional[float] = Form(None),
 ):
@@ -1682,6 +1701,7 @@ async def host_generate_stream(
                 outfit_strength=outfitStrength,
                 outfit_text=outfitText,
                 seeds=_parse_seeds_form(seeds),
+                image_size=_validate_image_size(imageSize),
                 n=n,
                 temperature=temperature,
             ):
@@ -1720,6 +1740,7 @@ async def composite_generate(
     rembg: bool = True,  # query param: ?rembg=false to skip
     temperature: Optional[float] = Form(None),
     seeds: Optional[str] = Form(None),
+    imageSize: str = Form("1K"),
 ):
     """Generate N=4 composite candidates (host + products + background scene) via Gemini.
 
@@ -1761,6 +1782,7 @@ async def composite_generate(
             rembg_products=rembg,
             temperature=temperature,
             seeds=_parse_seeds_form(seeds),
+            image_size=_validate_image_size(imageSize),
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -1785,6 +1807,7 @@ async def composite_generate_stream(
     rembg: bool = True,
     temperature: Optional[float] = Form(None),
     seeds: Optional[str] = Form(None),
+    imageSize: str = Form("1K"),
 ):
     """SSE variant of /api/composite/generate. Emits {type: "init"} with
     translated direction immediately, then one frame per completed candidate,
@@ -1827,6 +1850,7 @@ async def composite_generate_stream(
                 rembg_products=rembg,
                 temperature=temperature,
                 seeds=_parse_seeds_form(seeds),
+                image_size=_validate_image_size(imageSize),
             ):
                 yield f"data: {json.dumps(evt)}\n\n"
         except ValueError as e:
