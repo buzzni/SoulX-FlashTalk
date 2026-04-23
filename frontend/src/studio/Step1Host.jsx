@@ -330,7 +330,7 @@ const Step1Host = ({ state, update }) => {
 
         <Field
           label="이미지 품질"
-          hint="1단계와 2단계 모두에 적용돼요 · 고화질은 생성 시간이 약 2배 걸려요"
+          hint="1단계와 2단계 모두에 적용돼요 · 고화질일수록 생성 시간이 길어져요 (2K ~2배, 4K ~4배)"
         >
           <Segmented
             value={state.imageQuality || '1K'}
@@ -338,6 +338,7 @@ const Step1Host = ({ state, update }) => {
             options={[
               { value: '1K', label: '표준 (1K)' },
               { value: '2K', label: '고화질 (2K)' },
+              { value: '4K', label: '초고화질 (4K)' },
             ]}
           />
         </Field>

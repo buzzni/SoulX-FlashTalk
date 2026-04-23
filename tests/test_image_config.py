@@ -48,14 +48,19 @@ def test_system_instruction_passthrough(build_config):
     assert cfg.system_instruction is not None
 
 
-def test_image_size_defaults_to_1K_and_accepts_2K(build_config):
-    """image_size is passed through to ImageConfig; "1K" default and "2K"
-    both serialize OK. This is the knob Step 1's 이미지 품질 selector toggles."""
+def test_image_size_defaults_to_1K_and_accepts_2K_4K(build_config):
+    """image_size is passed through to ImageConfig. Verified live against
+    gemini-3.1-flash-image-preview 2026-04-23: 1K/2K/4K all produce images
+    (768×1376 / 1536×2752 / 3072×5504). The value is what the Step 1
+    '이미지 품질' selector emits and gets forwarded to both stages."""
     default = build_config((720, 1280))
     assert default.image_config.image_size == "1K"
 
     hd = build_config((720, 1280), image_size="2K")
     assert hd.image_config.image_size == "2K"
+
+    uhd = build_config((720, 1280), image_size="4K")
+    assert uhd.image_config.image_size == "4K"
 
 
 def test_config_serializes_for_mldev_backend(build_config):

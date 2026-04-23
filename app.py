@@ -102,14 +102,19 @@ def update_task(task_id: str, stage: str, progress: float, message: str):
 
 
 def _validate_image_size(raw: Optional[str]) -> str:
-    """Only {"1K", "2K"} are valid Gemini image_size values for this model.
-    Anything else would silently degrade to 1K or error on the API side —
-    reject up front so the user gets a clear 400."""
+    """Gemini 3.1 flash-image-preview accepts 1K / 2K / 4K (verified live
+    2026-04-23). Actual pixel counts at 9:16:
+      1K → 768×1376 (~1.4MP)
+      2K → 1536×2752 (~4.2MP)
+      4K → 3072×5504 (~17MP, ~4× time and ~15-30MB PNGs)
+    Reject anything else up front so users get a clear 400 instead of
+    the Gemini API's "Request contains an invalid argument." blob.
+    """
     normalized = (raw or "1K").strip().upper()
-    if normalized not in {"1K", "2K"}:
+    if normalized not in {"1K", "2K", "4K"}:
         raise HTTPException(
             status_code=400,
-            detail=f"imageSize must be '1K' or '2K', got {raw!r}"
+            detail=f"imageSize must be '1K', '2K', or '4K', got {raw!r}"
         )
     return normalized
 
