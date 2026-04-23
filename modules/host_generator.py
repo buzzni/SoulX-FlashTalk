@@ -36,6 +36,10 @@ async def generate_host_candidates(
     negative_prompt: Optional[str] = None,
     face_strength: float = 0.7,
     outfit_strength: float = 0.7,
+    # Free-text outfit description — used INSTEAD of (or in addition to) the
+    # outfit reference image. Lets users say "베이지 니트, 청바지" without
+    # having to find an outfit photo.
+    outfit_text: Optional[str] = None,
     n: int = 4,
     timeout_per_call: float = 45.0,
     min_success: int = 2,
@@ -91,6 +95,7 @@ async def generate_host_candidates(
             negative_prompt=negative_prompt,
             face_strength=face_strength,
             outfit_strength=outfit_strength,
+            outfit_text=outfit_text,
             timeout=timeout_per_call,
             output_dir=out_dir,
             temperature=temperature,
@@ -141,6 +146,7 @@ async def stream_host_candidates(
     negative_prompt: Optional[str] = None,
     face_strength: float = 0.7,
     outfit_strength: float = 0.7,
+    outfit_text: Optional[str] = None,
     n: int = 4,
     timeout_per_call: float = 45.0,
     min_success: int = 2,
@@ -177,6 +183,7 @@ async def stream_host_candidates(
                 negative_prompt=negative_prompt,
                 face_strength=face_strength,
                 outfit_strength=outfit_strength,
+                outfit_text=outfit_text,
                 timeout=timeout_per_call,
                 output_dir=out_dir,
                 temperature=temperature,
@@ -251,6 +258,7 @@ async def _generate_one(
     timeout: float,
     output_dir: str,
     temperature: Optional[float] = None,
+    outfit_text: Optional[str] = None,
 ) -> Optional[str]:
     """Single Gemini call with per-call timeout + semaphore-bounded concurrency."""
     async with _gemini_semaphore:
@@ -267,6 +275,7 @@ async def _generate_one(
                 negative_prompt=negative_prompt,
                 face_strength=face_strength,
                 outfit_strength=outfit_strength,
+                outfit_text=outfit_text,
                 output_dir=output_dir,
                 temperature=temperature,
             ),
@@ -288,6 +297,7 @@ async def _run_gemini(
     outfit_strength: float,
     output_dir: str,
     temperature: Optional[float] = None,
+    outfit_text: Optional[str] = None,
 ) -> Optional[str]:
     """Wrap the (sync) Gemini client call in an executor."""
     loop = asyncio.get_running_loop()
@@ -298,6 +308,7 @@ async def _run_gemini(
             style_ref_path, extra_prompt, builder, negative_prompt,
             face_strength, outfit_strength, output_dir,
             temperature=temperature,
+            outfit_text=outfit_text,
         ),
     )
 
@@ -307,6 +318,7 @@ def _sync_generate(
     style_ref_path, extra_prompt, builder, negative_prompt,
     face_strength, outfit_strength, output_dir,
     temperature: Optional[float] = None,
+    outfit_text: Optional[str] = None,
 ) -> Optional[str]:
     from io import BytesIO
 
@@ -325,25 +337,57 @@ def _sync_generate(
     # Portrait 9:16 for show-host (matches HostStudio design)
     target_size = (448, 768)
 
+    # Strength clauses now go INLINE next to each labeled image (built below)
+    # — leaving them in the prompt body without per-image anchoring let Gemini
+    # ignore the outfit reference entirely (multiple unlabeled images all
+    # treated as face refs). _build_host_prompt no longer emits them.
     prompt = _build_host_prompt(
         mode=mode,
         text_prompt=text_prompt,
         extra_prompt=extra_prompt,
         builder=builder,
-        face_strength=face_strength,
-        outfit_strength=outfit_strength,
+        outfit_text=outfit_text,
     )
     prompt = _sanitize_user_prompt(prompt)
 
     sys_instruction = _build_host_system_instruction(negative_prompt)
 
     client = _get_gemini_client()
+
+    # Interleave text labels + images so Gemini knows which attached image is
+    # the face vs outfit vs style ref. Without this, all images blur into "a
+    # bunch of references" and the model has no way to honor "use the OUTFIT
+    # from image #2" — see bug report 2026-04-23 (face-outfit mode silently
+    # ignored the outfit photo across all 4 candidates).
     contents = [prompt]
     has_ref = False
-    for ref in (face_ref_path, outfit_ref_path, style_ref_path):
-        if ref and os.path.exists(ref):
-            contents.append(Image.open(ref).convert("RGB"))
-            has_ref = True
+    if face_ref_path and os.path.exists(face_ref_path):
+        contents.append(
+            "[Reference image #1 — FACE]: This is the face/identity reference. "
+            + _strength_phrase("face", face_strength)
+        )
+        contents.append(Image.open(face_ref_path).convert("RGB"))
+        has_ref = True
+    if outfit_ref_path and os.path.exists(outfit_ref_path):
+        contents.append(
+            "[Reference image — OUTFIT/CLOTHING]: This is the clothing/outfit "
+            "reference. Use the garment's silhouette, color, fabric, and "
+            "styling on the generated person. " + _strength_phrase("outfit", outfit_strength)
+        )
+        contents.append(Image.open(outfit_ref_path).convert("RGB"))
+        has_ref = True
+    if style_ref_path and os.path.exists(style_ref_path):
+        contents.append(
+            "[Reference image — STYLE]: This is a visual-style/mood reference. "
+            "Match its lighting, color grading, and overall aesthetic."
+        )
+        contents.append(Image.open(style_ref_path).convert("RGB"))
+        has_ref = True
+    if outfit_text and outfit_text.strip():
+        contents.append(
+            "[Outfit description (text)]: Wear the following outfit on the "
+            "generated person — " + outfit_text.strip()
+        )
 
     def _do():
         return client.models.generate_content(
@@ -395,10 +439,17 @@ def _build_host_prompt(
     text_prompt: Optional[str],
     extra_prompt: Optional[str],
     builder: Optional[Dict[str, str]],
-    face_strength: float,
-    outfit_strength: float,
+    outfit_text: Optional[str] = None,
 ) -> str:
-    """Assemble Korean + English scaffolding into a single Gemini prompt."""
+    """Assemble the body prompt — descriptive text only.
+
+    Strength clauses are NOT included here anymore; they now ride next to
+    the image they reference (in _sync_generate's interleaved contents).
+    outfit_text is forwarded through, but for layout consistency the
+    generator also adds a separate "[Outfit description (text)]:" labeled
+    block in contents — keeping it in the body too gives Gemini two passes
+    at the cue.
+    """
     parts = ["AI 쇼호스트 인물 사진, 9:16 세로 프레임, 스튜디오 조명, 사실적 인물사진."]
     if text_prompt:
         parts.append(text_prompt)
@@ -408,11 +459,8 @@ def _build_host_prompt(
             parts.append("특성: " + ", ".join(suffix))
     if extra_prompt:
         parts.append(extra_prompt)
-    if mode == "face-outfit":
-        parts.append(_strength_phrase("face", face_strength))
-        parts.append(_strength_phrase("outfit", outfit_strength))
-    elif mode == "style-ref":
-        parts.append(_strength_phrase("face", face_strength))
+    if outfit_text and outfit_text.strip():
+        parts.append("의상 설명: " + outfit_text.strip())
     return "\n\n".join(parts)
 
 

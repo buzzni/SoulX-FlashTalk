@@ -245,13 +245,19 @@ const Step1Host = ({ state, update }) => {
                   sub="정면·밝은 사진 추천"
                 />
               </Field>
-              <Field label="의상" hint="없어도 돼요">
+              <Field label="의상" hint="사진이나 글, 둘 다 가능 · 없어도 돼요">
                 <RefInput
                   file={host.outfitRef}
                   onFile={f => setField('outfitRef', f)}
                   onRemove={() => setField('outfitRef', null)}
                   label="입힐 옷 사진 올리기"
                   sub="원하는 옷차림이 있을 때"
+                />
+                <input
+                  className="input mt-2"
+                  placeholder="또는 글로 설명: 예) 베이지 니트, 청바지"
+                  value={host.outfitText || ''}
+                  onChange={e => setField('outfitText', e.target.value)}
                 />
               </Field>
             </div>

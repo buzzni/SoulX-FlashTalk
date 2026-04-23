@@ -73,17 +73,33 @@ def test_strength_phrase_boundary_085():
 def test_build_host_prompt_includes_all_parts():
     from modules.host_generator import _build_host_prompt
 
+    # Strength clauses moved out of _build_host_prompt — they now ride
+    # next to each labeled image in _sync_generate's interleaved contents.
     prompt = _build_host_prompt(
         mode="text",
         text_prompt="밝은 여성",
         extra_prompt="친근한 미소",
         builder={"성별": "여성", "나이": "30대"},
-        face_strength=0.7,
-        outfit_strength=0.7,
     )
     assert "밝은 여성" in prompt
     assert "친근한 미소" in prompt
     assert "여성" in prompt and "30대" in prompt
+
+
+def test_build_host_prompt_includes_outfit_text():
+    """outfit_text is forwarded into the body so Gemini sees the cue twice
+    (here + as a labeled segment in the interleaved contents)."""
+    from modules.host_generator import _build_host_prompt
+
+    prompt = _build_host_prompt(
+        mode="face-outfit",
+        text_prompt="30대 여성",
+        extra_prompt=None,
+        builder=None,
+        outfit_text="베이지 니트, 청바지",
+    )
+    assert "베이지 니트" in prompt
+    assert "의상 설명" in prompt
 
 
 def test_build_system_instruction_includes_negative_prompt():
@@ -99,6 +115,138 @@ def test_build_system_instruction_no_negative():
 
     sys = _build_host_system_instruction(None)
     assert "Avoid" not in sys
+
+
+# ---- Multi-image labeling (regression for "outfit ref ignored" bug, 2026-04-23) ----
+
+
+def test_sync_generate_interleaves_face_and_outfit_with_explicit_labels(tmp_path, monkeypatch):
+    """Capture the actual `contents` list sent to client.models.generate_content
+    and verify each image is preceded by an explicit FACE / OUTFIT label.
+
+    Before the fix the contents list was just [prompt_text, face_img, outfit_img]
+    with the prompt body referring to "the reference face" / "the reference
+    outfit" abstractly — Gemini had no way to map either phrase to either
+    image, so the outfit photo got ignored across all 4 candidates.
+    """
+    from PIL import Image as _PIL
+    from modules import host_generator
+
+    # Real on-disk image files so _sync_generate's `os.path.exists` + `Image.open`
+    # don't have to be mocked.
+    face_path = tmp_path / "face.png"
+    outfit_path = tmp_path / "outfit.png"
+    _PIL.new("RGB", (10, 10), (255, 0, 0)).save(face_path)
+    _PIL.new("RGB", (10, 10), (0, 255, 0)).save(outfit_path)
+
+    captured = {}
+
+    class _FakeImagePart:
+        inline_data = type("D", (), {"data": _png_bytes((10, 10), (50, 50, 50))})()
+    class _FakeContent:
+        parts = [_FakeImagePart()]
+    class _FakeCandidate:
+        content = _FakeContent()
+    class _FakeResp:
+        candidates = [_FakeCandidate()]
+
+    class _FakeModels:
+        def generate_content(self, model, contents, config):
+            captured["contents"] = contents
+            captured["model"] = model
+            return _FakeResp()
+
+    class _FakeClient:
+        models = _FakeModels()
+
+    monkeypatch.setattr("modules.image_compositor._get_gemini_client", lambda: _FakeClient())
+
+    out_dir = tmp_path / "out"
+    out_dir.mkdir()
+
+    host_generator._sync_generate(
+        seed=10,
+        mode="face-outfit",
+        text_prompt="30대 여성",
+        face_ref_path=str(face_path),
+        outfit_ref_path=str(outfit_path),
+        style_ref_path=None,
+        extra_prompt=None,
+        builder=None,
+        negative_prompt=None,
+        face_strength=0.95,   # "똑같이"
+        outfit_strength=0.7,  # "가깝게"
+        output_dir=str(out_dir),
+    )
+
+    contents = captured["contents"]
+    # Must contain explicit per-image labels — otherwise we've regressed
+    # to the original ambiguous "all images mashed together" layout.
+    label_blob = " ".join(c for c in contents if isinstance(c, str))
+    assert "FACE" in label_blob
+    assert "OUTFIT" in label_blob or "CLOTHING" in label_blob
+    # Strength clauses must travel with their respective images
+    assert "Match the reference face as exactly as possible" in label_blob
+    assert "Preserve the key features of the reference outfit closely" in label_blob
+
+
+def test_sync_generate_includes_outfit_text_when_no_outfit_image(tmp_path, monkeypatch):
+    """outfit_text alone (no outfit image) still reaches the prompt — needed
+    so users without an outfit photo can describe it in writing."""
+    from PIL import Image as _PIL
+    from modules import host_generator
+
+    face_path = tmp_path / "face.png"
+    _PIL.new("RGB", (10, 10), (255, 0, 0)).save(face_path)
+
+    captured = {}
+
+    class _FakeImagePart:
+        inline_data = type("D", (), {"data": _png_bytes((10, 10), (0, 0, 0))})()
+    class _FakeResp:
+        candidates = [type("C", (), {"content": type("X", (), {"parts": [_FakeImagePart()]})()})()]
+
+    class _FakeClient:
+        class models:
+            @staticmethod
+            def generate_content(model, contents, config):
+                captured["contents"] = contents
+                return _FakeResp()
+
+    monkeypatch.setattr("modules.image_compositor._get_gemini_client", lambda: _FakeClient())
+
+    out_dir = tmp_path / "out"
+    out_dir.mkdir()
+
+    host_generator._sync_generate(
+        seed=10,
+        mode="style-ref",
+        text_prompt="30대 여성",
+        face_ref_path=str(face_path),
+        outfit_ref_path=None,
+        style_ref_path=None,
+        extra_prompt=None,
+        builder=None,
+        negative_prompt=None,
+        face_strength=0.7,
+        outfit_strength=0.7,
+        output_dir=str(out_dir),
+        outfit_text="베이지 니트, 청바지",
+    )
+
+    label_blob = " ".join(c for c in captured["contents"] if isinstance(c, str))
+    assert "베이지 니트" in label_blob
+    # Should NOT claim there's an outfit image
+    assert "Reference image — OUTFIT" not in label_blob
+
+
+def _png_bytes(size, color):
+    """Tiny PNG byte payload for fake Gemini responses."""
+    from io import BytesIO
+    from PIL import Image as _PIL
+    buf = BytesIO()
+    _PIL.new("RGB", size, color).save(buf, format="PNG")
+    return buf.getvalue()
 
 
 # ---- Async behavior (mocked Gemini) ----

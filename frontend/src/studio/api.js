@@ -236,6 +236,12 @@ export function buildHostGenerateBody(host) {
   if (host.styleRefPath) body.append('styleRefPath', host.styleRefPath);
   if (typeof host.faceStrength === 'number') body.append('faceStrength', String(host.faceStrength));
   if (typeof host.outfitStrength === 'number') body.append('outfitStrength', String(host.outfitStrength));
+  // outfitText: free-text outfit description, used INSTEAD of (or in addition
+  // to) outfitRef. Backend interleaves both into the prompt with explicit
+  // labels so Gemini knows which is the outfit reference.
+  if (host.outfitText && host.outfitText.trim()) {
+    body.append('outfitText', host.outfitText.trim());
+  }
   body.append('n', '4');
   // Backend accepts temperature ∈ [0.0, 2.0]. UI exposes three preset values
   // (0.4 / 0.7 / 1.0). Pass through only when user actually picked one.

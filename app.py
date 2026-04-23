@@ -1547,6 +1547,10 @@ async def host_generate(
     styleRefPath: Optional[str] = Form(None),
     faceStrength: float = Form(0.7),
     outfitStrength: float = Form(0.7),
+    # Free-text outfit description — used INSTEAD of (or alongside) the
+    # outfit reference image. Lets users describe the outfit when they have
+    # no reference photo handy.
+    outfitText: Optional[str] = Form(None),
     n: int = Form(4),
     temperature: Optional[float] = Form(None),
 ):
@@ -1586,6 +1590,7 @@ async def host_generate(
             negative_prompt=negativePrompt,
             face_strength=faceStrength,
             outfit_strength=outfitStrength,
+            outfit_text=outfitText,
             n=n,
             temperature=temperature,
         )
@@ -1608,6 +1613,7 @@ async def host_generate_stream(
     styleRefPath: Optional[str] = Form(None),
     faceStrength: float = Form(0.7),
     outfitStrength: float = Form(0.7),
+    outfitText: Optional[str] = Form(None),
     n: int = Form(4),
     temperature: Optional[float] = Form(None),
 ):
@@ -1649,6 +1655,7 @@ async def host_generate_stream(
                 negative_prompt=negativePrompt,
                 face_strength=faceStrength,
                 outfit_strength=outfitStrength,
+                outfit_text=outfitText,
                 n=n,
                 temperature=temperature,
             ):
