@@ -99,7 +99,7 @@ async def generate_host_candidates(
         ValueError: invalid mode / missing required inputs
         RuntimeError: fewer than min_success candidates succeeded
     """
-    _validate_inputs(mode, text_prompt, face_ref_path, outfit_ref_path, style_ref_path)
+    _validate_inputs(mode, text_prompt, face_ref_path, outfit_ref_path, style_ref_path, outfit_text)
 
     out_dir = output_dir or config.HOSTS_DIR
     os.makedirs(out_dir, exist_ok=True)
@@ -193,11 +193,18 @@ async def stream_host_candidates(
     The UI consumes these via SSE so each finished tile renders immediately
     instead of waiting for the slowest sibling (blocking gather).
     """
-    _validate_inputs(mode, text_prompt, face_ref_path, outfit_ref_path, style_ref_path)
+    _validate_inputs(mode, text_prompt, face_ref_path, outfit_ref_path, style_ref_path, outfit_text)
 
     out_dir = output_dir or config.HOSTS_DIR
     os.makedirs(out_dir, exist_ok=True)
     seeds = _resolve_seeds(seeds, n)
+
+    # Emit an init event up front so the UI can show its placeholder spinners
+    # ONLY after the request has been accepted — previously Step1 drew the
+    # 4 spinners as soon as the button was clicked, even when validation
+    # failed and the user only saw an error toast. With init, the frontend
+    # waits for this first byte to confirm the call succeeded.
+    yield {"type": "init", "seeds": seeds, "total": n}
 
     async def _run_tagged(seed: int):
         try:
@@ -259,18 +266,26 @@ async def stream_host_candidates(
     }
 
 
-def _validate_inputs(mode, text_prompt, face_ref, outfit_ref, style_ref):
+def _validate_inputs(mode, text_prompt, face_ref, outfit_ref, style_ref, outfit_text=None):
+    """Require at least one usable input — text prompt, any reference image,
+    or an outfit_text description. Mode strings are now purely informational
+    (they drive logging / metadata); previously 'style-ref' hard-required
+    style_ref_path which made "face-only + outfit text" break with an
+    irrelevant error.
+    """
+    if mode not in {"text", "face-outfit", "style-ref"}:
+        raise ValueError(f"Unknown mode: {mode}")
     if mode == "text":
         if not text_prompt or len(text_prompt.strip()) < 5:
             raise ValueError("'text' mode requires text_prompt (≥5 chars)")
-    elif mode == "face-outfit":
-        if not face_ref or not outfit_ref:
-            raise ValueError("'face-outfit' mode requires both face_ref_path and outfit_ref_path")
-    elif mode == "style-ref":
-        if not style_ref:
-            raise ValueError("'style-ref' mode requires style_ref_path")
-    else:
-        raise ValueError(f"Unknown mode: {mode}")
+        return
+    # Image modes — accept any combination of face/outfit/style image plus
+    # optional outfit_text. The generator skips missing inputs gracefully.
+    has_any_input = bool(face_ref or outfit_ref or style_ref or (outfit_text and outfit_text.strip()))
+    if not has_any_input:
+        raise ValueError(
+            f"'{mode}' mode needs at least one reference image or an outfit_text"
+        )
 
 
 async def _generate_one(
@@ -480,7 +495,11 @@ def _build_host_prompt(
     block in contents — keeping it in the body too gives Gemini two passes
     at the cue.
     """
-    parts = ["AI 쇼호스트 인물 사진, 9:16 세로 프레임, 스튜디오 조명, 사실적 인물사진."]
+    parts = [
+        "AI 쇼호스트 인물 사진, 9:16 세로 프레임, 스튜디오 조명, 사실적 인물사진. "
+        "배경은 반드시 베이지·크림 톤의 깔끔한 단색 배경. 소품·가구·텍스트·로고 없음. "
+        "인물 한 명만 등장."
+    ]
     if text_prompt:
         parts.append(text_prompt)
     if builder:
@@ -509,9 +528,15 @@ def _build_host_system_instruction(negative_prompt: Optional[str]) -> str:
     """§5.1.1: system_instruction for host generation."""
     base = (
         "Generate a single person (AI shopping host) in a neutral pose. "
-        "No products, no furniture, no complex background. "
+        # Background is a hard constraint — the downstream FlashTalk pipeline
+        # composites the host onto scene backgrounds later, so a plain beige
+        # studio backdrop makes rembg extraction clean. Anything else
+        # (props, furniture, outdoor scenes) breaks Step 2 composites.
+        "BACKGROUND: a plain, solid beige / cream / off-white studio backdrop. "
+        "No props, no furniture, no plants, no windows, no text, no logos, "
+        "no patterns — the background must be a uniform soft beige color. "
         "Focus on face and outfit clarity. "
-        "Photorealistic portrait. No text, no watermarks, no logos."
+        "Photorealistic portrait. No watermarks."
     )
     if negative_prompt:
         base += f"\n\nAvoid the following in the output: {negative_prompt}"

@@ -103,7 +103,11 @@ const Step1Host = ({ state, update }) => {
     // fresh randoms so the user actually sees new output (otherwise same
     // input + same seeds = same 4 images, and "다시 만들기" feels broken).
     const SEEDS = attempts === 0 ? [10, 42, 77, 128] : makeRandomSeeds(4);
-    setVariants(SEEDS.map(s => ({ seed: s, id: `v${s}`, placeholder: true })));
+    // Placeholders are NOT drawn yet — we wait for the 'init' SSE event
+    // to confirm the backend accepted the request. Showing spinners
+    // before that meant a validation failure would flash 4 spinners and
+    // then leave them stuck on screen.
+    setVariants([]);
     try {
       let faceRefPath = host.faceRefPath || null;
       let outfitRefPath = host.outfitRefPath || null;
@@ -128,7 +132,13 @@ const Step1Host = ({ state, update }) => {
       let errorCount = 0;
       const errs = [];
       for await (const evt of streamHost(req)) {
-        if (evt.type === 'candidate') {
+        if (evt.type === 'init') {
+          // Request accepted — now safe to show the 4 placeholder spinners.
+          // Prefer the seeds the backend echoed back so slot order stays
+          // consistent even if we ever let the backend rewrite them.
+          const slotSeeds = Array.isArray(evt.seeds) && evt.seeds.length > 0 ? evt.seeds : SEEDS;
+          setVariants(slotSeeds.map(s => ({ seed: s, id: `v${s}`, placeholder: true })));
+        } else if (evt.type === 'candidate') {
           successCount += 1;
           setVariants(vs => vs.map(v =>
             v.seed === evt.seed

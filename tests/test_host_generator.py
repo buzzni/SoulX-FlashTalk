@@ -20,20 +20,29 @@ def test_validate_inputs_text_mode_requires_prompt():
         _validate_inputs("text", "x", None, None, None)  # < 5 chars
 
 
-def test_validate_inputs_face_outfit_requires_both_refs():
+def test_validate_inputs_image_modes_need_at_least_one_input():
+    """Relaxed contract (2026-04-23): image modes accept any combination of
+    face/outfit/style ref or an outfit_text description — previously
+    'face-outfit' hard-required BOTH images and 'style-ref' hard-required
+    style_ref_path, which broke the common "face photo + outfit description"
+    flow with an unrelated-sounding error."""
     from modules.host_generator import _validate_inputs
 
-    with pytest.raises(ValueError, match="face_ref_path"):
+    # Empty state → rejected
+    with pytest.raises(ValueError, match="at least one"):
         _validate_inputs("face-outfit", None, None, None, None)
-    with pytest.raises(ValueError, match="face_ref_path"):
-        _validate_inputs("face-outfit", None, "face.png", None, None)  # missing outfit
-
-
-def test_validate_inputs_style_ref_requires_style():
-    from modules.host_generator import _validate_inputs
-
-    with pytest.raises(ValueError, match="style_ref_path"):
+    with pytest.raises(ValueError, match="at least one"):
         _validate_inputs("style-ref", None, None, None, None)
+
+    # Face ref alone is enough
+    _validate_inputs("face-outfit", None, "face.png", None, None)
+    _validate_inputs("style-ref", None, "face.png", None, None)
+
+    # Face ref + outfit text (the regression case) should pass
+    _validate_inputs("style-ref", None, "face.png", None, None, "베이지 니트")
+
+    # outfit_text alone (rare but technically valid) should also pass
+    _validate_inputs("face-outfit", None, None, None, None, "청바지 셔츠")
 
 
 def test_validate_inputs_unknown_mode_raises():
@@ -238,6 +247,46 @@ def test_sync_generate_includes_outfit_text_when_no_outfit_image(tmp_path, monke
     assert "베이지 니트" in label_blob
     # Should NOT claim there's an outfit image
     assert "Reference image — OUTFIT" not in label_blob
+
+
+# ---- System instruction + stream init ----
+
+
+def test_system_instruction_pins_beige_background():
+    """Step 1 must always produce a plain beige backdrop — Step 2 composites
+    onto scene backgrounds so anything else (props, outdoor, textured)
+    breaks rembg extraction downstream."""
+    from modules.host_generator import _build_host_system_instruction
+    sys = _build_host_system_instruction(None)
+    assert "beige" in sys.lower() or "cream" in sys.lower()
+    assert "no props" in sys.lower() or "no furniture" in sys.lower()
+
+
+@pytest.mark.asyncio
+async def test_stream_host_emits_init_before_candidates(monkeypatch):
+    """Frontend relies on the init event to know the backend accepted the
+    request — placeholder spinners only render after init arrives. Regression
+    for: "호출 성공시에만 하단 후보 4개의 스피너가 돌도록해줘" (2026-04-23)."""
+    from modules import host_generator
+
+    async def fake_one(*a, **kw):
+        return f"/fake/host_s{kw['seed']}.png"
+
+    monkeypatch.setattr(host_generator, "_generate_one", fake_one)
+
+    events = []
+    async for evt in host_generator.stream_host_candidates(
+        mode="text",
+        text_prompt="30대 여성 쇼호스트",
+        n=4,
+    ):
+        events.append(evt)
+
+    assert events[0]["type"] == "init"
+    assert events[0]["total"] == 4
+    assert events[0]["seeds"] == [10, 42, 77, 128]  # fixed defaults (no retry)
+    # And candidates follow (4 of them)
+    assert sum(1 for e in events if e["type"] == "candidate") == 4
 
 
 # ---- Seed policy (regression for "다시 만들기 = same 4 results" complaint) ----
