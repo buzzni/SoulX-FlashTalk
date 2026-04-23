@@ -9,6 +9,10 @@ const PreviewPanel = ({ state, step = 1 }) => {
   const hostReady = host.imageUrl || host.generated;
   const bgReady = background.imageUrl || background.preset || background.prompt || background.url;
   const compositeReady = composition.generated;
+  // After Step 2 candidate selection, selectedUrl is the actual generated PNG.
+  // Mirror Step 1's host.imageUrl flow so the right preview shows the real
+  // image, not the gradient/silhouette placeholder we used pre-generation.
+  const compositeImageUrl = composition.selectedUrl || null;
 
   const waveBars = useMemo(() => Array.from({ length: 24 }, (_, i) => 0.3 + Math.abs(Math.sin(i * 0.7)) * 0.7), []);
 
@@ -53,7 +57,23 @@ const PreviewPanel = ({ state, step = 1 }) => {
               </>
             )}
 
-            {step >= 2 && showComposite && (
+            {step >= 2 && showComposite && compositeImageUrl && (
+              <div
+                className="preview-host"
+                style={{
+                  position: 'absolute',
+                  inset: 0,
+                  backgroundImage: `url(${compositeImageUrl})`,
+                  backgroundSize: 'cover',
+                  backgroundPosition: 'center',
+                }}
+              />
+            )}
+
+            {step >= 2 && showComposite && !compositeImageUrl && (
+              // Fallback: Step 2 marked composition.generated=true but for some
+              // reason we have no selectedUrl (legacy state, race, etc.) — keep
+              // the old silhouette placeholder so the panel doesn't go blank.
               <>
                 <div className="preview-bg" style={{ background: composition._previewBg || background._gradient }} />
                 <div style={{
@@ -67,18 +87,6 @@ const PreviewPanel = ({ state, step = 1 }) => {
                   background: composition._previewHost || host._gradient,
                   borderRadius: '40% 40% 10% 10% / 50% 50% 10% 10%',
                   opacity: 0.92,
-                }} />
-                <div style={{
-                  position: 'absolute',
-                  left: `${(composition._hostX ?? 50) > 50 ? 22 : 72}%`,
-                  top: `${composition._productY ?? 70}%`,
-                  width: 26,
-                  height: 26,
-                  borderRadius: 4,
-                  background: 'oklch(0.85 0.1 60)',
-                  border: '2px solid oklch(0.3 0.05 60)',
-                  transform: 'translate(-50%, -50%)',
-                  boxShadow: '0 4px 12px oklch(0 0 0 / 0.2)',
                 }} />
               </>
             )}
