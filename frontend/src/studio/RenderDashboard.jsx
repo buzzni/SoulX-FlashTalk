@@ -63,14 +63,18 @@ const Confetti = () => {
   );
 };
 
-const RenderDashboard = ({ state, onBack, onReset }) => {
+const RenderDashboard = ({ state, attachToTaskId = null, onBack, onReset }) => {
+  // Two entry modes:
+  //   - dispatch: attachToTaskId is null → POST /api/generate then subscribe
+  //   - attach:   attachToTaskId is a string → skip dispatch, subscribe directly
+  // Attach is what powers QueueStatus click-to-monitor.
   const [job, setJob] = useState(() => ({
-    id: 'job_' + Date.now(),
-    taskId: null,
-    status: 'dispatching',
+    id: attachToTaskId ? `job_${attachToTaskId.slice(0, 8)}` : 'job_' + Date.now(),
+    taskId: attachToTaskId || null,
+    status: attachToTaskId ? 'rendering' : 'dispatching',
     progress: 0,
     stage: 'queued',
-    message: '영상 만들기 요청 중…',
+    message: attachToTaskId ? '실행 중인 작업에 연결 중…' : '영상 만들기 요청 중…',
     videoUrl: null,
     error: null,
     startedAt: Date.now(),
@@ -84,11 +88,46 @@ const RenderDashboard = ({ state, onBack, onReset }) => {
   const unsubRef = useRef(null);
   const dispatchedRef = useRef(false);
 
-  // 1) Dispatch /api/generate + subscribe SSE on mount
+  // 1) On mount: either dispatch a new /api/generate or attach to an existing
+  // task_id, then subscribe to SSE progress in both cases.
   useEffect(() => {
     if (dispatchedRef.current) return;
     dispatchedRef.current = true;
+
+    const subscribeForUpdates = (taskId) => {
+      const unsub = subscribeProgress(taskId, (evt) => {
+        if (evt.error) {
+          setJob(j => ({ ...j, status: 'error', error: '진행 상황 구독이 끊겼어요' }));
+          return;
+        }
+        const raw = evt.progress;
+        const progress = typeof raw === 'number'
+          ? (raw <= 1 ? Math.round(raw * 100) : Math.round(raw))
+          : null;
+        setJob(j => ({
+          ...j,
+          progress: progress != null ? progress : j.progress,
+          stage: evt.stage || j.stage,
+          message: evt.message || j.message,
+          status: evt.status === 'completed' ? 'done'
+            : evt.status === 'error' ? 'error'
+            : j.status,
+          videoUrl: evt.video_url || evt.path || j.videoUrl,
+          error: evt.status === 'error' ? (evt.message || '영상 생성 중 오류가 발생했어요') : j.error,
+        }));
+      });
+      unsubRef.current = unsub;
+    };
+
     (async () => {
+      // Attach mode: skip dispatch, hook straight into the existing task's
+      // progress stream. The task entry stays the source of truth for
+      // resolution/script/etc.; we only watch progress here.
+      if (attachToTaskId) {
+        subscribeForUpdates(attachToTaskId);
+        return;
+      }
+
       try {
         const audio_path = state.voice.generatedAudioPath
           || state.voice.uploadedAudio?.path
@@ -108,30 +147,7 @@ const RenderDashboard = ({ state, onBack, onReset }) => {
           message: taskId ? '대기열에 등록했어요' : '완료!',
         }));
         if (!taskId) return;
-
-        const unsub = subscribeProgress(taskId, (evt) => {
-          if (evt.error) {
-            setJob(j => ({ ...j, status: 'error', error: '진행 상황 구독이 끊겼어요' }));
-            return;
-          }
-          // Backend may send progress as 0-1 or 0-100.
-          const raw = evt.progress;
-          const progress = typeof raw === 'number'
-            ? (raw <= 1 ? Math.round(raw * 100) : Math.round(raw))
-            : null;
-          setJob(j => ({
-            ...j,
-            progress: progress != null ? progress : j.progress,
-            stage: evt.stage || j.stage,
-            message: evt.message || j.message,
-            status: evt.status === 'completed' ? 'done'
-              : evt.status === 'error' ? 'error'
-              : j.status,
-            videoUrl: evt.video_url || evt.path || j.videoUrl,
-            error: evt.status === 'error' ? (evt.message || '영상 생성 중 오류가 발생했어요') : j.error,
-          }));
-        });
-        unsubRef.current = unsub;
+        subscribeForUpdates(taskId);
       } catch (err) {
         console.error('render dispatch failed', err);
         setJob(j => ({ ...j, status: 'error', error: humanizeError(err) }));
@@ -153,14 +169,20 @@ const RenderDashboard = ({ state, onBack, onReset }) => {
   const currentStageIdx = Math.max(0, STAGE_ORDER.indexOf(job.stage));
 
   const handleCopyShare = async () => {
-    if (!job.videoUrl) return;
-    const link = job.videoUrl.startsWith('http') ? job.videoUrl : `${window.location.origin}${job.videoUrl}`;
+    const url = job.videoUrl || (job.taskId ? `/api/videos/${job.taskId}` : null);
+    if (!url) return;
+    const link = url.startsWith('http') ? url : `${window.location.origin}${url}`;
     try {
       await navigator.clipboard.writeText(link);
       setCopied(true);
       setTimeout(() => setCopied(false), 1800);
     } catch { /* ignore */ }
   };
+
+  // Worker SSE only emits {stage, progress, message, timestamp}; for attached
+  // tasks (and even fresh ones) the completed video URL has to be derived from
+  // task_id via /api/videos/. Keep job.videoUrl as the override when present.
+  const playableVideoUrl = job.videoUrl || (job.taskId && job.status === 'done' ? `/api/videos/${job.taskId}` : null);
 
   return (
     <div style={{ flex: 1, overflowY: 'auto', padding: '28px 32px 80px', background: 'var(--bg)', position: 'relative' }}>
@@ -182,9 +204,9 @@ const RenderDashboard = ({ state, onBack, onReset }) => {
         <div className="card" style={{ padding: 24 }}>
           <div style={{ display: 'grid', gridTemplateColumns: '180px 1fr', gap: 28, alignItems: 'stretch' }}>
             <div style={{ borderRadius: 12, overflow: 'hidden', background: '#0b0d12', aspectRatio: '9/16', position: 'relative', border: '1px solid var(--border)' }}>
-              {job.status === 'done' && job.videoUrl ? (
+              {job.status === 'done' && playableVideoUrl ? (
                 <video
-                  src={job.videoUrl}
+                  src={playableVideoUrl}
                   controls
                   autoPlay
                   loop
@@ -288,10 +310,10 @@ const RenderDashboard = ({ state, onBack, onReset }) => {
               )}
 
               <div style={{ display: 'flex', gap: 8, marginTop: 'auto', flexWrap: 'wrap' }}>
-                {job.status === 'done' && job.videoUrl ? (
+                {job.status === 'done' && playableVideoUrl ? (
                   <>
                     <a
-                      href={job.videoUrl}
+                      href={job.taskId ? `/api/videos/${job.taskId}?download=true` : playableVideoUrl}
                       download
                       className="btn btn-primary"
                       style={{ textDecoration: 'none' }}

@@ -106,7 +106,24 @@ const HostStudio = () => {
     return Math.min(3, Math.max(1, Math.floor(raw)));
   });
   const [rendering, setRendering] = useState(false);
+  // When set, RenderDashboard attaches to an existing in-flight task instead
+  // of dispatching a new /api/generate. Click-from-queue jumps here.
+  const [attachToTaskId, setAttachToTaskId] = useState(null);
   const [tweaksOpen, setTweaksOpen] = useState(false);
+
+  // Open RenderDashboard for an already-running/pending task (clicked in
+  // QueueStatus). Different entry from the wizard's "영상 만들기 시작" path
+  // because we don't want to redispatch — just monitor the existing job.
+  const openTaskInRenderView = (taskId) => {
+    if (!taskId) return;
+    setAttachToTaskId(taskId);
+    setRendering(true);
+  };
+
+  const exitRenderView = () => {
+    setRendering(false);
+    setAttachToTaskId(null);
+  };
 
   // Density — localStorage instead of prototype's postMessage handshake.
   const [density, setDensity] = useState(() => {
@@ -149,7 +166,11 @@ const HostStudio = () => {
 
   const next = () => {
     if (step < 3) setStep(step + 1);
-    else if (allValid) setRendering(true);
+    else if (allValid) {
+      // Wizard path — fresh dispatch, not attaching.
+      setAttachToTaskId(null);
+      setRendering(true);
+    }
   };
   const prev = () => setStep(s => Math.max(1, s - 1));
 
@@ -158,6 +179,7 @@ const HostStudio = () => {
     setState(INITIAL_STATE);
     setStep(1);
     setRendering(false);
+    setAttachToTaskId(null);
   };
 
   const update = (updater) => setState(s => typeof updater === 'function' ? updater(s) : updater);
@@ -173,8 +195,13 @@ const HostStudio = () => {
         <div {...shellProps}>
           <div className="app-shell" data-screen-label="05 Render">
             <TopBar onReset={reset} step={null} onTweaksToggle={() => setTweaksOpen(o => !o)} />
-            <RenderDashboard state={state} onBack={() => setRendering(false)} onReset={reset} />
-            <QueueStatus />
+            <RenderDashboard
+              state={state}
+              attachToTaskId={attachToTaskId}
+              onBack={exitRenderView}
+              onReset={reset}
+            />
+            <QueueStatus onTaskClick={openTaskInRenderView} />
             {tweaksOpen && (
               <TweaksPanel density={density} setDensity={setDensity} onClose={() => setTweaksOpen(false)} />
             )}
@@ -224,7 +251,7 @@ const HostStudio = () => {
           <PreviewPanel state={state} step={step} />
         </div>
 
-        <QueueStatus />
+        <QueueStatus onTaskClick={openTaskInRenderView} />
         {tweaksOpen && (
           <TweaksPanel density={density} setDensity={setDensity} onClose={() => setTweaksOpen(false)} />
         )}

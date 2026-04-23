@@ -23,11 +23,22 @@ const formatTime = (isoStr) => {
   return d.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 };
 
-export default function QueueStatus() {
+export default function QueueStatus({ onTaskClick }) {
   const { data: queueData, error } = useQueue();
   const [expanded, setExpanded] = useState(false);
 
   if (!queueData) return null;
+
+  // Click handler for live (running/pending) items — jumps the user to the
+  // RenderDashboard for that task. Recent/finished items are not clickable
+  // (would need to re-fetch state to show the played video; out of scope).
+  const handleItemClick = (taskId) => {
+    if (typeof onTaskClick === 'function' && taskId) {
+      onTaskClick(taskId);
+      setExpanded(false);
+    }
+  };
+  const clickable = typeof onTaskClick === 'function';
 
   const totalActive = (queueData.total_running || 0) + (queueData.total_pending || 0);
 
@@ -43,6 +54,15 @@ export default function QueueStatus() {
     borderRadius: 'var(--r-sm)',
     fontSize: 12,
     marginBottom: 4,
+  };
+  const liveItemButtonStyle = {
+    ...itemStyle,
+    width: '100%',
+    cursor: clickable ? 'pointer' : 'default',
+    color: 'inherit',
+    fontFamily: 'inherit',
+    fontSize: 12,
+    textAlign: 'left',
   };
 
   return (
@@ -108,7 +128,14 @@ export default function QueueStatus() {
             <div style={sectionStyle}>
               <div style={sectionHeaderStyle}>실행 중</div>
               {queueData.running.map(t => (
-                <div key={t.task_id} style={itemStyle}>
+                <button
+                  key={t.task_id}
+                  type="button"
+                  onClick={() => handleItemClick(t.task_id)}
+                  disabled={!clickable}
+                  style={liveItemButtonStyle}
+                  title={clickable ? '클릭하면 진행 화면으로 이동해요' : undefined}
+                >
                   <div>
                     <div style={{ fontWeight: 500 }}>{typeLabel(t.type)}</div>
                     <div style={{ fontSize: 10, color: 'var(--text-tertiary)' }} className="mono truncate">{t.label || t.task_id.slice(0, 8)}</div>
@@ -116,7 +143,7 @@ export default function QueueStatus() {
                   <div style={{ textAlign: 'right', fontSize: 10, color: 'var(--success)' }}>
                     {formatTime(t.started_at)}
                   </div>
-                </div>
+                </button>
               ))}
             </div>
           )}
@@ -125,7 +152,14 @@ export default function QueueStatus() {
             <div style={sectionStyle}>
               <div style={sectionHeaderStyle}>대기 중 ({queueData.pending.length})</div>
               {queueData.pending.map((t, idx) => (
-                <div key={t.task_id} style={itemStyle}>
+                <button
+                  key={t.task_id}
+                  type="button"
+                  onClick={() => handleItemClick(t.task_id)}
+                  disabled={!clickable}
+                  style={liveItemButtonStyle}
+                  title={clickable ? '클릭하면 진행 화면으로 이동해요' : undefined}
+                >
                   <div>
                     <div style={{ fontWeight: 500 }}>#{idx + 1} · {typeLabel(t.type)}</div>
                     <div style={{ fontSize: 10, color: 'var(--text-tertiary)' }} className="mono truncate">{t.label || t.task_id.slice(0, 8)}</div>
@@ -133,7 +167,7 @@ export default function QueueStatus() {
                   <div style={{ textAlign: 'right', fontSize: 10, color: 'var(--text-tertiary)' }}>
                     {formatTime(t.created_at)}
                   </div>
-                </div>
+                </button>
               ))}
             </div>
           )}
