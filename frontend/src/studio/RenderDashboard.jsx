@@ -531,36 +531,136 @@ const RenderDashboard = ({ state, attachToTaskId = null, onBack, onReset }) => {
           <RenderHistory excludeTaskId={job.taskId} />
         )}
 
-        <div className="card mt-4">
-          <div className="card-eyebrow">이렇게 만들었어요</div>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 20, marginTop: 8 }}>
-            <div>
-              <div className="text-xs text-tertiary">쇼호스트</div>
-              <div style={{ fontWeight: 500, marginTop: 2 }}>{state.host.mode === 'text' ? '설명으로 만들기' : '사진으로 만들기'}</div>
-              <div className="text-xs text-tertiary">후보 {state.host.selectedSeed ?? '—'}번 선택</div>
-            </div>
-            <div>
-              <div className="text-xs text-tertiary">소개할 제품</div>
-              <div style={{ fontWeight: 500, marginTop: 2 }} className="num">{state.products.length}개</div>
-              <div className="text-xs text-tertiary truncate">{state.products.map(p => p.name).join(', ') || '—'}</div>
-            </div>
-            <div>
-              <div className="text-xs text-tertiary">배경</div>
-              <div style={{ fontWeight: 500, marginTop: 2 }}>{
-                state.background.source === 'preset' ? '추천 장소' :
-                state.background.source === 'prompt' ? '직접 만들기' :
-                state.background.source === 'upload' ? '내 사진' :
-                state.background.source === 'url' ? '링크' : '—'
-              }</div>
-            </div>
-            <div>
-              <div className="text-xs text-tertiary">목소리</div>
-              <div style={{ fontWeight: 500, marginTop: 2 }}>{state.voice.voiceName || (state.voice.uploadedAudio ? '녹음 파일' : '—')}</div>
-              <div className="text-xs text-tertiary">{state.voice.source === 'tts' ? '목소리 고르기' : state.voice.source === 'clone' ? '내 목소리 복제' : '녹음 파일 업로드'}</div>
-            </div>
+        <ProvenanceCard taskMeta={queueEntry?.params?.meta || null} state={state} />
+      </div>
+    </div>
+  );
+};
+
+// ProvenanceCard — reads the meta snapshot stored in task_queue params when
+// available (attach mode or after the queue catches up in dispatch mode)
+// and falls back to live wizard `state` only when the task was enqueued
+// before the meta field existed. Lets users see the ACTUAL provenance of
+// an old/completed task instead of whatever the current wizard state is.
+const ProvenanceCard = ({ taskMeta, state }) => {
+  const h = taskMeta?.host || state.host || {};
+  const c = taskMeta?.composition || state.composition || {};
+  const bg = taskMeta?.background || state.background || {};
+  const products = taskMeta?.products ?? (state.products || []);
+  const voice = taskMeta?.voice || state.voice || {};
+  const imageQuality = taskMeta?.imageQuality || state.imageQuality || '1K';
+
+  const bgLabel = (
+    bg.source === 'preset' ? (bg.presetLabel || bg.preset?.label || '추천 장소')
+    : bg.source === 'prompt' ? '직접 만들기'
+    : bg.source === 'upload' ? '내 사진'
+    : bg.source === 'url' ? '링크'
+    : '—'
+  );
+  const voiceSource = voice.source === 'tts' ? '목소리 고르기'
+    : voice.source === 'clone' ? '내 목소리 복제'
+    : voice.source === 'upload' ? '녹음 파일 업로드'
+    : '—';
+
+  const tempLabel = (t) => t == null ? '—' : (t <= 0.4 ? '안정적' : t >= 1.0 ? '창의적' : '보통');
+
+  return (
+    <div className="card mt-4">
+      <div className="card-eyebrow">이렇게 만들었어요</div>
+
+      {/* Thumbnails — host (Step 1) + composite (Step 2). Show what actually
+          fed into FlashTalk, not whatever's currently staged in the wizard. */}
+      {(h.imageUrl || c.selectedUrl) && (
+        <div style={{ display: 'flex', gap: 12, marginTop: 12, marginBottom: 4 }}>
+          {h.imageUrl && (
+            <figure style={{ margin: 0, flex: 1 }}>
+              <div style={{ aspectRatio: '9/16', borderRadius: 8, overflow: 'hidden', background: '#0b0d12', border: '1px solid var(--border)' }}>
+                <img src={h.imageUrl} alt="쇼호스트" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+              </div>
+              <figcaption className="text-xs text-tertiary" style={{ marginTop: 6 }}>1단계 · 쇼호스트</figcaption>
+            </figure>
+          )}
+          {c.selectedUrl && (
+            <figure style={{ margin: 0, flex: 1 }}>
+              <div style={{ aspectRatio: '9/16', borderRadius: 8, overflow: 'hidden', background: '#0b0d12', border: '1px solid var(--border)' }}>
+                <img src={c.selectedUrl} alt="합성" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+              </div>
+              <figcaption className="text-xs text-tertiary" style={{ marginTop: 6 }}>2단계 · 합성 스틸</figcaption>
+            </figure>
+          )}
+        </div>
+      )}
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 20, marginTop: 16 }}>
+        <div>
+          <div className="text-xs text-tertiary">쇼호스트</div>
+          <div style={{ fontWeight: 500, marginTop: 2 }}>
+            {h.mode === 'text' ? '설명으로 만들기' : h.mode === 'image' ? '사진으로 만들기' : '—'}
+          </div>
+          <div className="text-xs text-tertiary">후보 {h.selectedSeed ?? '—'}번 선택</div>
+        </div>
+        <div>
+          <div className="text-xs text-tertiary">소개할 제품</div>
+          <div style={{ fontWeight: 500, marginTop: 2 }} className="num">{products.length}개</div>
+          <div className="text-xs text-tertiary truncate">
+            {products.map(p => p.name).filter(Boolean).join(', ') || '—'}
+          </div>
+        </div>
+        <div>
+          <div className="text-xs text-tertiary">배경</div>
+          <div style={{ fontWeight: 500, marginTop: 2 }}>{bgLabel}</div>
+          <div className="text-xs text-tertiary truncate">
+            {bg.source === 'prompt' ? (bg.prompt || '—')
+              : bg.source === 'preset' ? (bg.presetId || '')
+              : bg.source === 'upload' ? '업로드 이미지' : ''}
+          </div>
+        </div>
+        <div>
+          <div className="text-xs text-tertiary">목소리</div>
+          <div style={{ fontWeight: 500, marginTop: 2 }}>
+            {voice.voiceName || (voice.source === 'upload' ? '녹음 파일' : '—')}
+          </div>
+          <div className="text-xs text-tertiary">{voiceSource}</div>
+        </div>
+      </div>
+
+      {/* Params row — smaller, shows the knobs users tweaked. */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 20, marginTop: 16, paddingTop: 14, borderTop: '1px solid var(--border)' }}>
+        <div>
+          <div className="text-xs text-tertiary">이미지 품질</div>
+          <div style={{ fontWeight: 500, marginTop: 2 }}>
+            {imageQuality === '4K' ? '초고화질 (4K)' : imageQuality === '2K' ? '고화질 (2K)' : '표준 (1K)'}
+          </div>
+        </div>
+        <div>
+          <div className="text-xs text-tertiary">쇼호스트 변동성</div>
+          <div style={{ fontWeight: 500, marginTop: 2 }}>{tempLabel(h.temperature)}</div>
+        </div>
+        <div>
+          <div className="text-xs text-tertiary">합성 변동성</div>
+          <div style={{ fontWeight: 500, marginTop: 2 }}>{tempLabel(c.temperature)}</div>
+        </div>
+        <div>
+          <div className="text-xs text-tertiary">샷</div>
+          <div style={{ fontWeight: 500, marginTop: 2 }}>
+            {c.shot === 'closeup' ? '클로즈업'
+              : c.shot === 'bust' ? '상반신'
+              : c.shot === 'medium' ? '미디엄'
+              : c.shot === 'full' ? '풀샷'
+              : '—'}
           </div>
         </div>
       </div>
+
+      {/* Script preview (if present) — what was actually read. */}
+      {voice.script && (
+        <div style={{ marginTop: 16, paddingTop: 14, borderTop: '1px solid var(--border)' }}>
+          <div className="text-xs text-tertiary">대본</div>
+          <div style={{ fontSize: 13, marginTop: 4, whiteSpace: 'pre-wrap', maxHeight: 120, overflowY: 'auto' }}>
+            {voice.script.replace(/\[breath\]/g, ' · ')}
+          </div>
+        </div>
+      )}
     </div>
   );
 };

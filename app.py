@@ -1022,6 +1022,12 @@ async def generate_video(
     # Queue display label — frontend sends a human-readable summary so the
     # queue panel doesn't just show "Video generation" for every job.
     queue_label: Optional[str] = Form(None),
+    # Full provenance snapshot as JSON — stored verbatim in the task queue
+    # params so the render dashboard can later show "이렇게 만들었어요" from
+    # the actual task data (host image, products, background, voice,
+    # temperatures, etc.) instead of whatever state.* the wizard happens
+    # to hold at view time. None → dashboard falls back to state.
+    meta: Optional[str] = Form(None),
 ):
     """Generate video from host image + audio"""
     from utils.security import safe_upload_path
@@ -1102,6 +1108,15 @@ async def generate_video(
 
     ref_paths = json.loads(reference_image_paths) if reference_image_paths else []
 
+    # Parse the meta snapshot. Malformed JSON is non-fatal — log and skip so
+    # a broken meta field never blocks the actual generation.
+    meta_obj = None
+    if meta:
+        try:
+            meta_obj = json.loads(meta)
+        except json.JSONDecodeError as e:
+            logger.warning("Invalid meta JSON on /api/generate: %s", e)
+
     await task_queue.enqueue(
         task_id=task_id,
         task_type="generate",
@@ -1116,6 +1131,7 @@ async def generate_video(
             "resolution": resolution,
             "scene_prompt": scene_prompt,
             "reference_image_paths": ref_paths,
+            "meta": meta_obj,
         },
         label=_build_queue_label(queue_label, script_text, resolution, host_image_path),
     )

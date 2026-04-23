@@ -119,6 +119,49 @@ describe('RenderDashboard attach mode — branching on queue status', () => {
     });
   });
 
+  it('completed task: provenance card reads voiceName/products/script from meta (NOT state)', async () => {
+    fetchQueue.mockResolvedValue({
+      running: [],
+      pending: [],
+      recent: [{
+        task_id: 'done-meta',
+        type: 'generate',
+        status: 'completed',
+        params: {
+          resolution: '720x1280',
+          meta: {
+            host: { mode: 'image', selectedSeed: 42, temperature: 0.4 },
+            composition: { shot: 'medium', temperature: 1.0 },
+            products: [{ name: '쿠션' }, { name: '소파' }],
+            background: { source: 'preset', presetLabel: '아늑한 거실' },
+            voice: { source: 'tts', voiceName: '민지', script: '안녕하세요' },
+            imageQuality: '2K',
+          },
+        },
+        started_at: '2026-04-23T10:00:00',
+        completed_at: '2026-04-23T10:03:00',
+        created_at: '2026-04-23T09:59:00',
+      }],
+      total_running: 0,
+      total_pending: 0,
+    });
+    global.fetch = vi.fn().mockResolvedValue({ ok: true, headers: { get: () => '0' } });
+
+    render(withProvider(
+      <RenderDashboard state={baseState} attachToTaskId="done-meta" onBack={() => {}} onReset={() => {}} />
+    ));
+
+    await waitFor(() => {
+      // Voice name from meta, NOT baseState (which has voiceName: null)
+      expect(screen.getByText('민지')).toBeTruthy();
+      expect(screen.getByText('아늑한 거실')).toBeTruthy();
+      expect(screen.getByText('안녕하세요')).toBeTruthy();
+      expect(screen.getByText('고화질 (2K)')).toBeTruthy();
+      // Two products
+      expect(screen.getByText('쿠션, 소파')).toBeTruthy();
+    });
+  });
+
   it('completed task: summary card reads resolution from queueEntry.params (NOT state.resolution)', async () => {
     // state.resolution is 448×768 (Step 3 default). The task on the server
     // was actually run at 1280×720 per its queue params. The summary must

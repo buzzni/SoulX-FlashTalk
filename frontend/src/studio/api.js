@@ -455,6 +455,62 @@ export async function generateVideo({ state, audio }) {
   body.append('audio_source', 'upload');
   body.append('resolution', stringifyResolution(state.resolution));
 
+  // Snapshot of provenance at generate time — stored verbatim in the task
+  // queue params so the render dashboard can show "어떤 쇼호스트/배경/제품/
+  // 파라미터를 썼는지" *from the actual task*, not from whatever the wizard
+  // state happens to be when someone attaches later. Image URLs use the
+  // persistent /api/files/ paths that survive a refresh.
+  const meta = {
+    host: {
+      mode: state.host?.mode ?? 'text',
+      selectedSeed: state.host?.selectedSeed ?? null,
+      selectedPath: state.host?.selectedPath ?? null,
+      imageUrl: state.host?.imageUrl ?? null,
+      prompt: state.host?.prompt ?? '',
+      negativePrompt: state.host?.negativePrompt ?? '',
+      faceRefPath: state.host?.faceRefPath ?? null,
+      outfitRefPath: state.host?.outfitRefPath ?? null,
+      outfitText: state.host?.outfitText ?? '',
+      faceStrength: state.host?.faceStrength ?? null,
+      outfitStrength: state.host?.outfitStrength ?? null,
+      temperature: state.host?.temperature ?? null,
+    },
+    composition: {
+      selectedSeed: state.composition?.selectedSeed ?? null,
+      selectedPath: state.composition?.selectedPath ?? null,
+      selectedUrl: state.composition?.selectedUrl ?? null,
+      direction: state.composition?.direction ?? '',
+      shot: state.composition?.shot ?? null,
+      angle: state.composition?.angle ?? null,
+      temperature: state.composition?.temperature ?? null,
+    },
+    products: (state.products || []).map(p => ({
+      name: p.name || '',
+      path: p.path || '',
+      url: p.url || '',
+    })),
+    background: {
+      source: state.background?.source || null,
+      presetId: state.background?.preset?.id || (typeof state.background?.preset === 'string' ? state.background.preset : null),
+      presetLabel: state.background?.preset?.label || null,
+      prompt: state.background?.prompt || '',
+      uploadPath: state.background?.uploadPath || null,
+      imageUrl: state.background?.imageUrl || null,
+    },
+    voice: {
+      source: state.voice?.source || null,
+      voiceId: state.voice?.voiceId || null,
+      voiceName: state.voice?.voiceName || null,
+      script: state.voice?.script || '',
+      stability: state.voice?.stability ?? null,
+      style: state.voice?.style ?? null,
+      similarity: state.voice?.similarity ?? null,
+      speed: state.voice?.speed ?? null,
+    },
+    imageQuality: state.imageQuality || '1K',
+  };
+  body.append('meta', JSON.stringify(meta));
+
   // Queue label — what the user sees in the QueueStatus panel. Priority:
   // explicit script preview > voice id > generic. Without this, every job
   // landed as "Video generation" in the queue with no way to tell them apart.

@@ -437,3 +437,61 @@ describe('api.js — shared imageSize on both body builders', () => {
     expect(body.get('imageSize')).toBe('2K');
   });
 });
+
+
+describe('api.js — generateVideo attaches full provenance meta', () => {
+  beforeEach(() => {
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ task_id: 'abc' }),
+    });
+  });
+  afterEach(() => { global.fetch = undefined; });
+
+  it('includes host, composition, products, background, voice, imageQuality in meta blob', async () => {
+    const { generateVideo } = await import('../api.js');
+    const state = {
+      host: {
+        mode: 'image', selectedSeed: 42, selectedPath: '/srv/host_42.png', imageUrl: '/api/files/host_42.png',
+        faceRefPath: '/srv/face.png', outfitRefPath: null, outfitText: '베이지 니트',
+        faceStrength: 0.7, outfitStrength: 0.5, temperature: 1.0,
+      },
+      composition: {
+        selectedSeed: 77, selectedPath: '/srv/c_77.png', selectedUrl: '/api/files/c_77.png',
+        direction: '소파에 앉아 1번 들기', shot: 'medium', angle: 'eye', temperature: 0.4,
+      },
+      products: [{ name: '쿠션', path: '/srv/cushion.png' }, { name: '소파', path: '/srv/sofa.png' }],
+      background: { source: 'preset', preset: { id: 'living_cozy', label: '아늑한 거실' } },
+      voice: { source: 'tts', voiceId: 'v_minji', voiceName: '민지', script: '안녕하세요' },
+      resolution: { width: 720, height: 1280 },
+      imageQuality: '2K',
+    };
+    await generateVideo({ state, audio: { audio_path: '/srv/a.wav' } });
+
+    const [, opts] = global.fetch.mock.calls[0];
+    const metaStr = opts.body.get('meta');
+    expect(metaStr).toBeTruthy();
+    const meta = JSON.parse(metaStr);
+    // Host
+    expect(meta.host.mode).toBe('image');
+    expect(meta.host.selectedSeed).toBe(42);
+    expect(meta.host.temperature).toBe(1.0);
+    expect(meta.host.outfitText).toBe('베이지 니트');
+    // Composition
+    expect(meta.composition.shot).toBe('medium');
+    expect(meta.composition.direction).toContain('소파');
+    expect(meta.composition.temperature).toBe(0.4);
+    // Products (with names + paths)
+    expect(meta.products).toHaveLength(2);
+    expect(meta.products[0].name).toBe('쿠션');
+    // Background
+    expect(meta.background.source).toBe('preset');
+    expect(meta.background.presetId).toBe('living_cozy');
+    expect(meta.background.presetLabel).toBe('아늑한 거실');
+    // Voice
+    expect(meta.voice.voiceName).toBe('민지');
+    expect(meta.voice.script).toBe('안녕하세요');
+    // Global
+    expect(meta.imageQuality).toBe('2K');
+  });
+});
