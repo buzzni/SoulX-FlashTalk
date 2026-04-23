@@ -1,8 +1,9 @@
 // QueueStatus — floating queue badge/panel.
-// Ported from src/components/QueueStatus.jsx, restyled to match HostStudio tokens.
-import { useState, useEffect, useCallback } from 'react';
+// Reads from the shared QueueProvider so the queue is fetched once per app
+// regardless of how many components display it (this + RenderDashboard).
+import { useState } from 'react';
 import Icon from './Icon.jsx';
-import { fetchQueue } from './api.js';
+import { useQueue } from './QueueContext.jsx';
 
 const typeLabel = (type) => ({
   generate: '쇼호스트 영상',
@@ -23,25 +24,8 @@ const formatTime = (isoStr) => {
 };
 
 export default function QueueStatus() {
-  const [queueData, setQueueData] = useState(null);
+  const { data: queueData, error } = useQueue();
   const [expanded, setExpanded] = useState(false);
-  const [error, setError] = useState(null);
-
-  const load = useCallback(async () => {
-    try {
-      const data = await fetchQueue();
-      setQueueData(data);
-      setError(null);
-    } catch (err) {
-      setError(err.message || '큐 조회 실패');
-    }
-  }, []);
-
-  useEffect(() => {
-    load();
-    const t = setInterval(load, 5000);
-    return () => clearInterval(t);
-  }, [load]);
 
   if (!queueData) return null;
 

@@ -15,6 +15,7 @@ import Step3Audio from './Step3Audio.jsx';
 import PreviewPanel from './PreviewPanel.jsx';
 import QueueStatus from './QueueStatus.jsx';
 import RenderDashboard from './RenderDashboard.jsx';
+import { QueueProvider } from './QueueContext.jsx';
 
 import './styles/tokens.css';
 import './styles/app.css';
@@ -168,20 +169,23 @@ const HostStudio = () => {
 
   if (rendering) {
     return (
-      <div {...shellProps}>
-        <div className="app-shell" data-screen-label="05 Render">
-          <TopBar onReset={reset} step={null} onTweaksToggle={() => setTweaksOpen(o => !o)} />
-          <RenderDashboard state={state} onBack={() => setRendering(false)} onReset={reset} />
-          <QueueStatus />
-          {tweaksOpen && (
-            <TweaksPanel density={density} setDensity={setDensity} onClose={() => setTweaksOpen(false)} />
-          )}
+      <QueueProvider>
+        <div {...shellProps}>
+          <div className="app-shell" data-screen-label="05 Render">
+            <TopBar onReset={reset} step={null} onTweaksToggle={() => setTweaksOpen(o => !o)} />
+            <RenderDashboard state={state} onBack={() => setRendering(false)} onReset={reset} />
+            <QueueStatus />
+            {tweaksOpen && (
+              <TweaksPanel density={density} setDensity={setDensity} onClose={() => setTweaksOpen(false)} />
+            )}
+          </div>
         </div>
-      </div>
+      </QueueProvider>
     );
   }
 
   return (
+    <QueueProvider>
     <div {...shellProps}>
       <div className="app-shell" data-screen-label={`0${step} ${STEPS[step - 1].name}`}>
         <TopBar onReset={reset} step={step} valid={valid} onStepClick={setStep} onTweaksToggle={() => setTweaksOpen(o => !o)} />
@@ -226,6 +230,7 @@ const HostStudio = () => {
         )}
       </div>
     </div>
+    </QueueProvider>
   );
 };
 

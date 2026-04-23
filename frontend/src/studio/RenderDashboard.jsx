@@ -4,7 +4,8 @@
 import { useState, useEffect, useRef } from 'react';
 import Icon from './Icon.jsx';
 import { Badge, Button } from './primitives.jsx';
-import { fetchQueue, generateVideo, humanizeError, subscribeProgress } from './api.js';
+import { generateVideo, humanizeError, subscribeProgress } from './api.js';
+import { useQueuePosition } from './QueueContext.jsx';
 import RenderHistory from './RenderHistory.jsx';
 
 const STAGES = [
@@ -75,8 +76,11 @@ const RenderDashboard = ({ state, onBack, onReset }) => {
     startedAt: Date.now(),
   }));
   const [elapsed, setElapsed] = useState(0);
-  const [queuePos, setQueuePos] = useState(null);
   const [copied, setCopied] = useState(false);
+  // Read queue position from the shared snapshot — no more 4s poll here.
+  // Once the job hits done/error we stop reading (taskId stays but the value
+  // stops mattering for the UI branches).
+  const queuePos = useQueuePosition(job.taskId);
   const unsubRef = useRef(null);
   const dispatchedRef = useRef(false);
 
@@ -145,27 +149,6 @@ const RenderDashboard = ({ state, onBack, onReset }) => {
     const t = setInterval(() => setElapsed(Date.now() - job.startedAt), 1000);
     return () => clearInterval(t);
   }, [job.status, job.startedAt]);
-
-  // 3) Queue position poll (every 4s, only while still rendering)
-  useEffect(() => {
-    if (!job.taskId) return;
-    if (job.status === 'done' || job.status === 'error') return;
-    let alive = true;
-    const poll = async () => {
-      try {
-        const q = await fetchQueue();
-        if (!alive) return;
-        const pendingIdx = (q.pending || []).findIndex(t => t.task_id === job.taskId);
-        const runningIdx = (q.running || []).findIndex(t => t.task_id === job.taskId);
-        if (runningIdx >= 0) setQueuePos(0);
-        else if (pendingIdx >= 0) setQueuePos(pendingIdx + 1);
-        else setQueuePos(null);
-      } catch { /* ignore */ }
-    };
-    poll();
-    const t = setInterval(poll, 4000);
-    return () => { alive = false; clearInterval(t); };
-  }, [job.taskId, job.status]);
 
   const currentStageIdx = Math.max(0, STAGE_ORDER.indexOf(job.stage));
 
