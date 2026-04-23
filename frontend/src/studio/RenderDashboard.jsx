@@ -232,6 +232,49 @@ const RenderDashboard = ({ state, attachToTaskId = null, onBack, onReset }) => {
     if (unsubRef.current) unsubRef.current();
   }, []);
 
+  // Real resolution for the summary card — reads from the queue entry's
+  // params (what was actually sent to the worker) when available. Falls
+  // back to state.resolution only for in-wizard flow before the queue
+  // catches up. Previously the card read state.resolution for every view,
+  // which meant attaching to an old task showed whatever resolution the
+  // user currently had picked in Step 3, not what the task actually rendered.
+  const actualResolution = (() => {
+    const raw = queueEntry?.params?.resolution;
+    if (raw) {
+      const m = /^(\d+)\s*x\s*(\d+)$/.exec(raw);
+      if (m) {
+        const [, h, w] = m;
+        return { width: Number(w), height: Number(h), label: `${w}×${h}`, source: 'task' };
+      }
+    }
+    const r = state.resolution;
+    return r ? { width: r.width, height: r.height, label: r.label, source: 'state' } : null;
+  })();
+
+  // Real file size — HEAD /api/videos/{taskId} once the job is done to pull
+  // Content-Length. The old "파일 용량" box showed an *estimate* tied to
+  // state.resolution.size, which was the UI preset label (e.g., "~28MB")
+  // not the actual output. Display shows "—" until the HEAD resolves.
+  const [actualFileSize, setActualFileSize] = useState(null);
+  useEffect(() => {
+    if (job.status !== 'done' || !job.taskId) return;
+    let alive = true;
+    fetch(`/api/videos/${job.taskId}`, { method: 'HEAD' })
+      .then(r => {
+        if (!alive || !r.ok) return;
+        const len = Number(r.headers.get('content-length') || 0);
+        if (len > 0) setActualFileSize(len);
+      })
+      .catch(() => { /* silent — the card shows "—" */ });
+    return () => { alive = false; };
+  }, [job.status, job.taskId]);
+
+  const formatFileSize = (bytes) => {
+    if (!bytes) return '—';
+    if (bytes >= 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)}MB`;
+    return `${Math.round(bytes / 1024)}KB`;
+  };
+
   // Pick the right "elapsed since" anchor:
   //   - queueEntry.started_at (running): authoritative — what the worker
   //     actually started. Critical for attach mode (the task may have started
@@ -355,7 +398,9 @@ const RenderDashboard = ({ state, attachToTaskId = null, onBack, onReset }) => {
                 <div>
                   <div style={{ fontSize: 16, fontWeight: 600 }}>내 쇼호스트 영상 #{job.id.slice(-4).toUpperCase()}</div>
                   <div className="text-xs text-tertiary">
-                    {state.resolution.label} · {state.resolution.width}×{state.resolution.height} · 세로형
+                    {actualResolution
+                      ? `${actualResolution.width}×${actualResolution.height} · 세로형`
+                      : '—'}
                   </div>
                 </div>
                 {job.status === 'done' ? (
@@ -432,7 +477,12 @@ const RenderDashboard = ({ state, attachToTaskId = null, onBack, onReset }) => {
                   </div>
                   <div style={{ padding: 12, background: 'var(--bg-sunken)', borderRadius: 6 }}>
                     <div className="card-eyebrow">파일 용량</div>
-                    <div style={{ fontSize: 16, fontWeight: 600 }}>{state.resolution.size}</div>
+                    <div style={{ fontSize: 16, fontWeight: 600 }}>{formatFileSize(actualFileSize)}</div>
+                    {actualResolution && (
+                      <div className="text-xs text-tertiary" style={{ marginTop: 2 }}>
+                        {actualResolution.width}×{actualResolution.height}
+                      </div>
+                    )}
                   </div>
                   <div style={{ padding: 12, background: 'var(--bg-sunken)', borderRadius: 6 }}>
                     <div className="card-eyebrow">파일 형식</div>
@@ -441,14 +491,20 @@ const RenderDashboard = ({ state, attachToTaskId = null, onBack, onReset }) => {
                 </div>
               )}
 
-              <div style={{ display: 'flex', gap: 8, marginTop: 'auto', flexWrap: 'wrap' }}>
+              {/* 2×2 grid of action buttons on completion:
+                    row 1 — 저장 + 공유 (what you do WITH the finished video)
+                    row 2 — 수정 + 새로 (what you do NEXT)
+                  The flex-wrap row before this packed them awkwardly on
+                  narrower cards. `width: 100%` on the <a> makes the
+                  download anchor fill its grid cell like the <Button>s. */}
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginTop: 'auto' }}>
                 {job.status === 'done' && playableVideoUrl ? (
                   <>
                     <a
                       href={job.taskId ? `/api/videos/${job.taskId}?download=true` : playableVideoUrl}
                       download
                       className="btn btn-primary"
-                      style={{ textDecoration: 'none' }}
+                      style={{ textDecoration: 'none', justifyContent: 'center' }}
                     >
                       <Icon name="download" size={14} /> 내 컴퓨터에 저장
                     </a>
@@ -461,8 +517,9 @@ const RenderDashboard = ({ state, attachToTaskId = null, onBack, onReset }) => {
                 ) : (
                   <>
                     <Button variant="primary" icon="download" disabled>내 컴퓨터에 저장</Button>
-                    <Button icon="link" disabled>공유 링크</Button>
+                    <Button icon="link" disabled>공유 링크 복사</Button>
                     <Button icon="refresh" disabled={job.status !== 'error'} onClick={onBack}>고쳐서 다시 만들기</Button>
+                    <Button icon="plus" disabled onClick={onReset}>영상 하나 더 만들기</Button>
                   </>
                 )}
               </div>

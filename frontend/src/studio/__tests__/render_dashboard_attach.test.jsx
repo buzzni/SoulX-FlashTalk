@@ -119,6 +119,43 @@ describe('RenderDashboard attach mode — branching on queue status', () => {
     });
   });
 
+  it('completed task: summary card reads resolution from queueEntry.params (NOT state.resolution)', async () => {
+    // state.resolution is 448×768 (Step 3 default). The task on the server
+    // was actually run at 1280×720 per its queue params. The summary must
+    // show the TASK's resolution, not the UI state's.
+    fetchQueue.mockResolvedValue({
+      running: [],
+      pending: [],
+      recent: [{
+        task_id: 'done-hd',
+        type: 'generate',
+        status: 'completed',
+        params: { resolution: '720x1280' },  // hxw — matches stringifyResolution
+        started_at: '2026-04-23T10:00:00',
+        completed_at: '2026-04-23T10:03:00',
+        created_at: '2026-04-23T09:59:00',
+      }],
+      total_running: 0,
+      total_pending: 0,
+    });
+
+    // Stub HEAD request for file-size probe so the real-fetch effect doesn't
+    // dangle a promise during teardown.
+    const origFetch = global.fetch;
+    global.fetch = vi.fn().mockResolvedValue({ ok: true, headers: { get: () => '0' } });
+
+    render(withProvider(
+      <RenderDashboard state={baseState} attachToTaskId="done-hd" onBack={() => {}} onReset={() => {}} />
+    ));
+
+    await waitFor(() => {
+      // Actual task resolution (1280×720), NOT state.resolution (448×768)
+      expect(screen.getByText('1280×720 · 세로형')).toBeTruthy();
+    });
+
+    global.fetch = origFetch;
+  });
+
   it('pending task: header reads "영상 만드는 중", SSE still subscribed', async () => {
     fetchQueue.mockResolvedValue({
       running: [],
