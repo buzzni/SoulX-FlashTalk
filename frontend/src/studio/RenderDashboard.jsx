@@ -29,11 +29,13 @@ function formatDateTime(iso) {
   if (!iso) return '';
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return '';
-  return d.toLocaleString('ko-KR', {
-    month: '2-digit', day: '2-digit',
-    hour: '2-digit', minute: '2-digit', second: '2-digit',
-    hour12: false,
-  });
+  // Year included so users browsing older history know whether they're
+  // looking at today's run or last week's. ko-KR with `year: 'numeric'`
+  // produces e.g. "2026. 04. 23. 14:22:30" — too noisy. Build the string
+  // manually for "2026-04-23 14:22:30" which reads cleaner inline.
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} `
+    + `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
 }
 
 const Confetti = () => {
@@ -304,10 +306,10 @@ const RenderDashboard = ({ state, attachToTaskId = null, onBack, onReset }) => {
                       {displayElapsedMs == null ? '경과 — (대기 중)' : `경과 ${formatElapsed(displayElapsedMs)}`}
                     </span>
                     {queueEntry?.created_at && (
-                      <span title="작업이 큐에 등록된 시각">생성 {formatDateTime(queueEntry.created_at)}</span>
+                      <span title="작업이 작업 목록에 등록된 시각">작업생성날짜 {formatDateTime(queueEntry.created_at)}</span>
                     )}
                     {queueEntry?.started_at && (
-                      <span title="실제 작업이 시작된 시각">시작 {formatDateTime(queueEntry.started_at)}</span>
+                      <span title="실제 작업이 시작된 시각">작업시작날짜 {formatDateTime(queueEntry.started_at)}</span>
                     )}
                     {queuePos != null && queuePos > 0 && (
                       <span>대기열 {queuePos}번째</span>
@@ -345,7 +347,7 @@ const RenderDashboard = ({ state, attachToTaskId = null, onBack, onReset }) => {
                     <div className="card-eyebrow">걸린 시간</div>
                     <div style={{ fontSize: 16, fontWeight: 600 }} className="num mono">{formatElapsed(displayElapsedMs ?? 0)}</div>
                     {queueEntry?.created_at && (
-                      <div className="text-xs text-tertiary" style={{ marginTop: 2 }}>{formatDateTime(queueEntry.created_at)} 등록</div>
+                      <div className="text-xs text-tertiary" style={{ marginTop: 2 }}>작업생성날짜 {formatDateTime(queueEntry.created_at)}</div>
                     )}
                   </div>
                   <div style={{ padding: 12, background: 'var(--bg-sunken)', borderRadius: 6 }}>

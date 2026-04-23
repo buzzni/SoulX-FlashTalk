@@ -447,7 +447,7 @@ export async function generateVideo({ state, audio }) {
 // Queue polling — returns { running, pending, recent, total_running, total_pending }.
 export async function fetchQueue() {
   const res = await fetch(`${API_BASE}/api/queue`);
-  return jsonOrThrow(res, '큐 상태 조회');
+  return jsonOrThrow(res, '작업 목록 조회');
 }
 
 // Video history — returns { total, videos }. Used by RenderHistory while the

@@ -32,7 +32,7 @@ export function QueueProvider({ children }) {
       setError(null);
     } catch (err) {
       if (!aliveRef.current) return;
-      setError(err.message || '큐 조회 실패');
+      setError(err.message || '작업 목록 조회 실패');
     }
   }, []);
 

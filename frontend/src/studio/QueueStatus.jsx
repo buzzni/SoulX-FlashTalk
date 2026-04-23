@@ -162,10 +162,10 @@ export default function QueueStatus({ onTaskClick }) {
           cursor: 'pointer',
           boxShadow: 'var(--shadow-sm)',
         }}
-        title="작업 큐 상태"
+        title="작업 목록 보기"
       >
         <Icon name="settings" size={12} />
-        큐
+        작업
         {totalActive > 0 && (
           <span style={{
             background: 'rgba(255,255,255,0.25)',
@@ -196,7 +196,7 @@ export default function QueueStatus({ onTaskClick }) {
           boxSizing: 'border-box',
         }}>
           <div className="flex justify-between items-center" style={{ marginBottom: 8 }}>
-            <strong style={{ fontSize: 13 }}>작업 큐</strong>
+            <strong style={{ fontSize: 13 }}>작업 목록</strong>
             <button
               onClick={() => setExpanded(false)}
               aria-label="닫기"
@@ -266,7 +266,7 @@ export default function QueueStatus({ onTaskClick }) {
           )}
 
           {totalActive === 0 && !queueData.recent?.length && (
-            <div style={{ color: 'var(--text-tertiary)', fontSize: 12, padding: '10px 0' }}>큐가 비어있어요</div>
+            <div style={{ color: 'var(--text-tertiary)', fontSize: 12, padding: '10px 0' }}>처리할 작업이 없어요</div>
           )}
         </div>
       )}

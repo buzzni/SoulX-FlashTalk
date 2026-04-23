@@ -40,8 +40,8 @@ async function renderAndExpand(props = {}) {
     </QueueProvider>
   );
   await act(async () => { await Promise.resolve(); });
-  // Click the floating "큐" button to expand
-  fireEvent.click(screen.getByTitle('작업 큐 상태'));
+  // Click the floating "작업" button to expand
+  fireEvent.click(screen.getByTitle('작업 목록 보기'));
   return result;
 }
 
