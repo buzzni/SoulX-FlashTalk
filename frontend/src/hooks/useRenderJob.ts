@@ -56,6 +56,14 @@ export function useRenderJob(taskId: string | null | undefined): UseRenderJobRet
   // terminal (attach-to-completed-task should skip the subscribe
   // entirely, not subscribe-then-immediately-unsubscribe).
   const { data: queueSnapshot } = useQueue();
+  // Derive a stable boolean from the snapshot reference: once the
+  // first poll lands, `data` stays non-null forever, so this flips
+  // from false → true exactly once. Depending on `queueSnapshot`
+  // directly in the effect below would re-fire every 4s (queueStore
+  // writes a fresh object on every poll), causing subscribeProgress
+  // to tear down + recreate on every tick — extra HTTP traffic and
+  // a reset of the 12s error-give-up budget inside progress.ts.
+  const queueSnapshotReady = queueSnapshot !== null;
 
   const [progress, setProgress] = useState<number | null>(null);
   const [stage, setStage] = useState<TaskStateSnapshot['stage'] | null>(null);
@@ -77,12 +85,12 @@ export function useRenderJob(taskId: string | null | undefined): UseRenderJobRet
 
   useEffect(() => {
     if (!taskId) return;
-    // Wait for the queue snapshot to land — otherwise we can't tell
-    // "task is live and legitimately needs polling" from "task is
-    // already completed and we shouldn't subscribe at all." First
-    // snapshot arrives ~immediately from the store's eager first
-    // poll, so dispatch-mode doesn't feel the delay.
-    if (queueSnapshot === null) return;
+    // Wait for the first queue snapshot to land — otherwise we can't
+    // tell "task is live and legitimately needs polling" from "task is
+    // already completed and we shouldn't subscribe at all." The flag
+    // flips once and stays, so the effect no longer reruns on every
+    // 4s queue poll tick.
+    if (!queueSnapshotReady) return;
     if (entryIsTerminal) return;
     setPollFailed(false);
     const unsubscribe = subscribeProgress(taskId, (evt: ProgressEvent) => {
@@ -98,7 +106,7 @@ export function useRenderJob(taskId: string | null | undefined): UseRenderJobRet
       setMessage(evt.message ?? null);
     });
     return unsubscribe;
-  }, [taskId, entryIsTerminal, queueSnapshot]);
+  }, [taskId, entryIsTerminal, queueSnapshotReady]);
 
   // Elapsed ticker — 1s interval ONLY while the task is live.
   // Source-of-truth start time is `entry.started_at` (backend

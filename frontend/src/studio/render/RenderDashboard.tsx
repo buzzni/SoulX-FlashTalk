@@ -81,10 +81,14 @@ export default function RenderDashboard({
           setDispatchError('작업이 즉시 완료됐어요');
           return;
         }
-        setTaskId(id);
         // Promote the URL from /render → /render/:taskId so refresh
         // survives and the task is permalink-able. `replace: true` so
-        // the back button skips the transient dispatch URL.
+        // the back button skips the transient dispatch URL. No
+        // `setTaskId(id)` here — the URL change causes RenderAttachPage
+        // to own the route, and RenderLayout's `key=attachToTaskId ||
+        // 'fresh'` forces a full remount with the id as a prop. Any
+        // local setTaskId update on the outgoing dispatch instance is
+        // discarded on unmount.
         navigate(`/render/${id}`, { replace: true });
       } catch (err) {
         // eslint-disable-next-line no-console
