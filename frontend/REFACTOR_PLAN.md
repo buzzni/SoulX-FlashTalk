@@ -607,3 +607,74 @@ Right after, in a separate PR: `Phase 0b — Backend response_models for fronten
 - **EXTENSIBILITY ROUND:** Six slots (E1–E6) added to design for login/multi-user/full Tasks page without building them this refactor. Backend-side auth work explicitly scoped OUT (separate project).
 - **UNRESOLVED:** 0.
 - **VERDICT:** ENG CLEARED — ready to implement, starting with Phase 0a (frontend toolchain) + Phase 0b (backend response_models) in parallel PRs.
+
+---
+
+## 13. Post-merge follow-ups (not in this refactor)
+
+Issues surfaced during mid-refactor reviews that are out of scope for Phases 0–5
+but should land in a follow-up PR.
+
+### 13.1 Surface `queueStore.error` as a "connection lost" banner
+
+**Raised by:** Codex adversarial review (post-Phase 5).
+
+**Problem:** `useRenderJob` hard-gates progress polling on
+`queueSnapshotReady = queueSnapshot !== null`. If `/api/queue` fails on a cold
+open (full backend outage, DNS flake, proxy restart), `queueSnapshot` stays
+`null` forever, progress polling never starts, and the render view shows an
+eternal "rendering" spinner. `queueStore` already records the failure in its
+`error` field, but no consumer surfaces it.
+
+**Why not fix it in Phase 5:** The real problem is a global one — every
+route that reads from `useQueue()` (render, result, queue panel) has the
+same blind spot, and Step 1/2/3 have the same blind spot for their own
+endpoints. A local fix in `useRenderJob` would paper over the symptom for
+one route while leaving the rest exposed. Solving it properly means a
+global "backend connection lost" affordance (banner, toast, or an offline
+mode), which is a design question, not a structural refactor one.
+
+**Recommended approach:**
+- Add a top-level `ConnectionStatus` component that reads `queueStore.error`
+  (and later other store errors) and renders a non-blocking banner when
+  the backend is unreachable for N consecutive polls.
+- Keep `useRenderJob`'s `queueSnapshotReady` gate — it's still the right
+  correctness boundary. The banner tells the user *why* the spinner is
+  stuck.
+
+**Complexity:** half a day. Owned by whoever picks up "error handling
+polish" after the refactor merges.
+
+### 13.2 `useWizardStore()` whole-store subscribers
+
+**Raised by:** Claude review (internal).
+
+**Problem:** 7 components across `routes/` subscribe to the entire wizard
+store without selectors (`WizardLayout`, 3× `StepNPage`, `RootRedirect`,
+`RenderPage`, `RenderLayout`). Every keystroke in Step 3 re-renders all
+of them, even though most only read 1–2 fields. The Phase 2b comment
+explicitly calls this out as deferred work.
+
+**Why not fix it in Phase 5:** Selector migration requires moving the
+`state` + `update` prop threading out of the step components and
+replacing with per-slice `useWizardStore((s) => s.voice)` calls inside
+each leaf. That's a mechanical but touchy refactor that's easier to do
+after the route split has settled.
+
+**Complexity:** half a day per step tree. Ideally tied to a DevTools
+before/after measurement so the selector win is visible.
+
+### 13.3 `RenderLayout.handleBack` navigates to `/step/3` unconditionally
+
+**Raised by:** Claude review (internal).
+
+**Problem:** For a user who attached to `/render/:taskId` via queue click
+with an empty wizard state, "앞으로 돌아가서 수정" navigates to `/step/3`,
+which the `WizardLayout` guard then bounces to `/step/1`. The button
+label promises "go back and edit" but lands them at an empty form.
+
+**Recommended fix:** `navigate(/step/${deepestReachableStep(valid)})`,
+or hide the button when `!isAllValid(valid)`.
+
+**Complexity:** 15 minutes.
+

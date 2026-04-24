@@ -97,13 +97,14 @@ export default function RenderDashboard({
           { signal: controller.signal },
         );
         if (!alive) return;
-        const id = (res.task_id as string) || null;
+        // Backend contract (`app.py` `/api/generate`): always returns
+        // `{task_id, message, queue_position}` on 200, errors via
+        // HTTPException. No synchronous-complete branch exists, so a
+        // missing `task_id` here would be an actual backend regression
+        // — surface it as an error rather than silently succeeding.
+        const id = res.task_id as string | undefined;
         if (!id) {
-          // Rare synchronous-complete path — backend returned a URL
-          // without queueing. Just flip to a "done with no taskId"
-          // shell and let the user click through.
-          setDispatchError('작업이 즉시 완료됐어요');
-          return;
+          throw new Error('서버가 task_id를 돌려주지 않았어요');
         }
         // Promote the URL from /render → /render/:taskId so refresh
         // survives and the task is permalink-able. `replace: true` so
