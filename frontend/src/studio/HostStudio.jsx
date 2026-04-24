@@ -10,7 +10,7 @@ import { useSearchParams } from 'react-router-dom';
 import Icon from './Icon.jsx';
 import { Button } from './primitives.jsx';
 import Step1Host from './step1/Step1Host.tsx';
-import Step2Composite from './Step2Composite.jsx';
+import Step2Composite from './step2/Step2Composite.tsx';
 import Step3Audio from './Step3Audio.jsx';
 import PreviewPanel from './PreviewPanel.jsx';
 import QueueStatus from './QueueStatus.jsx';
