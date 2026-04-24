@@ -78,21 +78,47 @@ No changes to `frontend/` — this entire track is backend + eval tooling
 
 ### 3.1 Fixture selection
 
-Target: **6 fixtures** covering 3 known motion failure modes, each × 2 voices.
+**Audio source (decided 2026-04-25):** extracted from **real live-commerce
+videos** as MP3. This matches the B2B customer's actual target scenario
+exactly — broadcast-quality professional host audio is what operators
+will feed into the pipeline. Extraction via ffmpeg:
 
-| # | Failure mode | Voice profile | Script length | Expected FlashTalk behavior |
-|---|---|---|---|---|
-| 1 | Over-articulation (baseline common failure) | Jack's voice (flat, natural) | ~10s | Mouth opens too wide on vowels |
-| 2 | Over-articulation | Jack's voice (animated, product pitch) | ~15s | Worse — animated delivery amplifies |
-| 3 | Long-form drift | Jack's voice (calm explainer) | ~45s | Drift + identity loss across chunks |
-| 4 | Long-form drift | Synthetic TTS (ElevenLabs default clone) | ~45s | Same, different voice characteristics |
-| 5 | Numeric/mixed-language | Jack's voice | ~15s | "1200원 대비 3,500원" pronunciation + mouth |
-| 6 | Low-audio-energy | Jack's voice (whispered/calm) | ~15s | Baseline comparison — less pain expected |
+```bash
+ffmpeg -i <input.mp4> -vn -acodec libmp3lame -q:a 0 -ac 1 -ar 16000 output.mp3
+```
 
-**Source policy** (per §14.5 dropping persona validation):
-- Jack's voice: use existing dev recordings only, no new ask to first customer
-- Synthetic: generate via `/api/elevenlabs/generate` at default params
-- Reference frames: reuse existing test host images in `examples/`
+Note: 16kHz mono is what Wav2Vec2 expects. Stereo/44.1kHz sources get
+downsampled at extract time, not at load time (cleaner split of concerns).
+
+**Reference frame:** ONE fixed image shared across all 6 fixtures. Using
+a single face isolates audio as the sole lever (motion variation comes
+from audio, not face). Default: `examples/woman.png` or jack's own photo
+(operator chooses at fixture-commit time; same choice for all 6).
+
+**Target: 6 fixtures** covering the motion failure modes observed in
+broadcast-style delivery. Face constant, audio varies:
+
+| # | Audio profile | Length | Why this fixture |
+|---|---|---|---|
+| 1 | Calm product intro — opening greeting + brand name | 10s | Baseline "normal" delivery; if this fails, nothing else will pass |
+| 2 | Animated product pitch — emphatic delivery | 15s | Over-articulation stress test; loud audio envelope → FlashTalk tends to over-open mouth |
+| 3 | Calm explainer — product features walkthrough | 20s | Mid-length natural speech; tests sustained quality across multiple WanModel chunks |
+| 4 | Numeric-heavy — price/discount mentions ("1만 2천 원", "30% 할인") | 15s | Tests mixed-language + numeric lip-sync; known FlashTalk weakness |
+| 5 | Short salutation / sign-off ("감사합니다, 다음에 또 만나요") | 6s | Tests short-form (under one WanModel chunk); variance isolation |
+| 6 | Low-energy conversational aside ("그래서 제가 생각하기에는...") | 12s | Baseline comparison — less audio energy, expected to look best. Identifies whether over-articulation correlates with energy or is constant |
+
+**Source procurement** (operator task, ~20 min):
+- Jack picks 6 live-commerce clips from **쿠팡라이브 / 네이버쇼핑라이브 / 카카오쇼핑 /
+  유튜브 쇼핑** that exemplify the 6 profiles above
+- Extract MP3 per ffmpeg command above
+- Store at `eval/step3/fixtures/fixture-{01..06}/audio.mp3`
+- Note source URL in metadata.yaml (for future re-baseline, not for
+  attribution/upload)
+
+**Copyright stance:** internal evaluation only. Fixture MP3 files
+committed to the repo (not uploaded elsewhere, not distributed).
+Metadata records the source URL but audio itself never leaves the
+codebase. Standard research-eval fair use.
 
 **Fixture freeze rule:** once committed, the fixture set does NOT change
 during G2. Adding a fixture invalidates prior scores. If we need to add,
@@ -103,24 +129,31 @@ bump to `fixtures-v2/` and re-baseline.
 Each fixture directory has `metadata.yaml`:
 
 ```yaml
-fixture_id: fixture-01-short-neutral
-failure_mode: over_articulation
-voice_profile: jack_flat
+fixture_id: fixture-01-calm-intro
+profile: calm_product_intro
+source:
+  url: "https://shoppinglive.naver.com/..."   # for re-baseline only, not re-upload
+  extracted_at: "2026-04-25T14:00:00+09:00"
 audio:
-  duration_sec: 10.2
+  file: audio.mp3
+  duration_sec: 10.4
   sample_rate: 16000
-  peak_db: -3.1
-  rms_db: -22.4
+  channels: 1
+  peak_db: -2.8           # measured by librosa.load + peak amplitude
+  rms_db: -19.2           # measured
 reference_frame:
+  file: ../fixture-shared/reference.png  # SAME image across all 6 fixtures
   width: 448
   height: 768
-  source: examples/woman.png
-script:
-  text: "안녕하세요 오늘 소개드릴 제품은..."
+transcription:
+  text: "안녕하세요 오늘 소개드릴 상품은..."   # optional, operator can skip
   language: ko
-  char_count: 47
-notes: "Standard product intro, no numerics, calm tone"
+notes: "Broadcast-quality audio, calm female host voice, no background music"
 ```
+
+Rationale for `reference_frame` shared via symlink / relative path: the
+face is CONTROL (not variable). Having it in one place prevents accidental
+divergence and makes the experimental design explicit.
 
 Helper: `eval/common/fixture.py` loads + validates the yaml, returns a
 `Fixture` dataclass. `run_eval.py` iterates via `glob("fixtures/*/metadata.yaml")`.
@@ -342,34 +375,58 @@ Total wall-clock: 5 × 18 min = **~90 min**. Scoring: 30 videos × 20s ≈ **10 
 
 ---
 
-## 6. S3-E commercial model POC (conditional, Week 2 only)
+## 6. S3-E alternative motion model POC (conditional, Week 2 only)
 
 Activated if Week 1 gate says "ceiling confirmed" OR Week 2 S3-B winner
 still below bar.
 
-Scope: **ONE fixture, ONE commercial model, side-by-side with FlashTalk best**.
+**Budget constraint (decided 2026-04-25):** **zero external cost.**
+Commercial models (Hedra/HeyGen/D-ID) ruled out — all are per-API
+billing. S3-E candidates are **open-source, GPU-local, free**.
 
-### 6.1 First candidate: Hedra
+### 6.1 Candidate evaluation order
 
-Rationale: consumer-facing pricing, API public, image-to-video with
-audio sync, Korean language support undocumented → POC validates.
+| Model | Release | Quality signal | License | VRAM | Korean |
+|---|---|---|---|---|---|
+| **Hallo2** | 2024 Q4 | ★★★★ (strong demos) | Apache 2.0 | ~20GB | language-neutral (audio-driven only) |
+| **EchoMimic** | 2024 Q3 | ★★★★ (comparable to Hallo) | Apache 2.0 | ~16GB | language-neutral |
+| **MuseTalk** | 2024 | ★★★ (realtime focus) | MIT | ~10GB | language-neutral |
+| **SadTalker** | 2023 | ★★ (older, safe fallback) | Apache 2.0 | ~8GB | language-neutral |
 
-`scripts/step3_motion/s3e_hedra_poc.py`:
-1. Take `fixture-01-short-neutral` (smallest).
-2. Upload reference_frame + audio via Hedra API.
-3. Download result.
-4. Place next to our current-best FlashTalk render (same fixture).
-5. Jack watches both side-by-side, binary verdict: "commercial better enough to justify swap?"
+Primary candidate: **Hallo2**. Strongest recent quality signal, VRAM
+fits current 2× GPU setup. Language-neutral means Korean-specific
+training isn't an advantage we'd miss.
 
-Go/no-go on commercial swap within 2 days. If Hedra fails, try HeyGen
-same protocol.
+### 6.2 POC protocol
 
-Cost: Hedra ~$0.05/10s video. POC = 1 render = ~$0.01. Negligible.
+`scripts/step3_motion/s3e_hallo2_poc.py`:
+1. Clone Hallo2 locally (first-time cost ~1h: checkpoints ~15GB download).
+2. Run Hallo2 on **ONE fixture** from S3-0 set (pick fixture-02, the
+   animated one — that's where FlashTalk most visibly fails).
+3. Output to `eval/step3/results/s3e-hallo2-poc/fixture-02.mp4`.
+4. Place side-by-side with our FlashTalk best (same fixture, best S3-A+B
+   config).
+5. Jack watches both, binary verdict: "alternative better enough to
+   justify swap?"
 
-### 6.2 If S3-E wins
+**Time-budget:** 2 days including checkpoint download + first-run debug.
+If Hallo2 setup fails (dependency hell, GPU OOM, etc.) within day 1,
+fall back to EchoMimic (simpler).
 
-Separate G2-B PR replaces FlashTalk with commercial-model backend for
-Step 3. Out of scope for this spec — tracked as follow-up.
+### 6.3 Dropped (commercial models)
+
+Hedra / HeyGen / D-ID remain as reference but NOT in this track's scope
+due to the no-external-cost constraint. If post-contract the customer
+indicates budget, revisit separately. Not a §13 non-goal — just
+deferred until there's a budget line item.
+
+### 6.4 If S3-E wins
+
+Separate G2-B PR swaps FlashTalk inference for the winning open-source
+model at the app.py call site. Architecture impact: potentially much
+larger than expected (different API, different dependency tree,
+different preprocessing). Out of scope for this spec; G2-B gets its
+own spec.
 
 ---
 
@@ -445,14 +502,27 @@ swap decided, a separate G2-B spec covers the actual integration.
 
 ## 9. Operator workflow (jack's actual day-to-day)
 
-### First time setup (one-time, ~30 min)
+### First time setup (one-time, ~45 min)
 1. Pull branch, install deps
 2. Start backend: `CUDA_VISIBLE_DEVICES=1,3 uvicorn app:app --host 0.0.0.0 --port 8001`
-3. Collect/copy fixture audio to `eval/step3/fixtures/*/audio.wav`, reference images similarly
-4. Write metadata.yaml for each
-5. Run baseline: `python eval/step3/run_eval.py --config /dev/null --run-id baseline`
-6. Watch 6 videos, score them (20 min)
-7. Commit baseline scores
+3. **Source 6 live-commerce video clips** from 쿠팡라이브 / 네이버쇼핑라이브 etc.
+   matching the 6 profile slots in §3.1 (calm intro, animated pitch, etc.).
+   Save source URLs for later reference.
+4. **Extract MP3 from each:**
+   ```bash
+   for i in 01 02 03 04 05 06; do
+     mkdir -p eval/step3/fixtures/fixture-${i}-*
+     ffmpeg -i /path/to/clip-${i}.mp4 -vn -acodec libmp3lame \
+            -q:a 0 -ac 1 -ar 16000 \
+            -ss <start_s> -to <end_s> \
+            eval/step3/fixtures/fixture-${i}-*/audio.mp3
+   done
+   ```
+5. Pick ONE reference frame image, place at `eval/step3/fixtures/fixture-shared/reference.png`
+6. Write `metadata.yaml` for each fixture (template at `eval/step3/fixtures/_TEMPLATE.yaml`)
+7. Run baseline: `python eval/step3/run_eval.py --config /dev/null --run-id baseline`
+8. Watch 6 generated videos, score them in `results/baseline/scores.json` (20 min)
+9. Commit fixture MP3s + metadata + baseline scores
 
 ### Each lever sweep (~30-60 min)
 1. Run sweep: `python scripts/step3_motion/s3a_audio_lufs_sweep.py`
@@ -492,12 +562,24 @@ Based on Week 1 gate, either `s3b_prompt_sweep.py` or `s3e_hedra_poc.py`.
 
 ---
 
-## 12. Open questions to resolve before implementation
+## 12. Open questions — resolved 2026-04-25
 
-1. **Fixture audio: should Jack's voice be clone-regenerated or raw recording?** — probably raw (closer to target demo scenario), confirm with jack.
-2. **Scoring UI** — plain JSON editing in editor, or a tiny local web page for side-by-side video + score form? Plain JSON faster to ship.
-3. **Hedra API access** — does jack have an account + key? If not, POC takes longer (signup path).
-4. **Is "video problem 80%" dominated by motion (this spec) or TTS (§6B)?** — user-interview answer combined both. If TTS is actually the dominant sub-pain, G2 priority vs G3 priority flips.
+1. ✅ **Fixture audio source:** extracted MP3 from real live-commerce
+   videos (쿠팡라이브 etc.). Broadcast-quality professional audio.
+   Resolution reflected in §3.1 + §9.
+2. ✅ **Scoring UI:** plain JSON editing in editor. No custom tool.
+   Decided unilaterally — lowest friction, ships today.
+3. ✅ **S3-E budget:** zero external cost. Rules out all commercial
+   models. S3-E re-scoped to open-source alternatives (Hallo2 primary).
+   Resolution in §6.
+4. ✅ **"80% 영상 문제" decomposition:** motion-dominant, but TTS has
+   its own specific sub-issue — **voice clone from extracted audio**
+   is inconsistent. **ElevenLabs TTS itself is fine.** G3 TTS track
+   scope shifts accordingly (V-A script preproc drops or deprioritizes,
+   V-B clone quality + V-D multi-gen move up). Does not affect G2; noted
+   here for G3 spec author.
+
+All resolved. No blocker for starting implementation.
 
 ---
 
