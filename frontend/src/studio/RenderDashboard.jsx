@@ -8,7 +8,7 @@ import { useNavigate } from 'react-router-dom';
 import Icon from './Icon.jsx';
 import { Badge, Button } from './primitives.jsx';
 import { generateVideo, getVideoMeta, humanizeError, subscribeProgress } from './api.js';
-import { useQueueEntry, useQueuePosition } from './QueueContext.jsx';
+import { useQueueEntry, useQueuePosition } from '../stores/queueStore';
 import RenderHistory from './RenderHistory.jsx';
 import { formatTaskTitle } from './taskFormat.js';
 

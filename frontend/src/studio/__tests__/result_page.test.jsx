@@ -9,29 +9,28 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, screen, cleanup, waitFor } from '@testing-library/react';
 import { MemoryRouter, Routes, Route } from 'react-router-dom';
 
-// Partial mock — override fetchQueue (QueueContext uses it) but leave
-// fetchResult / humanizeError / etc. pointing at the real implementations
-// so the global.fetch override in `renderAt` is what actually drives
-// the test. Without this, ResultPage imports a mocked `fetchResult`
-// that doesn't exist on the stub and the page crashes.
-vi.mock('../api.js', async () => {
-  const actual = await vi.importActual('../api.js');
-  return {
-    ...actual,
-    fetchQueue: vi.fn().mockResolvedValue({
-      running: [],
-      pending: [],
-      recent: [],
-      total_running: 0,
-      total_pending: 0,
-    }),
-  };
-});
+// Mock only the queue fetch — everything else (fetchResult,
+// humanizeError) uses the real implementation so the `global.fetch`
+// override in `renderAt` is what drives the ResultPage request.
+vi.mock('../../api/queue', () => ({
+  fetchQueue: vi.fn().mockResolvedValue({
+    running: [],
+    pending: [],
+    recent: [],
+    total_running: 0,
+    total_pending: 0,
+  }),
+  cancelQueuedTask: vi.fn(),
+}));
 
 import ResultPage from '../ResultPage.jsx';
-import { QueueProvider } from '../QueueContext.jsx';
+import { __queueStoreInternals } from '../../stores/queueStore';
 
-afterEach(() => { cleanup(); vi.clearAllMocks(); });
+afterEach(() => {
+  cleanup();
+  vi.clearAllMocks();
+  __queueStoreInternals.reset();
+});
 
 function renderAt(taskId, manifest) {
   // Intercept /api/results/{id}; let /api/queue fall through to the mocked
@@ -49,11 +48,9 @@ function renderAt(taskId, manifest) {
 
   return render(
     <MemoryRouter initialEntries={[`/result/${taskId}`]}>
-      <QueueProvider>
-        <Routes>
-          <Route path="/result/:taskId" element={<ResultPage />} />
-        </Routes>
-      </QueueProvider>
+      <Routes>
+        <Route path="/result/:taskId" element={<ResultPage />} />
+      </Routes>
     </MemoryRouter>
   );
 }

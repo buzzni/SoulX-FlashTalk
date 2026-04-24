@@ -222,9 +222,10 @@ const HostStudio = () => {
   // is self-contained (live → /?attach=, completed → /result/:taskId).
   const queueSlot = <QueueStatus />;
 
-  // QueueProvider now lives in App.jsx (one step above the BrowserRouter's
-  // <Routes>) so the 4s polling interval survives navigation between
-  // wizard (/), render view, AND /result/:taskId.
+  // Queue polling is owned by queueStore (Phase 2a) — no Provider
+  // hoisting needed. The 4s interval runs while any component reads
+  // from useQueue/useQueueEntry/useQueuePosition, and pauses when
+  // nothing is mounted.
   const renderShell = rendering ? (
     <div {...shellProps}>
       <div className="app-shell" data-screen-label="05 Render">

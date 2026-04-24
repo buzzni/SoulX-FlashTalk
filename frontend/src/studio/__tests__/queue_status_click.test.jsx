@@ -9,17 +9,24 @@ import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
 import { render, screen, fireEvent, cleanup, act } from '@testing-library/react';
 import { MemoryRouter, useLocation } from 'react-router-dom';
 
-vi.mock('../api.js', () => ({
+// Mock the underlying domain module — `api.js` re-exports from here,
+// so both `import from '../api.js'` and the queueStore's direct
+// import from `../../api/queue` pick up the mock.
+vi.mock('../../api/queue', () => ({
   fetchQueue: vi.fn(),
   cancelQueuedTask: vi.fn(),
-  humanizeError: (e) => (e && e.message) || String(e),
 }));
 
-import { fetchQueue, cancelQueuedTask } from '../api.js';
+import { fetchQueue, cancelQueuedTask } from '../../api/queue';
 import QueueStatus from '../QueueStatus.jsx';
-import { QueueProvider } from '../QueueContext.jsx';
+import { __queueStoreInternals } from '../../stores/queueStore';
 
-afterEach(() => { cleanup(); vi.clearAllMocks(); vi.useRealTimers(); });
+afterEach(() => {
+  cleanup();
+  vi.clearAllMocks();
+  vi.useRealTimers();
+  __queueStoreInternals.reset();
+});
 
 beforeEach(() => {
   vi.useFakeTimers();
@@ -49,10 +56,8 @@ function LocationSpy() {
 async function renderAndExpand() {
   const result = render(
     <MemoryRouter initialEntries={["/"]}>
-      <QueueProvider>
-        <QueueStatus />
-        <LocationSpy />
-      </QueueProvider>
+      <QueueStatus />
+      <LocationSpy />
     </MemoryRouter>
   );
   await act(async () => { await Promise.resolve(); });

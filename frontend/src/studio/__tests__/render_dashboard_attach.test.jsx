@@ -15,19 +15,37 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, screen, cleanup, waitFor } from '@testing-library/react';
 import { MemoryRouter, useLocation } from 'react-router-dom';
 
-vi.mock('../api.js', () => ({
+// Mock each domain module the component tree actually imports from.
+// api.js re-exports from these, so the mocks propagate through both
+// the direct imports (inside queueStore, RenderDashboard) and any
+// legacy `from '../api.js'` calls.
+vi.mock('../../api/queue', () => ({
   fetchQueue: vi.fn(),
-  generateVideo: vi.fn(),
+  cancelQueuedTask: vi.fn(),
+}));
+vi.mock('../../api/video', () => ({ generateVideo: vi.fn() }));
+vi.mock('../../api/progress', () => ({
   subscribeProgress: vi.fn(() => () => {}),
-  humanizeError: (e) => (e && e.message) || String(e),
+}));
+vi.mock('../../api/history', () => ({
   fetchHistory: vi.fn().mockResolvedValue({ total: 0, videos: [] }),
 }));
+vi.mock('../../api/file', () => ({
+  getVideoMeta: vi.fn().mockResolvedValue({}),
+  listServerFiles: vi.fn(),
+}));
 
-import { fetchQueue, subscribeProgress } from '../api.js';
+import { fetchQueue } from '../../api/queue';
+import { subscribeProgress } from '../../api/progress';
 import RenderDashboard from '../RenderDashboard.jsx';
-import { QueueProvider } from '../QueueContext.jsx';
+import { __queueStoreInternals } from '../../stores/queueStore';
 
-afterEach(() => { cleanup(); vi.clearAllMocks(); vi.useRealTimers(); });
+afterEach(() => {
+  cleanup();
+  vi.clearAllMocks();
+  vi.useRealTimers();
+  __queueStoreInternals.reset();
+});
 
 const baseState = {
   voice: { generatedAudioPath: null, uploadedAudio: null, source: 'tts', voiceName: null },
@@ -46,10 +64,8 @@ function LocationSpy() {
 function renderInRouter(ui) {
   return render(
     <MemoryRouter initialEntries={["/"]}>
-      <QueueProvider>
-        {ui}
-        <LocationSpy />
-      </QueueProvider>
+      {ui}
+      <LocationSpy />
     </MemoryRouter>
   );
 }

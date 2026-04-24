@@ -1,6 +1,7 @@
 // QueueStatus — floating queue badge/panel.
-// Reads from the shared QueueProvider so the queue is fetched once per app
-// regardless of how many components display it (this + RenderDashboard).
+// Reads from queueStore (Phase 2a) — the store owns polling lifecycle
+// and reference-counts subscribers, so this component stops driving
+// network traffic when unmounted without any Provider plumbing.
 // Navigation is self-contained via react-router:
 //   - completed → /result/:taskId (dedicated result page)
 //   - running/pending → /?attach=:taskId (wizard route w/ attach hint that
@@ -9,7 +10,7 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Icon from './Icon.jsx';
 import { cancelQueuedTask, humanizeError } from './api.js';
-import { useQueue } from './QueueContext.jsx';
+import { useQueue } from '../stores/queueStore';
 import { formatTaskTitle } from './taskFormat.js';
 
 const statusLabel = (status) => ({
