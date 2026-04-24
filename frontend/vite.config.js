@@ -32,8 +32,29 @@ export default defineConfig({
           proxy.on('proxyReq', (proxyReq, req) => {
             console.log('[vite-proxy] →', req.method, req.url, 'len=', req.headers['content-length'] || '?');
           });
-          proxy.on('proxyRes', (proxyRes, req) => {
+          proxy.on('proxyRes', (proxyRes, req, res) => {
             console.log('[vite-proxy] ←', req.method, req.url, 'status=', proxyRes.statusCode, 'len=', proxyRes.headers['content-length'] || '?');
+            // SSE streams need to flush per-chunk. Without the Nagle/keep-
+            // alive tuning the default pipe buffers body chunks until either
+            // the backend fills the socket buffer or the stream closes —
+            // which made /api/progress/{id} return 200 headers but the
+            // browser's EventSource never saw any `data:` frames while the
+            // worker was still running.
+            //
+            // Do NOT call res.flushHeaders() here: at proxyRes-event time
+            // http-proxy hasn't copied Content-Type (and other headers) from
+            // proxyRes to res yet, so flushing pre-empts the copy and the
+            // response reaches the browser without `Content-Type: text/
+            // event-stream` — EventSource then silently rejects every frame.
+            const ct = proxyRes.headers['content-type'] || '';
+            if (ct.includes('text/event-stream')) {
+              proxyRes.headers['x-accel-buffering'] = 'no';
+              proxyRes.headers['cache-control'] = 'no-cache';
+              res.socket?.setNoDelay?.(true);
+              res.socket?.setKeepAlive?.(true);
+              proxyRes.socket?.setNoDelay?.(true);
+              proxyRes.socket?.setKeepAlive?.(true);
+            }
           });
         },
       },
