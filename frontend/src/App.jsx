@@ -1,6 +1,6 @@
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import HostStudio from './studio/HostStudio.jsx'
-import ResultPage from './studio/ResultPage.jsx'
+import ResultPage from './studio/ResultPage.tsx'
 import ErrorBoundary from './studio/ErrorBoundary.jsx'
 
 // Router:

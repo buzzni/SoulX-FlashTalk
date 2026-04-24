@@ -23,7 +23,7 @@ vi.mock('../../api/queue', () => ({
   cancelQueuedTask: vi.fn(),
 }));
 
-import ResultPage from '../ResultPage.jsx';
+import ResultPage from '../ResultPage.tsx';
 import { __queueStoreInternals } from '../../stores/queueStore';
 
 afterEach(() => {
