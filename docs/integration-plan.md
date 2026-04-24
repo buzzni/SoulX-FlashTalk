@@ -232,12 +232,63 @@ broken middle state.
 
 ## 6. Step 3 naturalness track — MOTION (FlashTalk path)
 
+> ⚠️ **G2 scope authority:** this section is historical context. Authoritative G2
+> execution reference is `docs/step3-motion-spec.md` v3 on branch `step3-motion`.
+> v3 diverges from §6 below on 7 material points (S3-A dropped as mathematically
+> dead lever, S3-D CFG dropped per paper, MULTITALK_OPTIONS booleans replaced,
+> S3-E reframed as Hallo2 open-source, etc. — see spec Appendix B). Read the spec
+> for what actually ships; this §6 stays for the broader integration narrative.
+
 **Correction from Codex outside-voice review:** earlier draft targeted
 MultiTalk. Production single-host video path uses **FlashTalk**
 (verified at `app.py:735, 1235` — both call sites pass
 `config.FLASHTALK_OPTIONS["default_prompt"]`). MultiTalk is the
 2-agent conversation path only (`app.py:1725`). All §6 PRs edit the
 FlashTalk surface.
+
+### 6.paper Technical report findings (authoritative, supersedes earlier §6.1-§6.4 lever list)
+
+Post-publication deep-dive of `assets/SoulX_FlashTalk.pdf` + full code
+audit produced a much shorter lever list than earlier drafts. Key
+evidence:
+
+1. **CFG removed at training time** — Paper §2.2 Stage 2: *"Self-Correcting
+   Bidirectional Distillation... reduces sampling steps and **removes
+   classifier-free guidance**"*. Not a config knob, a training choice.
+2. **DMD distillation with fixed step count** — Paper eq (2), (3) show
+   student `G_θ` trained via `Stochastic Truncation Strategy` where
+   `t' ~ U(1, T)` with **T = reduced sampling steps fixed during
+   training**. `sample_steps: 4` in `flash_talk/configs/infer_params.yaml`
+   IS that T.
+3. **Very short distillation (1.2k steps)** — Paper §3: *"converges in
+   just 1.2k steps"*. High sensitivity to inference hyperparameters.
+4. **`sample_shift=5`** is part of the distilled scheduler. Same
+   sensitivity concern.
+5. **`sample_neg_prompt` is dead in FlashTalk path** — pipeline stores
+   `config.sample_neg_prompt` (line 135) but `prepare_params`/`generate`
+   never use it. WanModel forward has no negative branch. Since CFG is
+   removed at training, no mechanism consumes a negative prompt.
+6. **`ref_target_masks` dead for single-host** — `audio_cross_attn:147`
+   early-returns to base class when `human_num==1`. Mask only matters
+   for 2-agent conversation path.
+7. **Text conditioning IS trained** — Paper §2.1: *"textual conditioning
+   via umT5... injected via cross-attention layers"*. L1 prompt lever
+   is valid, but marketed as "semantic guidance" — audio is the
+   dominant motion driver, not text.
+8. **Audio is the dominant motion driver** — Paper framework diagram
+   shows audio cross-attention per block, dedicated `audio_proj`
+   layer, `Wav2Vec2` encoder. Audio amplitude directly shapes motion
+   magnitude. L2 audio pre-attenuation is the strongest lever.
+
+**Lever consequences:**
+- ✅ Keep: `input_prompt` (L1), audio pre-attenuation (L2)
+- ❌ Drop: `sample_neg_prompt`, CFG, `sampling_steps` sweep,
+  `sample_shift` sweep, `ref_target_masks`, reference-frame preproc.
+  All either architecturally absent, structurally dead, or out-of-
+  distribution risk under short distillation.
+
+**G2 lever count: 2** (S3-A + S3-B). One is likely strong (audio), one
+is probably weak (prompt).
 
 ### 6.baseline Current state inventory (must read before any §6 PR)
 
@@ -334,7 +385,51 @@ Check FlashTalk pipeline for CFG scale exposure. If exposed via
 `FLASHTALK_OPTIONS` or pipeline config, sweep `{5.0, 6.0, 7.5 (likely
 current), 9.0}`. If not exposed, either skip or add exposure.
 
-### 6.5 S3-E (deferred): commercial model fallback
+### 6.5 S3-E — promoted from "deferred" to **contingency on-deck**
+
+Per §6.paper, G2 has only 2 active levers (S3-A + S3-B) and S3-B's
+effect is likely modest. If the S3-A+S3-B combined eval delta does
+NOT bring "would show to customer" yes-rate above demo threshold,
+**S3-E activates without additional planning**.
+
+Trigger conditions for S3-E activation (after G2 PRs land):
+- Rubric yes-rate after S3-A + S3-B combined < 60%, OR
+- Any single-fixture yes-rate remains 0/N (model fundamentally can't
+  handle a class of input)
+
+Candidate evaluation order (commercial model POC):
+1. **Hedra** — consumer-facing, API, Korean voice handling unknown
+2. **HeyGen** — enterprise, higher cost, proven Korean
+3. **D-ID** — older, solid quality baseline, mid cost
+
+POC scope: ONE candidate, ONE fixture from S3-0, side-by-side visual
+review. Go/no-go on commercial swap within 2 days.
+
+Cost implication: commercial per-video fees replace FlashTalk's GPU
+amortization. Budget TBD at S3-E activation time.
+
+---
+
+### 6.timebox G2 execution time-box (2 weeks to determine FlashTalk ceiling)
+
+**Week 1:**
+- Day 1-2: S3-0 fixture set (6-8) + rubric + `eval/step3/run_eval.py`
+- Day 3: baseline scoring (operator: jack)
+- Day 4-5: S3-A audio pre-attenuation sweep — `audio_lufs ∈ {-28, -33, -38}` × all fixtures, score each
+
+**Decision gate (end of Week 1):**
+- Rubric delta ≥ +3 points → **ship S3-A, S3-B deprioritized**. G2 done.
+- Rubric delta +1 to +2 → **partial. continue to S3-B in Week 2**
+- Rubric delta ≤ 0 → **FlashTalk ceiling confirmed. pivot to S3-E**
+
+**Week 2 (conditional on Week 1 result):**
+- S3-B path: 5-7 candidate positive prompts × fixtures. Commit winner.
+- S3-E path: Hedra POC on 1 fixture. Compare to S3-A best. Go/no-go on swap.
+
+**Exit criteria:** by end of Week 2, either (a) G2 shipped with
+measurable quality delta, or (b) S3-E decision made with concrete
+evidence. No open-ended "keep trying prompts" — time-box forces a
+conclusion.
 
 ### 6.0 S3-0: Baseline eval set (MUST land first)
 
@@ -927,9 +1022,14 @@ code-readiness reasons). Actual execution order:
 
 ### 14.1 New sequence
 
+> ⚠️ **G2 row is historical.** Actual G2 execution is in
+> `docs/step3-motion-spec.md` v3 on branch `step3-motion`. S3-A was dropped
+> (mathematically dead lever, proof in spec Appendix A). Week 1 is S3-B
+> positive-prompt sweep; Week 2 is Hallo2 open-source POC.
+
 | Order | PR | Contents | Why first/last |
 |---|---|---|---|
-| **🥇 G2** | step3-motion | S3-0 eval + S3-A audio_lufs sweep + S3-B FlashTalk prompt/neg-prompt sweep + S3-D CFG sweep. (S3-C dropped — see §6.3.) One commit per lever. | 80% of user-visible pain. All 3 active levers are direct causes of over-articulation (audio energy, prompt interpretation, CFG strength). |
+| **🥇 G2** | step3-motion | **2-week time-boxed (§6.timebox).** Week 1: S3-0 eval + S3-A audio pre-attenuation sweep. Decision gate. Week 2: EITHER S3-B positive-prompt sweep OR S3-E commercial model POC depending on gate result. | 80% of user-visible pain. **Only 2 active levers** (S3-A strong, S3-B likely weak). Time-box forces ceiling determination; if FlashTalk can't hit demo quality, pivot to S3-E inside same budget. |
 | **🥇 G3** | step3-tts | V-0 eval + V-A script preproc + V-B clone gate + V-C param sweep + V-D multi-gen auto-reject. Parallel with G2 (different subsystem). | Other half of 80% pain. |
 | **🥈 G1** | step2-trim | Option C++ scope (§3-§5). Backend `modules/step2/*` trim + app.py SSE extension + frontend remap into `step2/*.tsx`. **Judge runs as offline batch, no crown UI** (per §14.2a). | Lower urgency at 20% pain. Step 2 B1/B2/B3 prompt fixes are the demo value here. No operator-visible UX added. |
 
