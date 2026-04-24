@@ -1,0 +1,6 @@
+config_id: s3b-p-v2
+# Negation-as-positive — spec v3 §4.2
+prompt: >
+  A person speaks clearly. Lips open only slightly, never wide. Hands stay
+  at the sides, not gesturing. Body stays still, not swaying. Background is
+  static.
