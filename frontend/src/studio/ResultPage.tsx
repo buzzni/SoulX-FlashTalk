@@ -16,7 +16,7 @@ import { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Badge, Button } from './primitives.jsx';
 import ProvenanceCard from './ProvenanceCard.jsx';
-import QueueStatus from './QueueStatus.jsx';
+import QueueStatus from './QueueStatus';
 import { fetchResult } from '../api/result';
 import { humanizeError } from '../api/http';
 import { formatTaskTitle } from './taskFormat.js';

@@ -13,7 +13,7 @@ import Step1Host from './step1/Step1Host.tsx';
 import Step2Composite from './step2/Step2Composite.tsx';
 import Step3Audio from './step3/Step3Audio.tsx';
 import PreviewPanel from './PreviewPanel.jsx';
-import QueueStatus from './QueueStatus.jsx';
+import QueueStatus from './QueueStatus.tsx';
 import RenderDashboard from './render/RenderDashboard.tsx';
 import { useWizardStore } from '../stores/wizardStore';
 import { storageKey } from '../stores/storageKey';

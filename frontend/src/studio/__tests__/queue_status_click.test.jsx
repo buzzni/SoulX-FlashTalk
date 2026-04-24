@@ -18,7 +18,7 @@ vi.mock('../../api/queue', () => ({
 }));
 
 import { fetchQueue, cancelQueuedTask } from '../../api/queue';
-import QueueStatus from '../QueueStatus.jsx';
+import QueueStatus from '../QueueStatus.tsx';
 import { __queueStoreInternals } from '../../stores/queueStore';
 
 afterEach(() => {
