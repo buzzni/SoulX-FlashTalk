@@ -14,28 +14,28 @@
  * redirects them back to /step/3 via isAllValid. If they refresh on
  * /render/:taskId, the attach-mode re-picks up the existing job cleanly.
  */
-import { useEffect } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { Navigate, useParams } from 'react-router-dom';
 import RenderLayout from './RenderLayout';
 import { useWizardStore } from '../stores/wizardStore';
-import { computeValidity, isAllValid } from './wizardValidation';
+import {
+  computeValidity,
+  deepestReachableStep,
+  isAllValid,
+} from './wizardValidation';
 
 /** /render — no id, dispatch-new mode. Requires a fully-valid wizard
- * state (otherwise there's nothing to dispatch); otherwise redirect
- * to the deepest reachable step. */
+ * state (otherwise there's nothing to dispatch). If the state isn't
+ * valid we return a synchronous <Navigate />, so RenderLayout never
+ * mounts and RenderDashboard never tries to fire its dispatch against
+ * an empty wizard (the prior useEffect-based guard let the child
+ * mount for one tick, which made the dispatch throw "no audio path"
+ * right before the redirect ran). */
 export function RenderDispatchPage() {
-  const navigate = useNavigate();
   const state = useWizardStore();
-
-  useEffect(() => {
-    const valid = computeValidity(state);
-    if (!isAllValid(valid)) {
-      // No in-flight job + no usable wizard state = nothing to render.
-      // Drop the user at step 1 (or wherever deep-linked reach lands them).
-      navigate('/step/1', { replace: true });
-    }
-  }, [state, navigate]);
-
+  const valid = computeValidity(state);
+  if (!isAllValid(valid)) {
+    return <Navigate to={`/step/${deepestReachableStep(valid)}`} replace />;
+  }
   return <RenderLayout attachToTaskId={null} />;
 }
 

@@ -11,8 +11,8 @@
  * prevents showing a step 3 form that references missing step 2
  * state (e.g. no composite image to preview).
  */
-import { useEffect, useMemo, type ReactNode } from 'react';
-import { useLocation, useNavigate } from 'react-router-dom';
+import { useMemo, type ReactNode } from 'react';
+import { Navigate, useLocation, useNavigate } from 'react-router-dom';
 import PreviewPanel from '../studio/PreviewPanel.jsx';
 import QueueStatus from '../studio/QueueStatus';
 import { useWizardStore } from '../stores/wizardStore';
@@ -52,21 +52,18 @@ export default function WizardLayout({ children }: WizardLayoutProps) {
 
   // Guard: redirect bad URLs (/step/foo, /step/4) and unreachable
   // deep-links (/step/3 without step 2 done) to a sane target.
-  useEffect(() => {
-    if (parsed === null) {
-      navigate(`/step/${deepestReachableStep(valid)}`, { replace: true });
-      return;
-    }
-    if (parsed === 2 && !valid[1]) {
-      navigate('/step/1', { replace: true });
-      return;
-    }
-    if (parsed === 3 && !valid[2]) {
-      navigate(`/step/${deepestReachableStep(valid)}`, { replace: true });
-    }
-  }, [parsed, valid, navigate]);
-
-  if (parsed === null) return null; // guard will redirect on next tick
+  // Synchronous Navigate (not useEffect) so the step page never mounts
+  // for a tick before the redirect takes effect — that lag made Step2
+  // hit its missing-host preconditions and log noise to the console.
+  if (parsed === null) {
+    return <Navigate to={`/step/${deepestReachableStep(valid)}`} replace />;
+  }
+  if (parsed === 2 && !valid[1]) {
+    return <Navigate to="/step/1" replace />;
+  }
+  if (parsed === 3 && !valid[2]) {
+    return <Navigate to={`/step/${deepestReachableStep(valid)}`} replace />;
+  }
 
   const step: StepNum = parsed;
 
