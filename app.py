@@ -22,6 +22,12 @@ import uvicorn
 
 import config
 from modules.task_queue import task_queue
+from modules.schemas import (
+    HistoryResponse,
+    QueueSnapshot,
+    ResultManifest,
+    TaskStateSnapshot,
+)
 
 # Setup logging
 logging.basicConfig(
@@ -1330,7 +1336,7 @@ async def progress_stream(task_id: str):
     return StreamingResponse(_progress_event_generator(task_id), media_type="text/event-stream")
 
 
-@app.get("/api/tasks/{task_id}/state")
+@app.get("/api/tasks/{task_id}/state", response_model=TaskStateSnapshot)
 async def task_state_snapshot(task_id: str):
     """Plain-JSON snapshot of current task state — polling alternative to the
     SSE endpoint above. Exists because some client environments (certain
@@ -1377,7 +1383,7 @@ async def get_video(task_id: str, download: bool = False):
     raise HTTPException(status_code=404, detail="Video not found")
 
 
-@app.get("/api/history")
+@app.get("/api/history", response_model=HistoryResponse)
 async def get_history(limit: int = 50):
     history = load_video_history()
     return {"total": len(history), "videos": history[:limit]}
@@ -1695,7 +1701,7 @@ async def generate_conversation_endpoint(
 # Queue Status Endpoints
 # ========================================
 
-@app.get("/api/queue")
+@app.get("/api/queue", response_model=QueueSnapshot)
 async def get_queue_status():
     """Get current queue status: running, pending, and recent tasks."""
     return await task_queue.get_status()
@@ -1786,7 +1792,7 @@ def _synthesize_result_from_queue(entry: dict) -> dict:
     }
 
 
-@app.get("/api/results/{task_id}")
+@app.get("/api/results/{task_id}", response_model=ResultManifest)
 async def get_result(task_id: str):
     """Return the result manifest for a completed task.
 
