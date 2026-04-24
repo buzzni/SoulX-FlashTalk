@@ -482,21 +482,6 @@ async def generate_video_task(
                 human_speech_array_all, _ = librosa.load(audio_path, sr=sample_rate, mono=True)
 
                 # Pre-attenuate to target LUFS. FlashTalk's internal
-                # loudness_norm() targets -23 LUFS; lowering below that reduces
-                # lip openness because the audio envelope drives the mouth
-                # motion. Conversation path does the same (see
-                # modules/conversation_generator.py); this keeps single-host
-                # behavior aligned.
-                target_lufs = config.FLASHTALK_OPTIONS.get("audio_lufs", -23)
-                if target_lufs < -23:
-                    attenuation_db = target_lufs - (-23)  # negative
-                    attenuation_linear = 10.0 ** (attenuation_db / 20.0)
-                    human_speech_array_all = human_speech_array_all * attenuation_linear
-                    logger.info(
-                        f"Audio pre-attenuated by {attenuation_db:.1f}dB "
-                        f"(target LUFS: {target_lufs})"
-                    )
-
                 audio_encode_mode = config.FLASHTALK_OPTIONS.get("audio_encode_mode", "stream")
                 generated_list = []
 
