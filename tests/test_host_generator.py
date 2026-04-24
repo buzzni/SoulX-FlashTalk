@@ -108,7 +108,11 @@ def test_build_host_prompt_includes_outfit_text():
         outfit_text="베이지 니트, 청바지",
     )
     assert "베이지 니트" in prompt
-    assert "의상 설명" in prompt
+    # The prompt template labels the outfit segment "Outfit description:"
+    # (English). The assertion previously looked for the Korean label
+    # "의상 설명" and silently rotted when the template was switched.
+    # Match the current template so the test tracks reality.
+    assert "Outfit description" in prompt
 
 
 def test_build_system_instruction_includes_negative_prompt():
