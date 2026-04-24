@@ -15,8 +15,10 @@ import PreviewPanel from './PreviewPanel.jsx';
 import QueueStatus from './QueueStatus.jsx';
 import RenderDashboard from './RenderDashboard.jsx';
 
-import './styles/tokens.css';
-import './styles/app.css';
+// Global styles (tokens.css / app.css / tailwind.css) now load from
+// src/main.jsx so every route gets them on a cold open — previously they
+// only loaded when this component mounted, which left /result/:taskId
+// unstyled on direct navigation.
 
 const STEPS = [
   { key: 1, name: '쇼호스트', short: '1', full: '쇼호스트 만들기' },

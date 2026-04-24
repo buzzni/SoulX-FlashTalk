@@ -1,0 +1,3 @@
+Generated types land here via `npm run gen:types` once Phase 0b adds Pydantic
+response_model decorators on the backend. Until then this folder stays empty
+(but tracked) so imports from `@/types/generated/api` can be wired in advance.
