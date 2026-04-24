@@ -6,11 +6,14 @@ Each candidate = host + products + background, composed into a single scene.
 Features:
 - N parallel Gemini calls with partial-success tolerance (min_success=2)
 - Product image rembg preprocessing (toggle off via ?rembg=false)
-- Korean direction → English scene-prompt translation (cached)
 - Shot/angle/background-type enum validation
 - Semaphore cap on concurrent Gemini calls to prevent singleton tear-down races
 
-See specs/hoststudio-migration/plan.md §Phase 2.
+Prompt v2 (2026-04-25): hybrid EN structure + KO direction verbatim. The
+translate_direction_ko_to_en helper is retained for rollback but no longer
+invoked on the hot path. See docs/step2-rebuild-spec.md §2 and the 7-principle
+note on scene inventory, relational placement, integration triple, and
+constraints-last ordering (Gemini 3.x instruction-following behavior).
 """
 from __future__ import annotations
 
@@ -123,32 +126,139 @@ def translate_direction_ko_to_en(direction_ko: str) -> str:
 
 
 def _build_scene_prompt(
-    direction_en: str,
+    direction: str,
     shot: str,
     angle: str,
     background_type: str,
     background_prompt: Optional[str],
     background_preset_label: Optional[str],
 ) -> str:
-    parts: List[str] = []
+    """v2 prompt. EN structure + KO direction verbatim.
 
-    if background_type == "prompt" and background_prompt:
-        parts.append(background_prompt)
-    elif background_type == "preset" and background_preset_label:
-        parts.append(f"background: {background_preset_label}")
-    elif background_type == "upload":
-        parts.append("use the provided background reference image as the scene backdrop")
+    Seven design principles applied, anchoring on three observed Gemini 3
+    failure modes:
+    - "Same sofa rendered twice" when direction names a surface that also
+      exists in the BACKGROUND reference → addressed by the subset-only
+      scene-inventory clause in [2] + explicit negative examples.
+    - Product paste-in (rembg overlay, no shadow) → addressed by the
+      integration triple in [4].
+    - Host leg-crop from shot/direction spatial conflict → addressed by the
+      frame-consistency clause in [3].
 
-    if direction_en:
-        parts.append(direction_en)
+    Constraints land in the LAST block per Gemini 3's instruction-following
+    ordering preference.
+    """
+    blocks: List[str] = []
 
-    parts.append(_shot_clause(shot))
-    parts.append(_angle_clause(angle))
-    parts.append(
-        "Natural studio lighting. Products visible and prominent. "
-        "Photorealistic. No text, captions, or watermarks."
+    # [1] ROLES — explicit role assignment per reference image
+    blocks.append(
+        "[1] ROLES\n"
+        "Image 1 is the HOST (identity-locked): preserve face, body "
+        "proportions, clothing design, and clothing color exactly. "
+        "You MAY adjust gesture, head turn, and gaze to match the "
+        "DIRECTION block. You MUST NOT re-pose the full body stance or "
+        "change the clothing design.\n"
+        "Subsequent images labeled PRODUCT #1, #2, ... must be preserved "
+        "in original shape, colors, and visible branding. Products must "
+        "never float — they rest on a surface or are held by the host."
     )
-    return ". ".join(p.rstrip(".") for p in parts) + "."
+
+    # [2] BACKGROUND — reference-first, subset-only
+    if background_type == "upload":
+        blocks.append(
+            "[2] BACKGROUND — reference-first, subset-only\n"
+            "The last reference image is the BACKGROUND. It defines the "
+            "full inventory of furniture, decor, and objects available "
+            "for this scene.\n"
+            "- You MAY omit, occlude, or reframe any item from the "
+            "BACKGROUND if it obstructs the composition.\n"
+            "- You MUST NOT introduce any furniture, surface, decor, or "
+            "object that does not already appear in the BACKGROUND.\n"
+            "- If the DIRECTION names a surface (sofa, table, floor) "
+            "that is not in the BACKGROUND, adapt the pose using only "
+            "existing surfaces. Do not invent substitutes.\n"
+            "Positive examples:\n"
+            "  ✓ BACKGROUND has a sofa → the host sits on THAT sofa.\n"
+            "  ✓ BACKGROUND has no sofa but has a chair → the host "
+            "sits on the chair; do not generate any sofa.\n"
+            "  ✓ BACKGROUND has a cluttered coffee table → omit the "
+            "clutter, place the product on the cleared table surface.\n"
+            "Negative examples:\n"
+            "  ✗ Generating a new sofa because the direction says "
+            "\"sit on sofa\".\n"
+            "  ✗ Duplicating the existing sofa to give the host a "
+            "matching seat.\n"
+            "  ✗ Adding a side table to hold a product when none "
+            "exists in the BACKGROUND."
+        )
+    elif background_type == "preset" and background_preset_label:
+        blocks.append(
+            f"[2] BACKGROUND\n"
+            f"Scene setting: {background_preset_label}. Generate a "
+            f"single coherent environment. Do not duplicate any prop."
+        )
+    elif background_type == "prompt" and background_prompt:
+        blocks.append(
+            f"[2] BACKGROUND\n"
+            f"Scene setting: {background_prompt}. Generate a single "
+            f"coherent environment. Do not duplicate any prop."
+        )
+
+    # [3] FRAMING — aspect + shot + angle + frame-direction consistency
+    blocks.append(
+        f"[3] FRAMING\n"
+        f"Aspect ratio 9:16 vertical. {_shot_clause(shot)}. "
+        f"{_angle_clause(angle)}. Ensure both the HOST and all "
+        f"PRODUCTS are fully within the frame. If the DIRECTION "
+        f"requires showing a surface or prop below the default "
+        f"framing, widen the frame to include it naturally — do "
+        f"not awkwardly crop the host's body."
+    )
+
+    # [4] INTEGRATION — contact shadow + lighting match + no float
+    blocks.append(
+        "[4] INTEGRATION\n"
+        "- Re-light HOST and all PRODUCTS to match the BACKGROUND's "
+        "lighting direction, color temperature, and shadow softness.\n"
+        "- Every PRODUCT must cast a natural contact shadow on its "
+        "supporting surface.\n"
+        "- No floating products, no overlay, no paste-in. Products "
+        "must appear physically placed within the scene."
+    )
+
+    # [5] DIRECTION — Korean verbatim (not translated)
+    if direction and direction.strip():
+        blocks.append(f"[5] DIRECTION (한국어 원문)\n{direction.strip()}")
+
+    # [6] CONSTRAINTS — Gemini 3.x ordering rule: strict constraints LAST
+    constraints = [
+        "Output a single photograph. Never include text, captions, "
+        "logos, watermarks, UI overlays, or floating product cards.",
+        "Never duplicate any object. If any object appears in any "
+        "reference image, do not synthesize a second copy elsewhere "
+        "in the scene.",
+    ]
+    if background_type == "upload":
+        constraints.append(
+            "Never add furniture, surface, decor, or object not present "
+            "in the BACKGROUND reference."
+        )
+    constraints.extend([
+        "HOST identity locked: face, body proportions, clothing design, "
+        "and clothing color are all preserved.",
+        "HOST pose: gesture, head turn, and gaze may adapt to the "
+        "DIRECTION; the full-body stance must remain consistent with "
+        "Image 1.",
+        "Follow relational cues in the DIRECTION literally. Do not "
+        "mirror or swap left/right.",
+        "Photorealistic output. Natural studio lighting unless the "
+        "BACKGROUND specifies otherwise.",
+    ])
+    blocks.append(
+        "[6] CONSTRAINTS (strict)\n- " + "\n- ".join(constraints)
+    )
+
+    return "\n\n".join(blocks)
 
 
 def _preprocess_product(path: str, tmp_dir: str, apply_rembg: bool) -> str:
@@ -231,13 +341,14 @@ async def generate_composite_candidates(
             ],
         )
 
-    # Korean → English (cached; N=4 burst hits the cache after first call)
-    direction_en = await loop.run_in_executor(
-        None, translate_direction_ko_to_en, direction_ko
-    )
+    # Prompt v2: Korean direction goes verbatim into the scene prompt;
+    # translation step removed (see module docstring). Keep the direction_en
+    # field in the response for backward compat — frontend caches it as
+    # "what the model actually saw", which is now the original Korean.
+    direction_en = direction_ko
 
     scene_prompt = _build_scene_prompt(
-        direction_en=direction_en,
+        direction=direction_ko,
         shot=shot,
         angle=angle,
         background_type=background_type,
@@ -353,13 +464,12 @@ async def stream_composite_candidates(
             ],
         )
 
-    direction_en = await loop.run_in_executor(
-        None, translate_direction_ko_to_en, direction_ko
-    )
+    # Prompt v2: no translation — Korean direction is passed verbatim.
+    direction_en = direction_ko
     yield {"type": "init", "direction_ko": direction_ko, "direction_en": direction_en}
 
     scene_prompt = _build_scene_prompt(
-        direction_en=direction_en,
+        direction=direction_ko,
         shot=shot,
         angle=angle,
         background_type=background_type,
