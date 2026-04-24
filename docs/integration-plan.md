@@ -1,9 +1,15 @@
 # Integration Plan — `refactor-plan` ⊕ `step2-rebuild` ⊕ Step 3 Naturalness Track
 
-**Status:** draft, pending `/plan-eng-review`
-**Current branch:** `refactor-plan` (PR #1, 22 commits, CI green)
+**Status:** reviewed + reordered after customer-context discovery (2026-04-24)
+**refactor-plan:** MERGED (squash, `c488e0a`)
 **Sibling branch:** `step2-prompt-rebuild` (20 commits, unmerged)
-**Scope:** decide how the two branches + a newly-surfaced Step 3 naturalness track fit together without one killing the other.
+**Scope:** sequence how the merged refactor + the pending step2 trim + the Step 3 naturalness tracks ship into the B2B first customer's demo evaluation.
+
+**Execution update (§0, read first):** see §14 for the reordering
+applied after customer-context discovery — G2 step3-motion and G3
+step3-tts run FIRST (80% of pain), G1 step2-trim ships LAST. Persona
+validation dropped (no operators to interview at demo-evaluation
+stage). §8.1's PR order below is superseded by §14.
 
 ---
 
@@ -12,15 +18,19 @@
 **First customer: B2B live-commerce video production company.**
 Operators produce live-commerce style host videos from (a) the producer's own photo (face), (b) their own voice recording, (c) products, (d) a background. The app assembles host → composite → voice → talking-head video.
 
-Volume estimate:
-- Per-operator day: tens to hundreds of videos
-- Step 2 calls per video: 1–3 (iteration rate)
-- Hourly Pro-tier eligibility firings: realistic at 10s/hour per operator, hundreds/hour company-wide
+Volume estimate (confirmed by user interview 2026-04-24):
+- Step 2 iterations per video: **3 rounds × 4 candidates = 12 candidates viewed** before selection
+- Customer stage: **demo evaluation, no contract yet**. We're being evaluated.
+- Competitive context: **first AI-video proposal to this customer**. No incumbent tool, no established UX expectations.
+- Pain distribution (user-stated): **composite image problems 20%, video problems 80%**.
 
-Real pain points (stated by user, ordered by severity):
-- **P1.** Step 3 video output — lip movement is exaggerated, hand/body gestures look unnatural. **User perceives this.** Asks "can we fix via prompt?"
-- **P2.** Step 2 composite — "sticker effect" products, duplicate background objects, ignored spatial directions. Quality bugs B1/B2/B3 in `step2-rebuild` plan.
-- **P3.** Multi-product support (currently 1). Wanted soon.
+Real pain points (user-stated, with proportions):
+- **P1 (80%).** Step 3 video output — lip movement exaggerated, hand/body motion unnatural, AND **(newly surfaced)** TTS clone inconsistency (filler interjections "아", ~5 regenerations produce inconsistent quality). User directly perceives this. This is what sells or kills the demo.
+- **P2 (20%).** Step 2 composite — sticker products, duplicate background objects, ignored spatial directions. B1/B2/B3 in `step2-rebuild` plan. Annoying but not demo-killing.
+- **P3.** Multi-product support (currently 1). Wanted eventually, not urgent.
+
+**Consequence for sequencing:** Step 3 tracks (G2 motion + G3 TTS) ship
+BEFORE Step 2 trim (G1). §14 records this reordering.
 
 Two branches grew in parallel. Neither knew about the other. They overlap on 5 files. One file (`frontend/src/studio/Step2Composite.jsx`) is modify-in-one, delete-in-the-other.
 
@@ -41,16 +51,28 @@ Analysis justifying this decision is in a separate artifact; summary:
 - Full infrastructure (policy resolver, rate limiter, cost tracker, judge, bakeoff) is justified at B2B volume **but belongs in an operator admin panel, not end-user UI**.
 - End-user UI gets ONE UX win from the rebuild: the judge's "★ AI 추천" crown, because operators at volume have genuine decision fatigue on 4-candidate selection. Everything else is operator-facing.
 
-### 2.3 Step 3 naturalness is a **separate track**, not blocked by step2-trim
+### 2.3 Step 3 naturalness runs FIRST (reordered 2026-04-24)
 
-Prompt-level tuning on `FLASHTALK_OPTIONS.default_prompt` + FlashTalk
-pipeline sample_neg_prompt + audio_lufs sweep doesn't require step2-trim
-to land. It can run in parallel. §8 sequence reflects this: Step 3 PRs
-depend only on refactor-plan (PR #1) + persona validation, not on
-step2-trim.
+Earlier drafts had Step 3 running after or parallel-to step2-trim.
+Customer-context discovery inverted this: pain is 80% Step 3, 20% Step
+2, and the customer is in demo evaluation (not contracted). Demo
+quality decides the contract. Step 2's sticker/duplicate bugs are
+annoying but not blocking; Step 3's exaggerated lip + filler-laden TTS
+are blocking.
 
-(Earlier draft had Step 3 PRs chained after step2-trim — fixed per
-Codex finding #2.)
+Step 3 tracks depend ONLY on refactor-plan (merged as `c488e0a`).
+step2-trim is deferred to post-Step-3 or post-contract, whichever
+comes first. See §14.
+
+### 2.4 Persona validation: dropped (no operators to interview)
+
+Earlier plan gated step2-trim on a 30-min interview with first-customer
+operators. Customer is in demo evaluation — no operators have been
+onboarded yet. Asking "what do your operators prefer" when they don't
+have operators is fiction. R8 (persona assumption risk) is retained but
+downgraded: we ship conservative UI defaults (Pro/cost/mode selector
+hidden), revalidate after contract + onboarding when real operators
+start using the tool.
 
 ---
 
@@ -91,6 +113,12 @@ Codex finding #2.)
 
 ### 3.3 Remap into refactor-plan's decomposed structure
 
+⚠️ **§14 supersedes this section for demo phase.** Table below describes
+the Option C++ UI remap AS ORIGINALLY DRAFTED; §14.2 drops every
+operator-visible row (Pro badge, judge crown). In demo phase only the
+backend changes + silent `api/composite.ts` step2Mode/proMode field
+wiring ship. The UI remap table below applies post-contract.
+
 refactor-plan's `frontend/src/studio/step2/` layout:
 - `Step2Composite.tsx` (container, 285 LOC)
 - `ProductList.tsx`
@@ -117,7 +145,12 @@ step2-rebuild's additions map as follows:
 
 ## 4. New end-user UI surface (final shape)
 
-What the operator sees on Step 2 after this lands:
+⚠️ **§14.2 supersedes this section for demo phase.** §14 drops all
+operator-visible UI additions. The list below applies post-contract
+when we have calibration data. Demo phase operator sees the refactor-
+plan Step 2 screen unchanged.
+
+Post-contract UI (deferred):
 
 1. Same wizard Step 2 screen as refactor-plan (ProductList + BackgroundPicker + CompositionControls).
 2. One new control in CompositionControls: **"고품질 모드"** toggle (default off). Copy: "더 자연스러운 합성을 원하면 켜세요. 느려지고 비용이 올라갑니다."
@@ -176,6 +209,15 @@ surface is:
   pytest. ~3-4 hours.
 
 **Revised total: 1.5-2 days** for merge + verification, not half-day.
+
+**Demo-phase adjustment (§14):** frontend work drops to minimal (remove
+lines about Pro toggle chip, judge crown rendering, streamState UI
+consumption). Remaining frontend = `api/composite.ts` silent field
+wiring (~30 min), extend `useCompositeGeneration.ts` to consume new
+SSE events internally for telemetry only (~1 hour), no step2/*.tsx
+changes. Frontend effort drops from ~5 hours to ~1.5 hours.
+Revised demo-phase G1 total: **~1 day** (backend + tests + minimal
+frontend field wiring).
 
 Break into 2 sub-PRs to keep each reviewable:
 - **PR #2a:** backend (modules/step2/*, app.py SSE extension) — mergeable
@@ -265,25 +307,26 @@ Sweep design: baseline vs {prompt_v2, prompt_v3, neg_v2, prompt_v2+neg_v2}.
 pipeline exposes override path — verify; falls back to pipeline default
 if not).
 
-### 6.3 S3-C: reference frame preprocessing — TARGETED AT STEP 2 OUTPUT
+### 6.3 S3-C: DROPPED
 
-**Codex correction #5:** the animation source is `composition.selectedPath
-|| host.selectedPath` (`frontend/src/api/video.ts:81`), not always Step 1.
-The composite from Step 2 is what FlashTalk animates. Fixing Step 1's
-mouth posture alone can be overwritten when Step 2 composites through.
+Earlier drafts proposed preprocessing the reference frame (Step 1 or
+post-composite) to have a closed-mouth pose, arguing diffusion
+talking-head models amplify the reference's pose characteristics.
 
-Revised S3-C targets the **final composition frame** before it reaches
-FlashTalk:
-- Detect mouth aperture on the **selected composite** (not on Step 1
-  candidates) using MediaPipe face mesh
-- If open > threshold, either warn the operator with a "선택한 이미지의
-  입이 열려 있어요, 움직임이 과해질 수 있어요" hint, or re-composite
-  with a "closed mouth" constraint in the Step 2 prompt (more invasive)
-- Non-blocking warning first; hard gate only after usage data shows it
-  matters
+**Reconsidered:** FlashTalk is audio-driven. Mouth aperture in the
+animated output tracks audio energy + model's training distribution
++ CFG guidance. The reference frame's initial pose has weak secondary
+influence at best. The real levers for Step 3 over-articulation are
+already in plan at S3-A (audio energy), S3-B (prompt), S3-D (CFG) —
+all direct causes.
 
-Note scope creep: this ties §6 to §3 (Step 2 rebuild). Consider
-deferring until step2-trim lands if the coupling is too tight.
+S3-C as a "Step 1 fix for a Step 3 problem" was reaching. Dropped
+entirely from G2. G2 scope now: **S3-0 eval baseline + S3-A + S3-B +
+S3-D** (four items, not five).
+
+Reference-frame experiments can return if S3-A/B/D hit a ceiling and
+we have measurement data showing reference-pose influence matters.
+Until then, not a lever.
 
 ### 6.4 S3-D: CFG scale sweep (FlashTalk)
 
@@ -308,15 +351,18 @@ signal strength regardless of count.
 Establishes:
 
 - **6-8 input fixtures** in `eval/step3/fixtures/` (not 20):
-  - Prioritize **real B2B operator submissions** (with permission) over
-    synthetic. 4-6 real samples beats 20 synthetic.
+  - **Demo-phase constraint:** "real B2B customer samples (with
+    permission)" is dropped. Contract not signed — asking the customer
+    for sample recordings is persona-validation-by-another-name, which
+    §14.5 ruled out.
+  - Use **synthetic + existing internal test samples** instead. We
+    (jack + past dev sessions) already have voice recordings + host
+    images lying around from development; use those.
   - Cover 3 known failure modes explicitly: short-script (common
     failure), long-script (rare failure, high value if caught), emotional
     register (mid-severity, non-obvious).
   - Each fixture = `(audio.wav, reference_frame.png, script.txt)` triple.
-  - If <4 real samples available, pad with synthetic targeting the same
-    failure modes — but label them distinctly so we know which are
-    "real-world signal" vs "synthetic probe".
+  - Post-contract, swap in real operator samples and re-baseline.
 - **Baseline renders** at `eval/step3/baseline/`: current `MULTITALK_OPTIONS`
   run through unchanged code, one render per fixture, hash-pinned.
 - **Rubric** in `eval/step3/RUBRIC.md`:
@@ -457,23 +503,31 @@ New module `modules/tts_preproc.py`. Feature flag
 stages a file; the ElevenLabs clone call fires on "Generate." So
 "upload gate" language was wrong. Correct framing:
 
-Validate at the **post-upload, pre-Generate** step (file-staging), not
-at file-select. The operator uploads → file sits in state → operator
-hits Generate → validation runs before the ElevenLabs API call. If
-validation fails, show warning inline on the voice-cloner UI and block
-Generate until dismissed (hard gate once calibrated; non-blocking
-warning until then).
+**DEMO PHASE: backend-only per §14.2b.** Validation runs server-side
+before ElevenLabs clone call. Result logged to `outputs/clone-audit/`,
+does NOT surface as UI warning, does NOT block Generate. Operator
+sees no change; we accept the quality risk as the cost of not
+shipping uncalibrated UI copy.
 
-- Minimum length (e.g. 30 seconds)
-- Maximum silence ratio (>20% silence → reject)
-- Minimum SNR (simple: RMS over silence threshold)
-- Warn user with actionable copy ("목소리 샘플이 짧아요 — 최소 30초 녹음 권장")
+Post-contract path (for reference, NOT in demo scope): validation
+runs at pre-Generate step, if it fails show warning inline on the
+voice-cloner UI, non-blocking until thresholds calibrated against
+real samples, then hard-gate.
 
-Runs in `modules/audio_validation.py`. Wired into the
-pre-Generate validation hook in `useTTSGeneration.ts` AND surfaced at
-`VoiceCloner.tsx` (UI warning). Non-blocking warning by default; turn
-into hard reject once thresholds are calibrated against real B2B
-customer samples.
+**PROVISIONAL thresholds (need calibration before any hard gate):**
+- Minimum length: 30 seconds (industry common; NOT validated for ElevenLabs clone specifically)
+- Maximum silence ratio: 20% (eyeballed; real data may show different floor)
+- Minimum SNR: RMS over silence threshold (ratio TBD)
+
+These numbers MUST stay out of operator copy during demo phase. Even
+if V-B warning UI gets rescued from §14.2b's backend-only scope (via
+contingency), copy may not say "30초 이상 권장" as fact — write as
+"이 샘플이 짧을 수 있어요" at most, no number.
+
+Runs in `modules/audio_validation.py`. **In demo phase: backend
+validation + logging only per §14.2b**. No `useTTSGeneration.ts` UI
+hook, no `VoiceCloner.tsx` surface. Post-contract, thresholds
+calibrated against real B2B customer samples; then decide UI.
 
 **Codex #3 — TTS path fragmentation:** TTS runs on TWO endpoints:
 - `/api/elevenlabs/generate` — preview (Step 3 UI "목소리 듣기" button)
@@ -560,6 +614,13 @@ Gated on E2 (auth + user-scoping) from `REFACTOR_PLAN.md §Decisions #11`. Admin
 
 ## 8. Sequence / PR plan
 
+⚠️ **§14 supersedes this entire section for execution order.** Table
+below is the original draft (pre customer-context discovery); it
+still has the persona validation checkpoint row and the "G2/G3 after
+G1" dependency that §14 inverted. Kept for change-history reference
+only.
+
+
 | PR | Branch | Base | Contents | Merge criteria |
 |---|---|---|---|---|
 | #1 (open) | `refactor-plan` | `main` | 22 commits structural refactor + CI fix | CI green ✓, browse-smoke ✓, self-review ✓. **Merge now.** |
@@ -592,11 +653,15 @@ isolated eval attribution).
 
 Realistic execution plan:
 
-| Grouped PR | What lands | Internal commit structure |
+⚠️ **§8.1 contents below are superseded by §14** for demo-phase. §14
+corrects the S3-C target (Step 1 not composite) and clarifies which
+levers actually ship. Kept here as the rigorous decomposition reference.
+
+| Grouped PR | What lands (original draft — see §14 for actual) | Internal commit structure |
 |---|---|---|
-| **G1. step2-trim** | Everything under §3-§5. Backend `modules/step2/*` (trimmed per Option C++) + app.py SSE extension + `api/composite.ts` + `step2/*.tsx` remap + tests per §10 PR #2. | 1 commit per sub-area (backend, api, hooks, UI, tests). |
-| **G2. step3-motion** | §6 in full. S3-0 eval baseline + S3-A audio_lufs sweep + S3-B prompt sweep + S3-C composite-frame preprocessing + S3-D CFG sweep. | 1 commit per lever so `git bisect` still works within the PR. S3-0 commit lands first; each S3-* commit includes an eval manifest (`eval/step3/results/<commit>.json`). |
-| **G3. step3-tts** | §6B in full. V-0 + V-A/B/C/D. | Same commit-per-lever structure. |
+| **G1. step2-trim** | Backend `modules/step2/*` (trimmed per Option C++) + app.py SSE extension + `api/composite.ts` + `step2/*.tsx` remap + tests per §10 PR #2. **No crown UI in demo phase (§14.2).** | 1 commit per sub-area (backend, api, hooks, UI, tests). |
+| **G2. step3-motion** | S3-0 eval baseline + S3-A audio_lufs sweep + S3-B prompt sweep + S3-D CFG sweep. (S3-C dropped — unsound mechanism hypothesis, see §6.3.) | 1 commit per lever. S3-0 first; each S3-* commit includes an eval manifest. |
+| **G3. step3-tts** | V-0 + V-A + V-B **as backend-only validation + logging (no UI warning — see §14.2b)** + V-C param sweep + V-D **scoring logic only, N=1 default (dormant, see §14.2e)**. | Same commit-per-lever structure. |
 
 Persona validation checkpoint happens **between refactor-plan merge and
 G1.** 30-min interview, findings written to `docs/persona-validation.md`
@@ -661,6 +726,11 @@ Add unit tests for the parser at introduction time. Not per-flag.
 ---
 
 ## 10. Test coverage additions
+
+⚠️ **Test specs below written against the pre-§14 plan.** Several
+assertions assume UI elements that §14.2 drops (judge crown, Pro
+toggle, V-B warning surface). Demo-phase test scope is narrower —
+see §14.7 below for the actual demo-phase test set.
 
 Each PR in §8 lands with tests matching the coverage diagram §3 produced.
 Requirements per PR, in plan order:
@@ -782,14 +852,31 @@ TTS API calls, and manual human scoring. Concrete operational model:
 
 ---
 
-## 12. Success criteria (B2B-specific)
+## 12. Success criteria (demo-phase adjusted)
 
-- **Functional:** Operator can complete wizard steps 1-2-3 and render a video without seeing any option labeled "experimental", "beta", "legacy", or "v1". CI + playwright prove this.
-- **Quality (Step 2):** On a frozen 20-prompt eval set (different products, backgrounds, spatial directions), v1 prompt output rated "natural" by an internal reviewer at ≥70% rate vs legacy baseline ≤40%. B1/B2/B3 cited bugs resolved in >90% of relevant cases.
-- **Quality (Step 3):** On the same eval set rendered end-to-end, perceived lip over-articulation reduced. Target: internal reviewer rates the output "distracting mouth movement" ≤10% (baseline likely >50% per user's description).
-- **Ops:** Judge win-rate (user-pick matches judge-winner) ≥65%. Below that, the crown's value is doubtful.
-- **Cost:** Monthly spend stays within forecast (~$800-1500/month at first-customer volume). Tracked in backend logs.
-- **Dev velocity:** Average PR size stays ≤500 LOC post-step2-trim merge. If super-PRs start appearing it means the admin-panel deferral is leaking.
+⚠️ Earlier draft had 20-fixture rubric, ≥70% quality rate, judge
+win-rate ≥65% — all pre-§14 scope. Demo-phase criteria below (§14.3
+coarsened rubric):
+
+**Demo-phase gates (what determines "G2/G3/G1 done enough to show"):**
+- **Functional:** Operator can complete wizard steps 1-2-3 and render a video without seeing any option labeled "experimental", "beta", "legacy", "v1", or anything §14.2 drops. Playwright proves this.
+- **Quality (G2 step3-motion):** On the 6-8 fixture eval set, "would I show this video to the customer as demo material?" yes-rate goes up. No regression on any fixture. Baseline yes-rate is whatever it is today (likely low).
+- **Quality (G3 step3-tts):** Same binary on TTS outputs. Specifically, fixture-level filler injection rate drops from baseline.
+- **Quality (G1 step2-trim):** B1/B2/B3 bugs resolved in >80% of fixtures where they were previously observable. 80% not 90% — demo phase tolerance.
+
+**Backend observability (collect, don't block on):**
+- Judge offline-audit pick-match rate recorded daily. Threshold-for-promoting-to-UI = 65%. Not a demo-phase gate; it gates the post-contract admin-panel PR.
+- Cost per rendered video tracked in cost_actual_usd logs. No hard target demo phase.
+- V-B validation pass-rate logged — if it's extremely high (>95%) we don't need the warning UI at all.
+
+**Dev velocity:**
+- G1, G2, G3 each should be ≤800 LOC per PR (measured by files touched × ~200 LOC each). If a PR grows past that, split.
+
+**Post-demo (contract signed):**
+- Re-baseline everything against real B2B operator samples (§6.0)
+- Promote judge crown UI if pick-match ≥65%
+- Promote V-B UI if failure-rate justifies it
+- Start the operator admin panel (§7) for mode selector / cost preview / Pro toggle
 
 ---
 
@@ -824,6 +911,231 @@ points at. Flagged here so we don't forget.
 3. Is the judge's "★ 추천" crown copy the right register? User-facing copy review deferred — engineers shouldn't finalize.
 4. Should S3-A through S3-D be behind a single feature flag group or 4 independent flags?
 5. Merge #2 (step2-trim) — single combined PR or pair of PRs (backend first + frontend remap after)?
+
+---
+
+## 14. Execution order (supersedes §8.1 after customer-context discovery)
+
+Customer answered 4 structured questions on 2026-04-24. Key data points:
+- Step 2 iteration pattern: **3 rounds × 4 candidates** (12 total viewed)
+- Customer stage: **demo evaluation, no contract signed**
+- Incumbent tool: **none** (we're first proposal)
+- Pain distribution: **image 20%, video 80%**
+
+This inverts the sequencing in §8.1 (which went G1→G2→G3 for
+code-readiness reasons). Actual execution order:
+
+### 14.1 New sequence
+
+| Order | PR | Contents | Why first/last |
+|---|---|---|---|
+| **🥇 G2** | step3-motion | S3-0 eval + S3-A audio_lufs sweep + S3-B FlashTalk prompt/neg-prompt sweep + S3-D CFG sweep. (S3-C dropped — see §6.3.) One commit per lever. | 80% of user-visible pain. All 3 active levers are direct causes of over-articulation (audio energy, prompt interpretation, CFG strength). |
+| **🥇 G3** | step3-tts | V-0 eval + V-A script preproc + V-B clone gate + V-C param sweep + V-D multi-gen auto-reject. Parallel with G2 (different subsystem). | Other half of 80% pain. |
+| **🥈 G1** | step2-trim | Option C++ scope (§3-§5). Backend `modules/step2/*` trim + app.py SSE extension + frontend remap into `step2/*.tsx`. **Judge runs as offline batch, no crown UI** (per §14.2a). | Lower urgency at 20% pain. Step 2 B1/B2/B3 prompt fixes are the demo value here. No operator-visible UX added. |
+
+**Dependency reality:**
+- G2 and G3 touch disjoint code (FlashTalk path vs ElevenLabs path).
+  Parallel worktrees, share only reviewer eval time.
+- G1 depends on `step2-prompt-rebuild` branch being rebased onto
+  current main. Not dependent on G2 or G3, but deliberately scheduled
+  after them to preserve focus on demo-critical work.
+
+### 14.2 Demo-phase UI defaults — **all operator-visible UX changes DROPPED**
+
+Correction after user caught inconsistency: the earlier draft kept the
+judge crown based on my inference about 12-candidate decision fatigue,
+but that's exactly the kind of unvalidated UX claim the demo-phase
+principle rejects. Honoring the principle consistently: **no
+operator-visible UX additions in demo phase**. Period.
+
+| Control | Demo-phase | Notes |
+|---|---|---|
+| Judge "★ AI 추천" crown | ❌ **Not shown** | Judge runs backend-only (see §14.2a) |
+| Pro 모드 toggle | ❌ **Hidden**, always Flash | — |
+| Cost preview | ❌ **Hidden** | — |
+| Mode selector | ❌ **Hidden** | Always "v1" backend-default |
+| Pass progress badge | ❌ **Hidden** | 2-pass removed anyway |
+| Rate-limit warning banner | ❌ **Hidden** | Backend enforces silently |
+| TTS clone quality warning (V-B) | 🟡 **Kept** — see §14.2b | |
+
+### 14.2a Judge runs **offline batch** — data asset, zero runtime cost
+
+Codex correction #2: earlier draft claimed judge was "backend-only" but
+admitted +2-3s latency on every generation. That IS operator-visible
+(longer wait → "TTS 뭐가 이렇게 느려?"), which is exactly the reason
+V-D was demoted to dormant in §14.2e. Applying the filter consistently:
+
+Judge does NOT run during the generation request. Instead, a scheduled
+batch job (`scripts/step2_judge_audit.py`, nightly cron or on-demand)
+reads the last N completed generations from the queue store, fetches
+each's 4 candidate images, and ranks them retrospectively. Output
+written to a separate log `outputs/judge-audit/{date}.json`.
+
+Data collected is the same as inline judge: `(user_pick_seed,
+judge_winner_seed, score_deltas)`. Purpose identical: post-contract,
+if pick-match rate exceeds ~65% we surface the crown UI with real
+backing. Below, judge is dropped entirely.
+
+Runtime latency: zero. Operator-visible change: none. Passes §14.2c
+filter on step 4.
+
+Cost trade-off: the LLM calls still happen, just async. Monthly cost
+identical to inline. If cost matters, sample (e.g. 20% of generations
+audited) rather than running on every one.
+
+### 14.2b V-B clone quality — **validation is backend-only in demo phase**
+
+Codex correction #1: earlier draft kept V-B warning as "protective
+fact" but the plan ALSO said it could block Generate or be dismissed.
+"Block or dismiss" is operator interaction, not a fact display. Fails
+filter step 2 (choice prompt).
+
+Consistent resolution: **V-B ships as backend validation + logging
+only**. No warning UI, no blocking gate.
+
+- `modules/audio_validation.py` runs on every clone request
+- Validation result logged to `outputs/clone-audit/{date}.json`:
+  `{session_id, duration_s, silence_ratio, snr_db, passed: bool}`
+- **If failed**: generation proceeds anyway; the bad clone produces a
+  lower-quality TTS. We accept that residual quality loss in demo phase.
+- **Data value**: post-contract, if correlation is strong between
+  "failed validation" and "operator complained about TTS quality", we
+  introduce the warning UI with real calibration.
+
+Trade-off being made: during demo phase, the user might submit a 10s
+noisy clone, get bad TTS, and blame us. Codex's framing accepts this
+because the alternative (ship UI we haven't calibrated) is worse.
+
+If observed failure rate during demo is high (>30%), emergency
+escalation path: ship warning as read-only text block, no dismiss, no
+block. Not planned — contingency only.
+
+### 14.2c Demo-phase decision filter (apply to every future change)
+
+Explicit test for "does this change count as UX that we're supposed to
+be NOT doing in demo phase?":
+
+1. **Does the operator see a new pixel or interaction?** → candidate UX
+2. **If yes, is it presenting a choice the operator must make?** → UX, DROP
+3. **If yes, is it surfacing a fact the operator needs to know to not
+   produce bad output?** → protective, keep IF copy is factual not
+   choice-framed
+4. **If no pixel/interaction changes, only backend behavior shifts?**
+   → not UX, OK to ship
+
+Every proposed change goes through this filter. `judge crown` failed
+step 2 (it's a choice prompt — "I'd pick this, but you can override").
+`V-B warning` passes because it's step 3 (fact) not step 2 (choice).
+
+### 14.2d All backend quality work is unaffected
+
+Demo-phase principle gates UI (operator-chosen behavior), not code.
+Backend quality improvements that change output characteristics but
+don't ask the operator to choose anything all ship:
+
+- **S3-A** audio_lufs sweep (backend config, affects output motion) — passes filter step 4
+- **S3-B** FlashTalk prompt + neg_prompt tuning (backend config, affects output motion) — passes step 4
+- **S3-D** CFG sweep (backend config, affects output motion) — passes step 4
+- **V-A** script preprocessing (silent input transform; TTS output has different pause structure so operator may notice "더 끊긴다" — but no choice asked, filter step 2 passes, lands as quality delta)
+- **V-C** ElevenLabs param sweep (backend config, affects TTS output)
+- **V-D** multi-gen scoring logic (ships as code but N=1 default in demo — dormant, no runtime effect; see §14.2e)
+- **Judge** runs as nightly batch (see §14.2a, zero runtime latency)
+- **V-B** clone validation (backend-only logging, see §14.2b)
+- **Option C++ step2-trim** — prompt rewrite + sanitize + spatial-keywords detector + policy resolver + rate limiter + cost tracker all backend. Judge batch above. No frontend UI surface.
+
+Changes explicitly DROPPED (not just hidden):
+- S3-C reference frame regen — unsound mechanism for audio-driven model (§6.3)
+- 2-pass orchestration — anti-pattern for Gemini 3 (§3.2)
+
+### 14.2e V-D latency side-effect
+
+V-D (multi-gen N=3 with auto-reject) is backend logic but has a
+user-visible side-effect: TTS generation wall-clock roughly triples.
+This violates step 4 of the §14.2c filter ("no pixel/interaction
+changes") because operators will perceive "TTS는 왜 이렇게 느려?".
+
+Two mitigations to consider at G3 scope:
+- Keep V-D default N=1 during demo phase (auto-reject doesn't fire),
+  ship only the scoring logic. Flip to N=3 post-contract when latency
+  trade-off is customer-validated.
+- OR ship N=3 with a progress indicator — but that IS UX addition,
+  violates principle. First mitigation preferred.
+
+**Decision:** V-D ships with default `TTS_MULTI_GEN_N=1` in demo
+phase. Scoring module lands but doesn't fire. Flag flipped after
+contract when operator feedback justifies the latency trade.
+
+### 14.3 Demo-phase eval rubric (scope-reduced from §6.0 / §6B.0)
+
+Full rubric (4 dimensions × 6-8 fixtures) too expensive for demo-chase
+cadence. Reduce to binary per-fixture:
+
+**"Would this video be shown to the first customer as demo material?"** [yes/no]
+
+Score across fixtures = % yes. Merge criterion for each lever:
+- `yes_rate_after >= yes_rate_before` (no regression), AND
+- at least one fixture flips from no→yes.
+
+This is coarser than the 4-dim rubric but fits demo pressure. Promote
+back to full rubric after contract signed.
+
+### 14.4 Eval frequency (reduced)
+
+Per §8.1 original: eval after each S3-* / V-* lever. Per §14: **eval
+once per G (track-level)**. G2 total eval = 1 run after all 4 motion
+levers land on the branch. G3 total eval = 1 run after V-A/B/C/D. This
+sacrifices per-lever attribution for reviewer time — if the aggregate
+regresses, rebuild attribution by re-running the eval against each
+commit (local only, not CI-gated).
+
+### 14.5 What changes vs §8.1 persona validation block
+
+Dropped entirely. §8 sequence table's row labeled "Persona validation
+checkpoint" is no longer a gate. The R8 risk (persona assumption) is
+retained but accepted — conservative UI defaults in §14.2 are the
+mitigation.
+
+### 14.7 Demo-phase test scope (supersedes §10 for demo PRs)
+
+Since demo phase drops all operator-visible UX additions, many §10
+test specs no longer apply. Demo-phase test scope collapses to:
+
+**G1 step2-trim tests:**
+- `tests/test_step2_mode_plumbing.py` — pytest, step2Mode form field
+  accepted, default = "v1" (keep per §10)
+- `tests/test_step2_v1_prompt_output.py` — new test, assert v1 prompt
+  produces expected scene structure on 3 fixture inputs (keep)
+- ❌ `step2_judge_crown.test.jsx` — drop, no crown in demo
+- ❌ `frontend/e2e/step2-pro-toggle.spec.ts` — drop, no toggle in demo
+- ❌ `tests/integration/test_step2_remap.py` snapshot — narrow to only
+  the backend fields (step2Mode wiring). UI snapshot is unnecessary
+  because UI doesn't change from refactor-plan.
+- `scripts/step2_judge_audit.py` — standalone batch script, smoke
+  test that runs against last N queue entries without crashing.
+
+**G2 step3-motion tests:**
+- `tests/test_audio_preproc.py` (if S3-A compressor ships) (keep)
+- Eval rubric fixture assertions (keep, §14.3)
+- `tests/test_multitalk_prompt_injection.py` renamed to
+  `tests/test_flashtalk_prompt_injection.py` (fix per §6.baseline)
+
+**G3 step3-tts tests:**
+- `tests/test_tts_preproc.py` V-A script normalization (keep)
+- `tests/test_audio_validation.py` V-B backend validation (keep but
+  assert NO UI side effect)
+- ❌ `frontend/e2e/voice-cloner-quality-gate.spec.ts` — drop, no UI
+  warning in demo
+- `tests/test_tts_param_parity.py` parametrized across preview +
+  final paths (keep per Codex #3)
+- ❌ `tests/test_multi_gen_reject.py` — narrow: test the scoring
+  function in isolation with N=1 default. Don't test N=3 rejection
+  path since it's dormant.
+
+### 14.6 Admin panel (E2 auth) unlocks all the deferred UI
+
+Mode selector, cost preview, Pro toggle, rate-limit controls, bakeoff
+trigger — all move into a single operator admin panel PR once E2 auth
+lands. Not before contract. Not in G1/G2/G3.
 
 ---
 
