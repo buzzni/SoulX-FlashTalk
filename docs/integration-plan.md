@@ -145,7 +145,12 @@ step2-rebuild's additions map as follows:
 
 ## 4. New end-user UI surface (final shape)
 
-What the operator sees on Step 2 after this lands:
+⚠️ **§14.2 supersedes this section for demo phase.** §14 drops all
+operator-visible UI additions. The list below applies post-contract
+when we have calibration data. Demo phase operator sees the refactor-
+plan Step 2 screen unchanged.
+
+Post-contract UI (deferred):
 
 1. Same wizard Step 2 screen as refactor-plan (ProductList + BackgroundPicker + CompositionControls).
 2. One new control in CompositionControls: **"고품질 모드"** toggle (default off). Copy: "더 자연스러운 합성을 원하면 켜세요. 느려지고 비용이 올라갑니다."
@@ -847,14 +852,31 @@ TTS API calls, and manual human scoring. Concrete operational model:
 
 ---
 
-## 12. Success criteria (B2B-specific)
+## 12. Success criteria (demo-phase adjusted)
 
-- **Functional:** Operator can complete wizard steps 1-2-3 and render a video without seeing any option labeled "experimental", "beta", "legacy", or "v1". CI + playwright prove this.
-- **Quality (Step 2):** On a frozen 20-prompt eval set (different products, backgrounds, spatial directions), v1 prompt output rated "natural" by an internal reviewer at ≥70% rate vs legacy baseline ≤40%. B1/B2/B3 cited bugs resolved in >90% of relevant cases.
-- **Quality (Step 3):** On the same eval set rendered end-to-end, perceived lip over-articulation reduced. Target: internal reviewer rates the output "distracting mouth movement" ≤10% (baseline likely >50% per user's description).
-- **Ops:** Judge win-rate (user-pick matches judge-winner) ≥65%. Below that, the crown's value is doubtful.
-- **Cost:** Monthly spend stays within forecast (~$800-1500/month at first-customer volume). Tracked in backend logs.
-- **Dev velocity:** Average PR size stays ≤500 LOC post-step2-trim merge. If super-PRs start appearing it means the admin-panel deferral is leaking.
+⚠️ Earlier draft had 20-fixture rubric, ≥70% quality rate, judge
+win-rate ≥65% — all pre-§14 scope. Demo-phase criteria below (§14.3
+coarsened rubric):
+
+**Demo-phase gates (what determines "G2/G3/G1 done enough to show"):**
+- **Functional:** Operator can complete wizard steps 1-2-3 and render a video without seeing any option labeled "experimental", "beta", "legacy", "v1", or anything §14.2 drops. Playwright proves this.
+- **Quality (G2 step3-motion):** On the 6-8 fixture eval set, "would I show this video to the customer as demo material?" yes-rate goes up. No regression on any fixture. Baseline yes-rate is whatever it is today (likely low).
+- **Quality (G3 step3-tts):** Same binary on TTS outputs. Specifically, fixture-level filler injection rate drops from baseline.
+- **Quality (G1 step2-trim):** B1/B2/B3 bugs resolved in >80% of fixtures where they were previously observable. 80% not 90% — demo phase tolerance.
+
+**Backend observability (collect, don't block on):**
+- Judge offline-audit pick-match rate recorded daily. Threshold-for-promoting-to-UI = 65%. Not a demo-phase gate; it gates the post-contract admin-panel PR.
+- Cost per rendered video tracked in cost_actual_usd logs. No hard target demo phase.
+- V-B validation pass-rate logged — if it's extremely high (>95%) we don't need the warning UI at all.
+
+**Dev velocity:**
+- G1, G2, G3 each should be ≤800 LOC per PR (measured by files touched × ~200 LOC each). If a PR grows past that, split.
+
+**Post-demo (contract signed):**
+- Re-baseline everything against real B2B operator samples (§6.0)
+- Promote judge crown UI if pick-match ≥65%
+- Promote V-B UI if failure-rate justifies it
+- Start the operator admin panel (§7) for mode selector / cost preview / Pro toggle
 
 ---
 
