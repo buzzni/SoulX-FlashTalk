@@ -1,9 +1,15 @@
 # Integration Plan — `refactor-plan` ⊕ `step2-rebuild` ⊕ Step 3 Naturalness Track
 
-**Status:** draft, pending `/plan-eng-review`
-**Current branch:** `refactor-plan` (PR #1, 22 commits, CI green)
+**Status:** reviewed + reordered after customer-context discovery (2026-04-24)
+**refactor-plan:** MERGED (squash, `c488e0a`)
 **Sibling branch:** `step2-prompt-rebuild` (20 commits, unmerged)
-**Scope:** decide how the two branches + a newly-surfaced Step 3 naturalness track fit together without one killing the other.
+**Scope:** sequence how the merged refactor + the pending step2 trim + the Step 3 naturalness tracks ship into the B2B first customer's demo evaluation.
+
+**Execution update (§0, read first):** see §14 for the reordering
+applied after customer-context discovery — G2 step3-motion and G3
+step3-tts run FIRST (80% of pain), G1 step2-trim ships LAST. Persona
+validation dropped (no operators to interview at demo-evaluation
+stage). §8.1's PR order below is superseded by §14.
 
 ---
 
@@ -12,15 +18,19 @@
 **First customer: B2B live-commerce video production company.**
 Operators produce live-commerce style host videos from (a) the producer's own photo (face), (b) their own voice recording, (c) products, (d) a background. The app assembles host → composite → voice → talking-head video.
 
-Volume estimate:
-- Per-operator day: tens to hundreds of videos
-- Step 2 calls per video: 1–3 (iteration rate)
-- Hourly Pro-tier eligibility firings: realistic at 10s/hour per operator, hundreds/hour company-wide
+Volume estimate (confirmed by user interview 2026-04-24):
+- Step 2 iterations per video: **3 rounds × 4 candidates = 12 candidates viewed** before selection
+- Customer stage: **demo evaluation, no contract yet**. We're being evaluated.
+- Competitive context: **first AI-video proposal to this customer**. No incumbent tool, no established UX expectations.
+- Pain distribution (user-stated): **composite image problems 20%, video problems 80%**.
 
-Real pain points (stated by user, ordered by severity):
-- **P1.** Step 3 video output — lip movement is exaggerated, hand/body gestures look unnatural. **User perceives this.** Asks "can we fix via prompt?"
-- **P2.** Step 2 composite — "sticker effect" products, duplicate background objects, ignored spatial directions. Quality bugs B1/B2/B3 in `step2-rebuild` plan.
-- **P3.** Multi-product support (currently 1). Wanted soon.
+Real pain points (user-stated, with proportions):
+- **P1 (80%).** Step 3 video output — lip movement exaggerated, hand/body motion unnatural, AND **(newly surfaced)** TTS clone inconsistency (filler interjections "아", ~5 regenerations produce inconsistent quality). User directly perceives this. This is what sells or kills the demo.
+- **P2 (20%).** Step 2 composite — sticker products, duplicate background objects, ignored spatial directions. B1/B2/B3 in `step2-rebuild` plan. Annoying but not demo-killing.
+- **P3.** Multi-product support (currently 1). Wanted eventually, not urgent.
+
+**Consequence for sequencing:** Step 3 tracks (G2 motion + G3 TTS) ship
+BEFORE Step 2 trim (G1). §14 records this reordering.
 
 Two branches grew in parallel. Neither knew about the other. They overlap on 5 files. One file (`frontend/src/studio/Step2Composite.jsx`) is modify-in-one, delete-in-the-other.
 
@@ -41,16 +51,28 @@ Analysis justifying this decision is in a separate artifact; summary:
 - Full infrastructure (policy resolver, rate limiter, cost tracker, judge, bakeoff) is justified at B2B volume **but belongs in an operator admin panel, not end-user UI**.
 - End-user UI gets ONE UX win from the rebuild: the judge's "★ AI 추천" crown, because operators at volume have genuine decision fatigue on 4-candidate selection. Everything else is operator-facing.
 
-### 2.3 Step 3 naturalness is a **separate track**, not blocked by step2-trim
+### 2.3 Step 3 naturalness runs FIRST (reordered 2026-04-24)
 
-Prompt-level tuning on `FLASHTALK_OPTIONS.default_prompt` + FlashTalk
-pipeline sample_neg_prompt + audio_lufs sweep doesn't require step2-trim
-to land. It can run in parallel. §8 sequence reflects this: Step 3 PRs
-depend only on refactor-plan (PR #1) + persona validation, not on
-step2-trim.
+Earlier drafts had Step 3 running after or parallel-to step2-trim.
+Customer-context discovery inverted this: pain is 80% Step 3, 20% Step
+2, and the customer is in demo evaluation (not contracted). Demo
+quality decides the contract. Step 2's sticker/duplicate bugs are
+annoying but not blocking; Step 3's exaggerated lip + filler-laden TTS
+are blocking.
 
-(Earlier draft had Step 3 PRs chained after step2-trim — fixed per
-Codex finding #2.)
+Step 3 tracks depend ONLY on refactor-plan (merged as `c488e0a`).
+step2-trim is deferred to post-Step-3 or post-contract, whichever
+comes first. See §14.
+
+### 2.4 Persona validation: dropped (no operators to interview)
+
+Earlier plan gated step2-trim on a 30-min interview with first-customer
+operators. Customer is in demo evaluation — no operators have been
+onboarded yet. Asking "what do your operators prefer" when they don't
+have operators is fiction. R8 (persona assumption risk) is retained but
+downgraded: we ship conservative UI defaults (Pro/cost/mode selector
+hidden), revalidate after contract + onboarding when real operators
+start using the tool.
 
 ---
 
@@ -265,25 +287,21 @@ Sweep design: baseline vs {prompt_v2, prompt_v3, neg_v2, prompt_v2+neg_v2}.
 pipeline exposes override path — verify; falls back to pipeline default
 if not).
 
-### 6.3 S3-C: reference frame preprocessing — TARGETED AT STEP 2 OUTPUT
+### 6.3 S3-C: reference frame preprocessing — Step 1 first, Step 2 later
 
-**Codex correction #5:** the animation source is `composition.selectedPath
-|| host.selectedPath` (`frontend/src/api/video.ts:81`), not always Step 1.
-The composite from Step 2 is what FlashTalk animates. Fixing Step 1's
-mouth posture alone can be overwritten when Step 2 composites through.
+Originally targeted the post-Step-2 composite frame per Codex finding
+#5. Retargeted after §14 reordering: step2-trim ships LAST, so S3-C
+cannot depend on step2 code changes in its first iteration.
 
-Revised S3-C targets the **final composition frame** before it reaches
-FlashTalk:
-- Detect mouth aperture on the **selected composite** (not on Step 1
-  candidates) using MediaPipe face mesh
-- If open > threshold, either warn the operator with a "선택한 이미지의
-  입이 열려 있어요, 움직임이 과해질 수 있어요" hint, or re-composite
-  with a "closed mouth" constraint in the Step 2 prompt (more invasive)
-- Non-blocking warning first; hard gate only after usage data shows it
-  matters
+**Revised (G2 scope):** apply at Step 1 reference frame. Detect mouth
+aperture on Step 1 candidates (MediaPipe face mesh). If open >
+threshold, regenerate with "closed mouth, neutral expression" prompt
+addition. Yes — Step 2 composite may "overwrite" this (Codex correction),
+but at 20% pain distribution the residual loss is acceptable.
 
-Note scope creep: this ties §6 to §3 (Step 2 rebuild). Consider
-deferring until step2-trim lands if the coupling is too tight.
+**Deferred follow-up (post-G1 step2-trim):** extend the same check to
+the selected composite, with an operator hint "선택한 이미지의 입이
+열려 있어요, 움직임이 과해질 수 있어요". Tracked as a §13 non-goal.
 
 ### 6.4 S3-D: CFG scale sweep (FlashTalk)
 
@@ -824,6 +842,88 @@ points at. Flagged here so we don't forget.
 3. Is the judge's "★ 추천" crown copy the right register? User-facing copy review deferred — engineers shouldn't finalize.
 4. Should S3-A through S3-D be behind a single feature flag group or 4 independent flags?
 5. Merge #2 (step2-trim) — single combined PR or pair of PRs (backend first + frontend remap after)?
+
+---
+
+## 14. Execution order (supersedes §8.1 after customer-context discovery)
+
+Customer answered 4 structured questions on 2026-04-24. Key data points:
+- Step 2 iteration pattern: **3 rounds × 4 candidates** (12 total viewed)
+- Customer stage: **demo evaluation, no contract signed**
+- Incumbent tool: **none** (we're first proposal)
+- Pain distribution: **image 20%, video 80%**
+
+This inverts the sequencing in §8.1 (which went G1→G2→G3 for
+code-readiness reasons). Actual execution order:
+
+### 14.1 New sequence
+
+| Order | PR | Contents | Why first/last |
+|---|---|---|---|
+| **🥇 G2** | step3-motion | S3-0 eval + S3-A audio_lufs sweep + S3-B FlashTalk prompt + S3-C Step 1 reference frame + S3-D CFG sweep. All commits in one PR, one-commit-per-lever for bisectability. | 80% of user-visible pain. Demo-blocking if unfixed. |
+| **🥇 G3** | step3-tts | V-0 eval + V-A script preproc + V-B clone gate + V-C param sweep + V-D multi-gen auto-reject. Parallel with G2 (different subsystem). | Other half of 80% pain. |
+| **🥈 G1** | step2-trim | Option C++ scope (§3-§5). Backend `modules/step2/*` trim + app.py SSE extension + frontend remap into `step2/*.tsx` + judge crown. | Lower urgency at 20% pain. Judge crown still ships because 12-candidate scenario makes decision fatigue real. |
+
+**Dependency reality:**
+- G2 and G3 touch disjoint code (FlashTalk path vs ElevenLabs path).
+  Parallel worktrees, share only reviewer eval time.
+- G1 depends on `step2-prompt-rebuild` branch being rebased onto
+  current main. Not dependent on G2 or G3, but deliberately scheduled
+  after them to preserve focus on demo-critical work.
+
+### 14.2 Demo-phase UI defaults (conservative)
+
+Since operators don't exist yet (demo evaluation), we cannot calibrate
+UI to them. Ship conservative defaults and revalidate post-contract:
+
+| Control | Demo-phase default | Revalidate when |
+|---|---|---|
+| Judge "★ AI 추천" crown | **Shown** | Real operator data shows pick-winner rate < 50% |
+| Pro 모드 toggle | **Hidden entirely** (backend always Flash) | Volume/cost data justifies Pro escalation |
+| Cost preview | **Hidden** | Operators request it post-contract |
+| Mode selector | **Hidden** | Admin panel (E2 auth track) |
+| Pass progress badge | **Hidden** (no 2-pass anyway) | — |
+| Rate-limit warning banner | **Hidden** (backend enforces silently) | — |
+
+The judge crown is the ONE end-user-facing UX addition from step2-rebuild
+that survives. At 12 candidates across 3 iterations, decision fatigue
+is real and the crown's "I'd pick this one" prompt has measurable value.
+
+### 14.3 Demo-phase eval rubric (scope-reduced from §6.0 / §6B.0)
+
+Full rubric (4 dimensions × 6-8 fixtures) too expensive for demo-chase
+cadence. Reduce to binary per-fixture:
+
+**"Would this video be shown to the first customer as demo material?"** [yes/no]
+
+Score across fixtures = % yes. Merge criterion for each lever:
+- `yes_rate_after >= yes_rate_before` (no regression), AND
+- at least one fixture flips from no→yes.
+
+This is coarser than the 4-dim rubric but fits demo pressure. Promote
+back to full rubric after contract signed.
+
+### 14.4 Eval frequency (reduced)
+
+Per §8.1 original: eval after each S3-* / V-* lever. Per §14: **eval
+once per G (track-level)**. G2 total eval = 1 run after all 4 motion
+levers land on the branch. G3 total eval = 1 run after V-A/B/C/D. This
+sacrifices per-lever attribution for reviewer time — if the aggregate
+regresses, rebuild attribution by re-running the eval against each
+commit (local only, not CI-gated).
+
+### 14.5 What changes vs §8.1 persona validation block
+
+Dropped entirely. §8 sequence table's row labeled "Persona validation
+checkpoint" is no longer a gate. The R8 risk (persona assumption) is
+retained but accepted — conservative UI defaults in §14.2 are the
+mitigation.
+
+### 14.6 Admin panel (E2 auth) unlocks all the deferred UI
+
+Mode selector, cost preview, Pro toggle, rate-limit controls, bakeoff
+trigger — all move into a single operator admin panel PR once E2 auth
+lands. Not before contract. Not in G1/G2/G3.
 
 ---
 
