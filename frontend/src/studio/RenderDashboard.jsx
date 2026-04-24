@@ -7,7 +7,7 @@ import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Icon from './Icon.jsx';
 import { Badge, Button } from './primitives.jsx';
-import { generateVideo, humanizeError, subscribeProgress } from './api.js';
+import { generateVideo, getVideoMeta, humanizeError, subscribeProgress } from './api.js';
 import { useQueueEntry, useQueuePosition } from './QueueContext.jsx';
 import RenderHistory from './RenderHistory.jsx';
 import { formatTaskTitle } from './taskFormat.js';
@@ -293,15 +293,15 @@ const RenderDashboard = ({ state, attachToTaskId = null, onBack, onReset }) => {
   const [actualFileSize, setActualFileSize] = useState(null);
   useEffect(() => {
     if (job.status !== 'done' || !job.taskId) return;
+    const controller = new AbortController();
     let alive = true;
-    fetch(`/api/videos/${job.taskId}`, { method: 'HEAD' })
-      .then(r => {
-        if (!alive || !r.ok) return;
-        const len = Number(r.headers.get('content-length') || 0);
-        if (len > 0) setActualFileSize(len);
+    getVideoMeta(job.taskId, { signal: controller.signal })
+      .then(meta => {
+        if (!alive) return;
+        if (meta.sizeBytes) setActualFileSize(meta.sizeBytes);
       })
       .catch(() => { /* silent — the card shows "—" */ });
-    return () => { alive = false; };
+    return () => { alive = false; controller.abort(); };
   }, [job.status, job.taskId]);
 
   const formatFileSize = (bytes) => {

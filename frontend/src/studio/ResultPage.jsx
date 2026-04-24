@@ -13,7 +13,7 @@ import Icon from './Icon.jsx';
 import { Badge, Button } from './primitives.jsx';
 import ProvenanceCard from './ProvenanceCard.jsx';
 import QueueStatus from './QueueStatus.jsx';
-import { humanizeError } from './api.js';
+import { humanizeError, fetchResult } from './api.js';
 import { formatTaskTitle } from './taskFormat.js';
 
 const Confetti = () => {
@@ -83,22 +83,30 @@ export default function ResultPage() {
   const [copied, setCopied] = useState(false);
 
   useEffect(() => {
+    // AbortController + alive flag belt-and-braces: abort cancels
+    // in-flight fetch (no wasted bytes); `alive` guards the setState
+    // calls from running after React has already unmounted (still
+    // useful in StrictMode double-mount + any race where the promise
+    // resolves in the exact tick the cleanup runs).
+    const controller = new AbortController();
     let alive = true;
     setLoading(true);
-    fetch(`/api/results/${taskId}`)
-      .then(async (r) => {
-        if (!r.ok) {
-          const msg = r.status === 404
-            ? '아직 완료된 작업을 찾을 수 없어요. 잠시 후 다시 시도해 주세요.'
-            : `작업 정보를 불러오지 못했어요 (${r.status})`;
-          throw new Error(msg);
-        }
-        return r.json();
-      })
+    fetchResult(taskId, { signal: controller.signal })
       .then(d => { if (alive) { setResult(d); setError(null); } })
-      .catch(err => { if (alive) setError(humanizeError(err)); })
+      .catch(err => {
+        // Aborts are not real errors — caller navigated away.
+        if (err?.name === 'AbortError') return;
+        if (!alive) return;
+        const friendly = err?.status === 404
+          ? '아직 완료된 작업을 찾을 수 없어요. 잠시 후 다시 시도해 주세요.'
+          : humanizeError(err);
+        setError(friendly);
+      })
       .finally(() => { if (alive) setLoading(false); });
-    return () => { alive = false; };
+    return () => {
+      alive = false;
+      controller.abort();
+    };
   }, [taskId]);
 
   const handleCopyShare = async () => {

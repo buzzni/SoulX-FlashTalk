@@ -9,10 +9,24 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, screen, cleanup, waitFor } from '@testing-library/react';
 import { MemoryRouter, Routes, Route } from 'react-router-dom';
 
-vi.mock('../api.js', () => ({
-  fetchQueue: vi.fn().mockResolvedValue({ running: [], pending: [], recent: [], total_running: 0, total_pending: 0 }),
-  humanizeError: (e) => (e && e.message) || String(e),
-}));
+// Partial mock — override fetchQueue (QueueContext uses it) but leave
+// fetchResult / humanizeError / etc. pointing at the real implementations
+// so the global.fetch override in `renderAt` is what actually drives
+// the test. Without this, ResultPage imports a mocked `fetchResult`
+// that doesn't exist on the stub and the page crashes.
+vi.mock('../api.js', async () => {
+  const actual = await vi.importActual('../api.js');
+  return {
+    ...actual,
+    fetchQueue: vi.fn().mockResolvedValue({
+      running: [],
+      pending: [],
+      recent: [],
+      total_running: 0,
+      total_pending: 0,
+    }),
+  };
+});
 
 import ResultPage from '../ResultPage.jsx';
 import { QueueProvider } from '../QueueContext.jsx';
