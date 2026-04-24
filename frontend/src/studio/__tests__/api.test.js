@@ -346,13 +346,21 @@ describe('api.js — listServerFiles (DLP/VPN bypass)', () => {
     global.fetch.mockResolvedValueOnce({ ok: true, json: async () => payload });
     const r = await listServerFiles('image');
     expect(r).toEqual(payload);
-    expect(global.fetch).toHaveBeenCalledWith(expect.stringMatching(/\/api\/upload\/list\?kind=image$/));
+    // Phase 1: fetchJSON calls fetch with (url, init) — init carries
+    // merged auth headers + the caller's AbortSignal.
+    expect(global.fetch).toHaveBeenCalledWith(
+      expect.stringMatching(/\/api\/upload\/list\?kind=image$/),
+      expect.any(Object),
+    );
   });
 
   it('URL-encodes the kind parameter', async () => {
     global.fetch.mockResolvedValueOnce({ ok: true, json: async () => ({ files: [] }) });
     await listServerFiles('audio/mp3');
-    expect(global.fetch).toHaveBeenCalledWith(expect.stringMatching(/kind=audio%2Fmp3$/));
+    expect(global.fetch).toHaveBeenCalledWith(
+      expect.stringMatching(/kind=audio%2Fmp3$/),
+      expect.any(Object),
+    );
   });
 
   it('throws via jsonOrThrow on non-OK response', async () => {

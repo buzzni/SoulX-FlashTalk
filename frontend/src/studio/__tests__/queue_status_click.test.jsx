@@ -1,7 +1,7 @@
 /**
- * QueueStatus — running/pending items navigate to /?attach=:taskId, completed
- * items navigate to /result/:taskId. Self-contained (no onTaskClick prop);
- * uses react-router's useNavigate directly.
+ * QueueStatus — running/pending items navigate to /render/:taskId (attach-mode
+ * dashboard), completed items navigate to /result/:taskId. Self-contained
+ * (no onTaskClick prop); uses react-router's useNavigate directly.
  *
  * @vitest-environment jsdom
  */
@@ -9,17 +9,24 @@ import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
 import { render, screen, fireEvent, cleanup, act } from '@testing-library/react';
 import { MemoryRouter, useLocation } from 'react-router-dom';
 
-vi.mock('../api.js', () => ({
+// Mock the underlying domain module — `api.js` re-exports from here,
+// so both `import from '../api.js'` and the queueStore's direct
+// import from `../../api/queue` pick up the mock.
+vi.mock('../../api/queue', () => ({
   fetchQueue: vi.fn(),
   cancelQueuedTask: vi.fn(),
-  humanizeError: (e) => (e && e.message) || String(e),
 }));
 
-import { fetchQueue, cancelQueuedTask } from '../api.js';
-import QueueStatus from '../QueueStatus.jsx';
-import { QueueProvider } from '../QueueContext.jsx';
+import { fetchQueue, cancelQueuedTask } from '../../api/queue';
+import QueueStatus from '../QueueStatus.tsx';
+import { __queueStoreInternals } from '../../stores/queueStore';
 
-afterEach(() => { cleanup(); vi.clearAllMocks(); vi.useRealTimers(); });
+afterEach(() => {
+  cleanup();
+  vi.clearAllMocks();
+  vi.useRealTimers();
+  __queueStoreInternals.reset();
+});
 
 beforeEach(() => {
   vi.useFakeTimers();
@@ -49,10 +56,8 @@ function LocationSpy() {
 async function renderAndExpand() {
   const result = render(
     <MemoryRouter initialEntries={["/"]}>
-      <QueueProvider>
-        <QueueStatus />
-        <LocationSpy />
-      </QueueProvider>
+      <QueueStatus />
+      <LocationSpy />
     </MemoryRouter>
   );
   await act(async () => { await Promise.resolve(); });
@@ -61,16 +66,16 @@ async function renderAndExpand() {
 }
 
 describe('QueueStatus click-to-navigate', () => {
-  it('navigates to /?attach=:taskId when a running item is clicked', async () => {
+  it('navigates to /render/:taskId when a running item is clicked', async () => {
     await renderAndExpand();
     fireEvent.click(screen.getByText('running script'));
-    expect(screen.getByTestId('landed').textContent).toBe('LANDED:/?attach=run-1');
+    expect(screen.getByTestId('landed').textContent).toBe('LANDED:/render/run-1');
   });
 
-  it('navigates to /?attach=:taskId when a pending item is clicked', async () => {
+  it('navigates to /render/:taskId when a pending item is clicked', async () => {
     await renderAndExpand();
     fireEvent.click(screen.getByText('first pending'));
-    expect(screen.getByTestId('landed').textContent).toBe('LANDED:/?attach=pend-1');
+    expect(screen.getByTestId('landed').textContent).toBe('LANDED:/render/pend-1');
   });
 
   it('pending rows expose an enabled cancel button that calls cancelQueuedTask', async () => {

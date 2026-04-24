@@ -1,5 +1,6 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
+import tailwindcss from '@tailwindcss/vite'
 
 // Vite dev-server proxies /api and /static to the FastAPI backend on
 // 127.0.0.1:8001. This keeps the backend bound to loopback (per plan §4.0.3
@@ -7,7 +8,7 @@ import react from '@vitejs/plugin-react'
 // IP (e.g., 172.28.60.60:5555) make API calls — the calls go back through
 // the Vite process, not directly to the user's machine.
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react(), tailwindcss()],
   server: {
     host: '0.0.0.0',
     port: 5174,

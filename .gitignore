@@ -35,3 +35,8 @@ frontend.log
 # Local dev symlinks to sibling checkouts — keep out of source control
 /justin
 /models
+
+# Playwright E2E run artifacts
+frontend/test-results/
+frontend/playwright-report/
+frontend/playwright/.cache/

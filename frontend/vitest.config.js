@@ -6,6 +6,9 @@ export default defineConfig({
   test: {
     environment: 'jsdom',
     globals: true,
+    // e2e/ is Playwright's turf — its specs use browser APIs and
+    // `@playwright/test`, which vitest would choke on.
+    exclude: ['node_modules/**', 'dist/**', 'e2e/**'],
     coverage: {
       provider: 'v8',
       reporter: ['text', 'html'],

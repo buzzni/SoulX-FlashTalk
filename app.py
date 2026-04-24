@@ -22,6 +22,12 @@ import uvicorn
 
 import config
 from modules.task_queue import task_queue
+from modules.schemas import (
+    HistoryResponse,
+    QueueSnapshot,
+    ResultManifest,
+    TaskStateSnapshot,
+)
 
 # Setup logging
 logging.basicConfig(
@@ -1330,7 +1336,7 @@ async def progress_stream(task_id: str):
     return StreamingResponse(_progress_event_generator(task_id), media_type="text/event-stream")
 
 
-@app.get("/api/tasks/{task_id}/state")
+@app.get("/api/tasks/{task_id}/state", response_model=TaskStateSnapshot)
 async def task_state_snapshot(task_id: str):
     """Plain-JSON snapshot of current task state — polling alternative to the
     SSE endpoint above. Exists because some client environments (certain
@@ -1338,18 +1344,75 @@ async def task_state_snapshot(task_id: str):
     EventSource while allowing ordinary fetch requests, leaving the render
     dashboard permanently stuck at the placeholder 0%. The polling path uses
     this endpoint; SSE stays in place for clients that can use it.
+
+    Fallback ordering:
+      1. in-memory `task_states` — the live, detailed state (has all
+         the sub-stage progress the worker emits)
+      2. persistent queue — if the task exists in the queue but hasn't
+         been picked up yet (e.g. right after a backend restart, when
+         `task_states` was wiped but `_recover_interrupted` flipped
+         running→pending), synthesize a minimal "queued/loading"
+         state so the frontend keeps polling instead of reporting the
+         task as failed after 8 consecutive 404s (~12s window).
+      3. only 404 if the task genuinely doesn't exist anywhere.
     """
     state = task_states.get(task_id)
-    if not state:
-        raise HTTPException(status_code=404, detail="Task not found")
-    return {
-        "task_id": task_id,
-        "stage": state.get("stage"),
-        "progress": state.get("progress"),
-        "message": state.get("message"),
-        "error": state.get("error"),
-        "output_path": state.get("output_path"),
-    }
+    if state:
+        return {
+            "task_id": task_id,
+            "stage": state.get("stage"),
+            "progress": state.get("progress"),
+            "message": state.get("message"),
+            "error": state.get("error"),
+            "output_path": state.get("output_path"),
+        }
+
+    # Backend-restart recovery window — task is in the persistent queue
+    # but the worker hasn't rebuilt `task_states` for it yet. Synthesize
+    # enough state that the frontend's polling loop doesn't give up.
+    queue = await task_queue.get_status()
+    for entry in queue.get("running", []):
+        if entry.get("task_id") == task_id:
+            return {
+                "task_id": task_id,
+                "stage": "loading",
+                "progress": 0.0,
+                "message": "작업 복구 중…",
+                "error": None,
+                "output_path": None,
+            }
+    for entry in queue.get("pending", []):
+        if entry.get("task_id") == task_id:
+            return {
+                "task_id": task_id,
+                "stage": "queued",
+                "progress": 0.0,
+                "message": "대기열에서 차례를 기다리는 중…",
+                "error": None,
+                "output_path": None,
+            }
+    for entry in queue.get("recent", []):
+        if entry.get("task_id") == task_id:
+            status = entry.get("status") or "completed"
+            if status == "completed":
+                return {
+                    "task_id": task_id,
+                    "stage": "complete",
+                    "progress": 1.0,
+                    "message": "완료",
+                    "error": None,
+                    "output_path": None,
+                }
+            return {
+                "task_id": task_id,
+                "stage": "error",
+                "progress": 0.0,
+                "message": entry.get("label"),
+                "error": entry.get("error") or f"작업이 {status} 상태입니다",
+                "output_path": None,
+            }
+
+    raise HTTPException(status_code=404, detail="Task not found")
 
 
 @app.api_route("/api/videos/{task_id}", methods=["GET", "HEAD"])
@@ -1377,7 +1440,7 @@ async def get_video(task_id: str, download: bool = False):
     raise HTTPException(status_code=404, detail="Video not found")
 
 
-@app.get("/api/history")
+@app.get("/api/history", response_model=HistoryResponse)
 async def get_history(limit: int = 50):
     history = load_video_history()
     return {"total": len(history), "videos": history[:limit]}
@@ -1695,7 +1758,7 @@ async def generate_conversation_endpoint(
 # Queue Status Endpoints
 # ========================================
 
-@app.get("/api/queue")
+@app.get("/api/queue", response_model=QueueSnapshot)
 async def get_queue_status():
     """Get current queue status: running, pending, and recent tasks."""
     return await task_queue.get_status()
@@ -1786,7 +1849,7 @@ def _synthesize_result_from_queue(entry: dict) -> dict:
     }
 
 
-@app.get("/api/results/{task_id}")
+@app.get("/api/results/{task_id}", response_model=ResultManifest)
 async def get_result(task_id: str):
     """Return the result manifest for a completed task.
 

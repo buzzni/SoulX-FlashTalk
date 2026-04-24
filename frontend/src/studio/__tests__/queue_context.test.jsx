@@ -1,24 +1,37 @@
 /**
- * QueueContext — single shared poller invariant.
+ * queueStore — single shared poller invariant.
  *
  * Regression: previously QueueStatus and RenderDashboard each ran their own
  * setInterval(fetchQueue, 4-5s) against the same endpoint. The dedupe
  * goal is "N consumers, 1 fetch per interval." This test fails the moment
  * someone re-introduces a per-consumer poller.
  *
+ * Phase 2a note: provider/context pattern replaced by a Zustand store
+ * that reference-counts subscribers. No `<QueueProvider>` wrapper
+ * needed — the hooks (`useQueue`, `useQueuePosition`, `useQueueEntry`)
+ * auto-enroll on mount and release on unmount.
+ *
  * @vitest-environment jsdom
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, cleanup, act } from '@testing-library/react';
 
-vi.mock('../api.js', () => ({
+vi.mock('../../api/queue', () => ({
   fetchQueue: vi.fn(),
+  cancelQueuedTask: vi.fn(),
 }));
 
-import { fetchQueue } from '../api.js';
-import { QueueProvider, useQueue, useQueueEntry, useQueuePosition } from '../QueueContext.jsx';
+import { fetchQueue } from '../../api/queue';
+import { useQueue, useQueueEntry, useQueuePosition, __queueStoreInternals } from '../../stores/queueStore';
 
-afterEach(() => { cleanup(); vi.clearAllMocks(); vi.useRealTimers(); });
+afterEach(() => {
+  cleanup();
+  vi.clearAllMocks();
+  vi.useRealTimers();
+  // Reset refcount + state between tests — a leaked mount from one
+  // test would otherwise bleed into the next.
+  __queueStoreInternals.reset();
+});
 
 beforeEach(() => {
   vi.useFakeTimers();
@@ -51,14 +64,14 @@ function ConsumerC() {
   return <div data-testid="c">{data ? `pending=${data.pending.length}` : '...'}</div>;
 }
 
-describe('QueueContext', () => {
+describe('queueStore', () => {
   it('runs ONE fetch per poll interval regardless of consumer count', async () => {
     render(
-      <QueueProvider>
+      <>
         <ConsumerA />
         <ConsumerB />
         <ConsumerC />
-      </QueueProvider>
+      </>,
     );
 
     // Mount triggers immediate first fetch
@@ -83,12 +96,12 @@ describe('QueueContext', () => {
     }
 
     const { getByTestId } = render(
-      <QueueProvider>
+      <>
         <PosProbe taskId="r1" label="running" />
         <PosProbe taskId="p1" label="first-pending" />
         <PosProbe taskId="p2" label="second-pending" />
         <PosProbe taskId="ghost" label="not-in-queue" />
-      </QueueProvider>
+      </>,
     );
 
     await act(async () => { await Promise.resolve(); });
@@ -105,12 +118,12 @@ describe('QueueContext', () => {
     }
 
     const { getByTestId } = render(
-      <QueueProvider>
+      <>
         <EntryProbe taskId="r1" label="running" />
         <EntryProbe taskId="p1" label="pending" />
         <EntryProbe taskId="rec1" label="recent" />
         <EntryProbe taskId="ghost" label="missing" />
-      </QueueProvider>
+      </>,
     );
 
     await act(async () => { await Promise.resolve(); });
@@ -120,12 +133,16 @@ describe('QueueContext', () => {
     expect(getByTestId('missing').textContent).toBe('null');
   });
 
-  it('useQueue outside provider returns safe fallback (no crash)', () => {
-    function Bare() {
-      const { data, error } = useQueue();
-      return <div data-testid="bare">{data == null && error == null ? 'safe' : 'unsafe'}</div>;
-    }
-    const { getByTestId } = render(<Bare />);
-    expect(getByTestId('bare').textContent).toBe('safe');
+  it('polling stops when the last subscriber unmounts', async () => {
+    const { unmount } = render(<ConsumerA />);
+    await act(async () => { await Promise.resolve(); });
+    expect(fetchQueue).toHaveBeenCalledTimes(1);
+
+    unmount();
+    // Reference count now 0 — advance past several poll intervals and
+    // assert no further fetches.
+    await act(async () => { vi.advanceTimersByTime(20_000); await Promise.resolve(); });
+    expect(fetchQueue).toHaveBeenCalledTimes(1);
+    expect(__queueStoreInternals.subscriberCount()).toBe(0);
   });
 });

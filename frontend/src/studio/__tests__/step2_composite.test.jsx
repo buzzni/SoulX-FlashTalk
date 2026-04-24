@@ -14,24 +14,30 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { useState } from 'react';
 import { render, screen, waitFor, fireEvent, cleanup, act } from '@testing-library/react';
 
-vi.mock('../api.js', async () => {
-  const actual = await vi.importActual('../api.js');
+// Mock each domain module the component tree actually imports from.
+// Post Phase 4b, Step2Composite imports from ../../api/* directly.
+vi.mock('../../api/file', () => ({
+  listServerFiles: vi.fn(),
+  getVideoMeta: vi.fn(),
+}));
+vi.mock('../../api/composite', () => ({
+  streamComposite: vi.fn(),
+  generateComposite: vi.fn(),
+  buildCompositeBody: vi.fn(),
+}));
+vi.mock('../../api/upload', async () => {
+  const actual = await vi.importActual('../../api/upload');
   return {
     ...actual,
-    listServerFiles: vi.fn(),
-    streamComposite: vi.fn(),
     uploadReferenceImage: vi.fn(),
     uploadBackgroundImage: vi.fn(),
   };
 });
 
-import {
-  listServerFiles,
-  streamComposite,
-  uploadReferenceImage,
-  uploadBackgroundImage,
-} from '../api.js';
-import Step2Composite from '../Step2Composite.jsx';
+import { listServerFiles } from '../../api/file';
+import { streamComposite } from '../../api/composite';
+import { uploadReferenceImage, uploadBackgroundImage } from '../../api/upload';
+import Step2Composite from '../step2/Step2Composite.tsx';
 
 // ---- Helpers ----
 
@@ -120,6 +126,7 @@ describe('Step2Composite — picker wiring', () => {
     render(<StatefulStep2 />);
     fireEvent.click(screen.getByRole('button', { name: /서버 파일 선택/ }));
     await waitFor(() => expect(listServerFiles).toHaveBeenCalled());
+    // ServerFilePicker still calls listServerFiles(kind) — single-arg.
     expect(listServerFiles).toHaveBeenLastCalledWith('image');
   });
 });
@@ -201,7 +208,8 @@ describe('Step2Composite — generateComposite upload short-circuit', () => {
     await act(async () => { fireEvent.click(genBtn); });
 
     await waitFor(() => expect(uploadReferenceImage).toHaveBeenCalledTimes(1));
-    expect(uploadReferenceImage).toHaveBeenCalledWith(localFile);
+    // Phase 1: uploads take (file, {signal}) for abort support.
+    expect(uploadReferenceImage).toHaveBeenCalledWith(localFile, expect.any(Object));
     // streamComposite then runs with the path back-filled from the upload result
     await waitFor(() => expect(streamComposite).toHaveBeenCalledTimes(1));
     expect(streamComposite.mock.calls[0][0].products[0].path).toBe('/uploads/p_uploaded.png');

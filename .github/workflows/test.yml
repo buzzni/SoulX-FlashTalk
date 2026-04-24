@@ -14,10 +14,16 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - name: Install pytest + plugins
+      - name: Install pytest + runtime deps that tests import
         run: |
           python -m pip install --upgrade pip
           python -m pip install pytest pytest-cov pytest-asyncio pytest-mock
+          # Tests import app.py (and indirectly modules/*.py) so the
+          # minimal set of non-ML runtime deps has to be present. ML
+          # deps (torch, transformers, flash-attn, etc.) stay out —
+          # individual tests that need them use pytest.importorskip or
+          # are marked with phase markers skipped in CI.
+          python -m pip install fastapi httpx python-multipart Pillow python-dotenv uvicorn google-genai
       - name: Run pytest (skipped tests count as green)
         run: pytest -v
 
