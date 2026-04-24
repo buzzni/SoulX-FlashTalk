@@ -9,7 +9,7 @@ import { Fragment, useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import Icon from './Icon.jsx';
 import { Button } from './primitives.jsx';
-import Step1Host from './Step1Host.jsx';
+import Step1Host from './step1/Step1Host.tsx';
 import Step2Composite from './Step2Composite.jsx';
 import Step3Audio from './Step3Audio.jsx';
 import PreviewPanel from './PreviewPanel.jsx';

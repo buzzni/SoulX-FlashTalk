@@ -1,99 +1,145 @@
 /**
- * useHostGeneration — SSE-driven host candidate generation.
+ * useHostGeneration — SSE-driven host candidate generation with
+ * slot-aware state.
  *
- * Phase 3 per REFACTOR_PLAN.md. Wraps `api.host.streamHost`, applies
- * the concurrency contract from `useAbortableRequest`, and writes
- * final variants back to `wizardStore.host.variants` so they survive
- * reload (per Decision #1: variants persist, not transient).
+ * The backend emits 5 event flavors during a stream:
+ *   - `init` — accepted + echoes the seeds it will use. ONLY after
+ *     this do we draw placeholder tiles. (Drawing them before init
+ *     meant a validation failure left 4 spinners stuck on screen.)
+ *   - `candidate` — one slot completed. Has seed + url + path.
+ *   - `error` — per-slot failure. Mark that slot as errored.
+ *   - `fatal` — stream aborted backend-side. Rethrow.
+ *   - `done` — terminal. If min_success_met is false, throw.
  *
- * Contract:
- *   const { variants, isLoading, error, regenerate, abort } =
- *     useHostGeneration();
+ * Variants have matching `seed` identity so out-of-order candidate
+ * events land in the right tile. UI never sees intermediate
+ * un-init'd placeholders.
  *
- *   - `variants` — live array; updates as each SSE `candidate` event
- *     arrives. Initial value comes from `wizardStore.host.variants`,
- *     so if the user has finished a run and reloaded, the grid
- *     appears immediately.
- *   - `isLoading` — true while a stream is in flight.
- *   - `error` — humanized error string, or null.
- *   - `regenerate(seeds?)` — start a new stream. If another stream
- *     is in flight, it's aborted. `seeds` is optional: omit to let
- *     the backend pick its default set; pass `makeRandomSeeds()`
- *     for "다시 만들기" that returns fresh variants.
- *   - `abort()` — cancel the current stream without starting a new
- *     one (cancel-button UX).
+ * Final set is persisted to `wizardStore.host.variants` so
+ * reload restores the grid (Decision #1).
  *
- * Stale-result protection: late SSE frames from an aborted stream
- * are filtered via `isCurrent()` before touching state. Without
- * this, rapid re-clicks of "다시 만들기" could interleave events
- * from multiple streams.
+ * Contract — see useHostGeneration.ts header for the canonical doc.
  */
 
 import { useCallback, useState } from 'react';
-import { streamHost, type HostGenerateInput, type StreamEvent } from '../api/host';
+import { streamHost, type HostGenerateInput } from '../api/host';
 import { humanizeError } from '../api/http';
 import { useWizardStore } from '../stores/wizardStore';
 import { useAbortableRequest } from './useAbortableRequest';
 
+export interface HostVariant {
+  seed: number;
+  id: string;
+  url?: string;
+  path?: string;
+  placeholder: boolean;
+  error?: string;
+  _gradient?: string | null;
+}
+
 export interface UseHostGenerationReturn {
-  variants: StreamEvent[];
+  variants: HostVariant[];
   isLoading: boolean;
   error: string | null;
-  regenerate: (seeds?: number[]) => Promise<void>;
+  /** Start a fresh stream. `seeds` overrides the backend default —
+   * pass `makeRandomSeeds()` for "다시 만들기" that returns fresh
+   * variants; omit to let the backend use its deterministic default
+   * (so two users with the same input see the same output). */
+  regenerate: (
+    input: HostGenerateInput & { imageSize?: '1K' | '2K' | '4K' },
+    seeds?: number[],
+  ) => Promise<void>;
   abort: () => void;
 }
 
 export function useHostGeneration(): UseHostGenerationReturn {
-  // Seed initial state from the store so a reload shows the last run's
-  // variants instantly. We don't subscribe — the store only matters at
-  // mount time; during an active stream we're authoritative.
+  // Seed initial state from the store so a reload shows the last
+  // run's grid instantly. We don't subscribe — store only matters
+  // at mount; during an active stream we're authoritative.
   const initialVariants =
-    (useWizardStore.getState().host?.variants as StreamEvent[] | undefined) ?? [];
+    (useWizardStore.getState().host?.variants as HostVariant[] | undefined) ?? [];
 
-  const [variants, setVariants] = useState<StreamEvent[]>(initialVariants);
+  const [variants, setVariants] = useState<HostVariant[]>(initialVariants);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const { run, abort } = useAbortableRequest();
 
   const regenerate = useCallback(
-    async (seeds?: number[]) => {
+    async (
+      input: HostGenerateInput & { imageSize?: '1K' | '2K' | '4K' },
+      seeds?: number[],
+    ): Promise<void> => {
       const { signal, isCurrent } = run();
-      // Read host slice at call time — do NOT subscribe (would
-      // re-create the callback on every keystroke).
-      const host = useWizardStore.getState().host as HostGenerateInput;
-      const input: HostGenerateInput = seeds ? { ...host, _seeds: seeds } : host;
+      const req: HostGenerateInput = seeds ? { ...input, _seeds: seeds } : input;
 
       setIsLoading(true);
       setError(null);
-      const collected: StreamEvent[] = [];
-      setVariants(collected);
+      // Placeholders are NOT drawn yet — wait for `init` to confirm
+      // the backend accepted the request.
+      setVariants([]);
+
+      let currentVariants: HostVariant[] = [];
+      const errs: string[] = [];
+      let errorCount = 0;
 
       try {
-        for await (const evt of streamHost(input, { signal })) {
-          if (!isCurrent()) return; // a newer run started; drop this frame
+        for await (const evt of streamHost(req, { signal })) {
+          if (!isCurrent()) return;
 
-          // Stream shape is "candidate" per completed variant plus
-          // terminal "done"/"error" frames. Anything else is a progress
-          // heartbeat the caller may or may not care about — we
-          // accumulate everything and let Phase 4 UIs filter.
-          if (evt.type === 'candidate' || evt.type === 'placeholder') {
-            collected.push(evt);
-            setVariants([...collected]);
+          if (evt.type === 'init') {
+            const slotSeeds =
+              Array.isArray(evt.seeds) && evt.seeds.length > 0
+                ? (evt.seeds as number[])
+                : (seeds ?? []);
+            currentVariants = slotSeeds.map((s) => ({
+              seed: s,
+              id: `v${s}`,
+              placeholder: true,
+            }));
+            setVariants(currentVariants);
+          } else if (evt.type === 'candidate') {
+            currentVariants = currentVariants.map((v) =>
+              v.seed === evt.seed
+                ? { ...v, url: evt.url as string, path: evt.path as string, placeholder: false }
+                : v,
+            );
+            setVariants(currentVariants);
+          } else if (evt.type === 'error') {
+            errorCount += 1;
+            const detail = typeof evt.error === 'string' ? evt.error : 'unknown';
+            errs.push(`seed ${evt.seed}: ${detail}`);
+            currentVariants = currentVariants.map((v) =>
+              v.seed === evt.seed ? { ...v, error: detail, placeholder: false } : v,
+            );
+            setVariants(currentVariants);
+          } else if (evt.type === 'fatal') {
+            const err = new Error(
+              (typeof evt.error === 'string' && evt.error) || '알 수 없는 오류',
+            );
+            (err as { status?: number }).status = evt.status as number | undefined;
+            throw err;
           } else if (evt.type === 'done') {
-            break;
-          } else if (evt.type === 'fatal' || evt.type === 'error') {
-            if (typeof evt.error === 'string') {
-              throw new Error(evt.error);
+            if (evt.min_success_met === false) {
+              const successCount = currentVariants.filter(
+                (v) => !v.placeholder && !v.error,
+              ).length;
+              const total = (evt.total as number | undefined) ?? currentVariants.length;
+              const err = new Error(`후보가 부족해요 (${successCount}/${total})`);
+              (err as { status?: number }).status = 503;
+              throw err;
+            }
+            if (errorCount > 0) {
+              // eslint-disable-next-line no-console
+              console.warn('host generate had partial errors:', errs);
             }
           }
         }
 
         if (!isCurrent()) return;
-
         setIsLoading(false);
-        // Persist the finished set to the store so a reload shows the
-        // grid (and Step 2 picks up the selected host for composition).
-        useWizardStore.getState().setHost({ variants: collected });
+        // Persist the finished set so reload restores the grid and
+        // Step 2 picks up the selected host for composition.
+        useWizardStore.getState().setHost({ variants: currentVariants });
       } catch (err) {
         if (!isCurrent()) return;
         const name = (err as { name?: string } | null)?.name;
