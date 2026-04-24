@@ -69,6 +69,19 @@ describe('wizardStore — legacy showhost_state migration', () => {
     expect(envelope.state.products).toHaveLength(1);
     expect(envelope.state.voice.voiceId).toBe('v_abc');
     expect(envelope.state.imageQuality).toBe('1K');
+
+    // Step is preserved — user mid-Step-2 stays on Step 2 after upgrade.
+    expect(localStorage.getItem(storageKey('step'))).toBe('2');
+  });
+
+  it('clamps an out-of-range legacy step to a valid 1..3 value', () => {
+    localStorage.setItem(LEGACY_STATE_KEY, JSON.stringify({ host: {}, products: [], background: {}, composition: {}, voice: {}, script: '', resolution: {}, imageQuality: '1K' }));
+    localStorage.setItem(LEGACY_STEP_KEY, '999');
+
+    migrate();
+
+    // Out-of-range step → not written (HostStudio's initializer defaults to 1).
+    expect(localStorage.getItem(storageKey('step'))).toBeNull();
   });
 
   it('is idempotent — running twice does not re-migrate or clobber', () => {

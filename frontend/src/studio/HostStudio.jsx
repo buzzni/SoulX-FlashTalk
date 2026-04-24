@@ -15,7 +15,7 @@ import Step3Audio from './Step3Audio.jsx';
 import PreviewPanel from './PreviewPanel.jsx';
 import QueueStatus from './QueueStatus.jsx';
 import RenderDashboard from './RenderDashboard.jsx';
-import { useWizardStore, INITIAL_WIZARD_STATE } from '../stores/wizardStore';
+import { useWizardStore } from '../stores/wizardStore';
 import { storageKey } from '../stores/storageKey';
 
 // Global styles (tokens.css / app.css / tailwind.css) now load from
@@ -29,14 +29,29 @@ const STEPS = [
   { key: 3, name: '목소리·영상', short: '3', full: '목소리와 영상 뽑기' },
 ];
 
-const STEP_STORAGE_KEY = storageKey('step');
-
+// Resolve the step key lazily (inside the component) rather than at module
+// import time, so a future setUserScope() call before HostStudio mounts
+// still ends up scoping this key to the right user. Capturing at module
+// load would freeze the key to the pre-login global scope, out of sync
+// with wizardStore's persist middleware (which reads storageKey() on
+// first use inside the store factory).
 const HostStudio = () => {
+  const STEP_STORAGE_KEY = storageKey('step');
   // Wizard content lives in the Zustand store (persist middleware owns
   // localStorage round-trip + the one-time legacy migration; no manual
-  // save/load here). Subscribing to the whole store keeps the legacy
-  // `state` prop handed to Step components byte-compatible; Phase 4
-  // will split this into per-slice selectors as each Step decomposes.
+  // save/load here).
+  //
+  // KNOWN LIMITATION (Phase 2b): this subscribes to the entire store,
+  // so any `set*` call re-renders HostStudio AND propagates a new
+  // `state` prop reference into Step1/2/3 — the "selector ergonomics"
+  // win the refactor plan claimed for Zustand is NOT actually
+  // delivered yet. Half-measures here (shallow compare, per-slice
+  // selectors inside HostStudio) don't help because the whole `state`
+  // object is still handed down to children as a prop. The real fix
+  // is Phase 4: Step components subscribe to their own slices
+  // internally, HostStudio stops passing `state` as a prop. Until
+  // then the re-render cost is the same as the pre-refactor
+  // `useState(INITIAL_STATE)` — no regression, no improvement.
   const state = useWizardStore();
   const updateState = useWizardStore((s) => s.updateState);
   const resetState = useWizardStore((s) => s.reset);

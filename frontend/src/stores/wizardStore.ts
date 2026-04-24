@@ -205,6 +205,20 @@ function migrateLegacyStateOnce(): void {
     // the middleware picks it up on first read.
     const envelope = { state: partializeForPersist(merged), version: 1 };
     localStorage.setItem(storageKey('wizard'), JSON.stringify(envelope));
+
+    // Preserve the step the user was on. Without this, a user upgrading
+    // mid-wizard (at Step 2 or 3) keeps all their data but lands back
+    // on Step 1 after refresh — data survives, place in the flow
+    // doesn't. Carry the legacy `showhost_step` over to the new
+    // `showhost.step.v1` key before deleting the old one.
+    const legacyStep = localStorage.getItem(LEGACY_STEP_KEY);
+    if (legacyStep != null) {
+      const n = Number(legacyStep);
+      if (Number.isFinite(n) && n >= 1 && n <= 3) {
+        localStorage.setItem(storageKey('step'), String(Math.floor(n)));
+      }
+    }
+
     localStorage.removeItem(LEGACY_STATE_KEY);
     localStorage.removeItem(LEGACY_STEP_KEY);
   } catch {

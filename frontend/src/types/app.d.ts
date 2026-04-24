@@ -121,6 +121,19 @@ export interface WizardVoice {
   audioPath?: string | null;
 }
 
+/** Resolution preset — the full object shape the wizard carries and the
+ * backend ultimately consumes via `stringifyResolution({width, height})`.
+ * Stored verbatim in localStorage so Step 3's picker round-trips unchanged. */
+export interface ResolutionPreset {
+  key: string;           // '448p' | '720p' | '1080p' — UI preset id
+  label: string;
+  width: number;
+  height: number;
+  size?: string;         // human-readable file-size estimate (e.g. '~28MB')
+  speed?: string;        // human-readable speed hint (e.g. '빠름')
+  default?: boolean;
+}
+
 export interface WizardState {
   host: WizardHost;
   products: WizardProduct[];
@@ -128,6 +141,6 @@ export interface WizardState {
   composition: WizardComposition;
   voice: WizardVoice;
   script?: string;
-  resolution?: string;
+  resolution?: ResolutionPreset;
   imageQuality?: '1K' | '2K' | '4K';
 }

@@ -1075,6 +1075,8 @@ export interface components {
             total: number;
             /** Videos */
             videos?: components["schemas"]["VideoHistoryItem"][];
+        } & {
+            [key: string]: unknown;
         };
         /**
          * QueueEntry
@@ -1115,6 +1117,8 @@ export interface components {
             params?: {
                 [key: string]: unknown;
             } | null;
+        } & {
+            [key: string]: unknown;
         };
         /**
          * QueueSnapshot
@@ -1137,6 +1141,8 @@ export interface components {
              * @default 0
              */
             total_pending: number;
+        } & {
+            [key: string]: unknown;
         };
         /**
          * ResultManifest
@@ -1196,6 +1202,8 @@ export interface components {
              * @default false
              */
             synthesized: boolean;
+        } & {
+            [key: string]: unknown;
         };
         /**
          * ResultParams
@@ -1228,6 +1236,8 @@ export interface components {
             scene_prompt?: string | null;
             /** Reference Image Paths */
             reference_image_paths?: string[] | null;
+        } & {
+            [key: string]: unknown;
         };
         /**
          * TaskStateSnapshot
@@ -1249,6 +1259,8 @@ export interface components {
             error?: string | null;
             /** Output Path */
             output_path?: string | null;
+        } & {
+            [key: string]: unknown;
         };
         /** ValidationError */
         ValidationError: {
@@ -1288,6 +1300,8 @@ export interface components {
             generation_time?: number | null;
             /** Type */
             type?: ("generate" | "conversation") | null;
+        } & {
+            [key: string]: unknown;
         };
     };
     responses: never;

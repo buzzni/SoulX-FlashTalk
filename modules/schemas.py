@@ -28,7 +28,26 @@ from __future__ import annotations
 
 from typing import Any, Literal, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
+
+
+class _ExtraAllowBase(BaseModel):
+    """Base model for response shapes.
+
+    `extra='allow'` so fields the backend adds later pass through to the
+    frontend unchanged, even before `modules/schemas.py` gets updated.
+    Without this, FastAPI's `response_model` would silently *strip*
+    any undeclared key before it reaches the client — so a backend
+    change that adds `gpu_id` to the manifest would be invisible on
+    the frontend side, and `openapi-typescript` would regenerate
+    types that confirm the lie. `extra='allow'` means undeclared
+    keys keep their values and appear in the serialised output.
+
+    Declared fields still get type validation on the way out — this
+    only affects undeclared ones.
+    """
+
+    model_config = ConfigDict(extra='allow')
 
 
 # ────────────────────────────────────────────────────────────────────
@@ -39,7 +58,7 @@ TaskType = Literal["generate", "conversation"]
 TaskStatus = Literal["pending", "running", "completed", "error", "cancelled"]
 
 
-class QueueEntry(BaseModel):
+class QueueEntry(_ExtraAllowBase):
     """One task row as persisted by `TaskQueue` (see modules/task_queue.py).
 
     `params` is intentionally typed as an arbitrary dict because its
@@ -59,7 +78,7 @@ class QueueEntry(BaseModel):
     params: Optional[dict[str, Any]] = None
 
 
-class QueueSnapshot(BaseModel):
+class QueueSnapshot(_ExtraAllowBase):
     """Return shape of `/api/queue` — matches `TaskQueue.get_status()`."""
 
     running: list[QueueEntry] = Field(default_factory=list)
@@ -81,7 +100,7 @@ class QueueSnapshot(BaseModel):
 TaskStage = str
 
 
-class TaskStateSnapshot(BaseModel):
+class TaskStateSnapshot(_ExtraAllowBase):
     """Polling-friendly snapshot of in-memory `task_states[task_id]`.
 
     Returned by `/api/tasks/{task_id}/state` — the polling path that
@@ -101,7 +120,7 @@ class TaskStateSnapshot(BaseModel):
 # ────────────────────────────────────────────────────────────────────
 
 
-class ResultParams(BaseModel):
+class ResultParams(_ExtraAllowBase):
     """Subset of the dispatch params captured on the result manifest.
 
     See `_write_result_manifest` and `_synthesize_result_from_queue` in
@@ -122,7 +141,7 @@ class ResultParams(BaseModel):
     reference_image_paths: Optional[list[str]] = None
 
 
-class ResultManifest(BaseModel):
+class ResultManifest(_ExtraAllowBase):
     """Return shape of `/api/results/{task_id}`.
 
     Written to `outputs/results/{task_id}.json` by
@@ -156,7 +175,7 @@ class ResultManifest(BaseModel):
 # ────────────────────────────────────────────────────────────────────
 
 
-class VideoHistoryItem(BaseModel):
+class VideoHistoryItem(_ExtraAllowBase):
     """One row from `outputs/video_history.json` (see `add_to_history`)."""
 
     task_id: str
@@ -171,7 +190,7 @@ class VideoHistoryItem(BaseModel):
     type: Optional[TaskType] = None
 
 
-class HistoryResponse(BaseModel):
+class HistoryResponse(_ExtraAllowBase):
     """Return shape of `/api/history`."""
 
     total: int
@@ -182,7 +201,7 @@ class HistoryResponse(BaseModel):
 # Generic acks (optional — keep untyped for now)
 # ────────────────────────────────────────────────────────────────────
 
-class SimpleMessage(BaseModel):
+class SimpleMessage(_ExtraAllowBase):
     """Generic `{message, ...}` ack body used by cancel etc. Not wired yet —
     staged here so follow-up phases can decorate endpoints without a second
     schemas refactor."""
