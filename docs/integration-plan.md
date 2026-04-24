@@ -232,6 +232,13 @@ broken middle state.
 
 ## 6. Step 3 naturalness track — MOTION (FlashTalk path)
 
+> ⚠️ **G2 scope authority:** this section is historical context. Authoritative G2
+> execution reference is `docs/step3-motion-spec.md` v3 on branch `step3-motion`.
+> v3 diverges from §6 below on 7 material points (S3-A dropped as mathematically
+> dead lever, S3-D CFG dropped per paper, MULTITALK_OPTIONS booleans replaced,
+> S3-E reframed as Hallo2 open-source, etc. — see spec Appendix B). Read the spec
+> for what actually ships; this §6 stays for the broader integration narrative.
+
 **Correction from Codex outside-voice review:** earlier draft targeted
 MultiTalk. Production single-host video path uses **FlashTalk**
 (verified at `app.py:735, 1235` — both call sites pass
@@ -1014,6 +1021,11 @@ This inverts the sequencing in §8.1 (which went G1→G2→G3 for
 code-readiness reasons). Actual execution order:
 
 ### 14.1 New sequence
+
+> ⚠️ **G2 row is historical.** Actual G2 execution is in
+> `docs/step3-motion-spec.md` v3 on branch `step3-motion`. S3-A was dropped
+> (mathematically dead lever, proof in spec Appendix A). Week 1 is S3-B
+> positive-prompt sweep; Week 2 is Hallo2 open-source POC.
 
 | Order | PR | Contents | Why first/last |
 |---|---|---|---|
