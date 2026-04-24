@@ -114,6 +114,8 @@ async def generate_host_candidates(
     # user actually gets different output — see seed_policy note in
     # modules/host_generator.py at FIXED_DEFAULT_SEEDS.
     seeds = _resolve_seeds(seeds, n)
+    from modules.image_compositor import scaled_timeout
+    per_call_timeout = scaled_timeout(timeout_per_call, image_size)
 
     tasks = [
         _generate_one(
@@ -129,7 +131,7 @@ async def generate_host_candidates(
             face_strength=face_strength,
             outfit_strength=outfit_strength,
             outfit_text=outfit_text,
-            timeout=timeout_per_call,
+            timeout=per_call_timeout,
             output_dir=out_dir,
             temperature=temperature,
             image_size=image_size,
@@ -204,6 +206,8 @@ async def stream_host_candidates(
     out_dir = output_dir or config.HOSTS_DIR
     os.makedirs(out_dir, exist_ok=True)
     seeds = _resolve_seeds(seeds, n)
+    from modules.image_compositor import scaled_timeout
+    per_call_timeout = scaled_timeout(timeout_per_call, image_size)
 
     # Emit an init event up front so the UI can show its placeholder spinners
     # ONLY after the request has been accepted — previously Step1 drew the
@@ -227,7 +231,7 @@ async def stream_host_candidates(
                 face_strength=face_strength,
                 outfit_strength=outfit_strength,
                 outfit_text=outfit_text,
-                timeout=timeout_per_call,
+                timeout=per_call_timeout,
                 output_dir=out_dir,
                 temperature=temperature,
                 image_size=image_size,
@@ -428,8 +432,12 @@ def _sync_generate(
     if outfit_ref_path and os.path.exists(outfit_ref_path):
         contents.append(
             "[Reference image — OUTFIT/CLOTHING]: This is the clothing/outfit "
-            "reference. Use the garment's silhouette, color, fabric, and "
-            "styling on the generated person. " + _strength_phrase("outfit", outfit_strength)
+            "reference. Use ONLY the garment design — color, fabric, pattern, "
+            "neckline, sleeve length, and overall styling. DO NOT copy the "
+            "pose, body position, arm placement, or framing of the person in "
+            "this reference image; the generated person must stand in the "
+            "attention pose specified in the main prompt. "
+            + _strength_phrase("outfit", outfit_strength)
         )
         contents.append(Image.open(outfit_ref_path).convert("RGB"))
         has_ref = True
@@ -442,8 +450,10 @@ def _sync_generate(
         has_ref = True
     if outfit_text and outfit_text.strip():
         contents.append(
-            "[Outfit description (text)]: Wear the following outfit on the "
-            "generated person — " + outfit_text.strip()
+            "[Outfit description (text)]: Dress the generated person in the "
+            "following outfit (apply to clothing design only — pose remains "
+            "the attention pose specified in the main prompt): "
+            + outfit_text.strip()
         )
 
     def _do():
@@ -509,27 +519,38 @@ def _build_host_prompt(
     at the cue.
     """
     parts = [
-        "AI 쇼호스트 인물 사진, 9:16 세로 프레임, 스튜디오 조명, 사실적 인물사진. "
-        "배경은 반드시 베이지·크림 톤의 깔끔한 단색 배경. 소품·가구·텍스트·로고 없음. "
+        "Portrait photo of an AI shopping host. 9:16 vertical frame, studio "
+        "lighting, photorealistic portrait. Background must be a clean, solid "
+        "beige / cream tone — no props, no furniture, no text, no logos. "
         # Medium shot is the sweet spot for the downstream FlashTalk pipeline:
         # face takes ~30% of frame (strong lip-sync signal) AND upper-body
         # motion reads natural. Full body shrinks the face so lip-sync drops,
         # and closeup leaves Step 2 re-framing no room to pull back. Pinning
         # it here stops Gemini's default from drifting between candidates.
-        "샷 프레이밍: 무릎 위 미디엄 샷 (medium shot, knee-up). "
-        "얼굴과 상체가 프레임의 중심을 차지하고, 자연스러운 정면 포즈. "
-        "인물 한 명만 등장."
+        "Shot framing: MEDIUM SHOT, knee-up crop. The frame ends just above "
+        "the knees — the lower legs and feet MUST be out of frame. Do NOT "
+        "render a full-body shot. Face and upper body occupy the center of "
+        "the frame; hands (resting at the thighs) are visible at the bottom "
+        "of the frame. "
+        "Pose MUST be a strict attention pose for the visible upper body: "
+        "facing the camera straight on, shoulders level, both arms hanging "
+        "straight down naturally at the sides with hands resting next to the "
+        "thighs. (Legs are out of frame but the stance is feet-together, "
+        "weight evenly distributed — not contrapposto, not walking.) Do NOT "
+        "use hands-on-hips, crossed arms, hand-in-pocket, or any other "
+        "styled/posed gesture. "
+        "Exactly one person in frame."
     ]
     if text_prompt:
         parts.append(text_prompt)
     if builder:
         suffix = [f"{k}: {v}" for k, v in builder.items() if v]
         if suffix:
-            parts.append("특성: " + ", ".join(suffix))
+            parts.append("Attributes: " + ", ".join(suffix))
     if extra_prompt:
         parts.append(extra_prompt)
     if outfit_text and outfit_text.strip():
-        parts.append("의상 설명: " + outfit_text.strip())
+        parts.append("Outfit description: " + outfit_text.strip())
     return "\n\n".join(parts)
 
 
@@ -547,7 +568,24 @@ def _strength_phrase(kind: str, s: float) -> str:
 def _build_host_system_instruction(negative_prompt: Optional[str]) -> str:
     """§5.1.1: system_instruction for host generation."""
     base = (
-        "Generate a single person (AI shopping host) in a neutral pose. "
+        "Generate a single person (AI shopping host). "
+        # Pose is a hard constraint — outfit reference images often show the
+        # model in editorial/dynamic poses (hands on hips, walking, leaning),
+        # and Gemini will copy that pose by default. Forcing attention pose
+        # at the system level overrides any pose leak from the outfit ref so
+        # the generated host always faces forward with arms at sides — what
+        # the downstream FlashTalk lip-sync pipeline expects.
+        "FRAMING: medium shot, knee-up crop. The frame MUST end just above "
+        "the knees — never render a full-body shot. Lower legs and feet are "
+        "out of frame. "
+        "POSE: the person MUST be in a strict attention pose for the visible "
+        "upper body — facing the camera straight on, shoulders level, both "
+        "arms hanging straight down naturally at the sides with hands "
+        "resting next to the thighs (hands visible at the bottom of the "
+        "frame). Do NOT use hands-on-hips, crossed arms, hand-in-pocket, "
+        "walking, leaning, or any other styled pose, even if a reference "
+        "image shows one — the outfit reference is for clothing design only, "
+        "never for pose or framing. "
         # Background is a hard constraint — the downstream FlashTalk pipeline
         # composites the host onto scene backgrounds later, so a plain beige
         # studio backdrop makes rembg extraction clean. Anything else

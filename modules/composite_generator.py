@@ -248,6 +248,8 @@ async def generate_composite_candidates(
     # Seeds: caller override wins; else the fixed default set. See host_generator
     # for the rationale behind the dual-mode contract.
     seeds = _resolve_seeds(seeds, n)
+    from modules.image_compositor import scaled_timeout
+    per_call_timeout = scaled_timeout(timeout_per_call, image_size)
 
     tasks = [
         _generate_one(
@@ -258,7 +260,7 @@ async def generate_composite_candidates(
             scene_prompt=scene_prompt,
             target_size=target_size,
             output_dir=out_dir,
-            timeout=timeout_per_call,
+            timeout=per_call_timeout,
             temperature=temperature,
             image_size=image_size,
         )
@@ -366,6 +368,8 @@ async def stream_composite_candidates(
     )
 
     seeds = _resolve_seeds(seeds, n)
+    from modules.image_compositor import scaled_timeout
+    per_call_timeout = scaled_timeout(timeout_per_call, image_size)
 
     async def _run_tagged(seed: int):
         try:
@@ -377,7 +381,7 @@ async def stream_composite_candidates(
                 scene_prompt=scene_prompt,
                 target_size=target_size,
                 output_dir=out_dir,
-                timeout=timeout_per_call,
+                timeout=per_call_timeout,
                 temperature=temperature,
                 image_size=image_size,
             )

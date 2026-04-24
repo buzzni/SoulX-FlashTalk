@@ -32,6 +32,17 @@ _rembg_session = None
 _GEMINI_RETRY_MAX_ATTEMPTS = 2  # 1 initial + 1 retry
 _GEMINI_RETRY_BACKOFF_S = (1.0, 3.0)  # sleeps before attempts 2, 3, ...
 
+# Per-call wait_for budget scales with image_size — 4K renders ~4× slower than
+# 1K (commit 612cef2: 1K~baseline, 2K~2×, 4K~4× time, 15-30MB PNGs). The 45s
+# baseline that worked for 1K reliably tripped all 4 parallel 4K calls into
+# TimeoutError, surfacing as "후보가 부족해요 (0/4)". Multipliers include
+# headroom over the measured ratios so a slightly slow call doesn't trip.
+_IMAGE_SIZE_TIMEOUT_MULTIPLIER = {"1K": 1.0, "2K": 2.5, "4K": 5.0}
+
+
+def scaled_timeout(base: float, image_size: str) -> float:
+    return base * _IMAGE_SIZE_TIMEOUT_MULTIPLIER.get((image_size or "1K").upper(), 1.0)
+
 
 def _call_gemini_with_retry(fn, *, attempts: int = _GEMINI_RETRY_MAX_ATTEMPTS):
     """Invoke a zero-arg Gemini callable with retry on transient errors.
@@ -450,6 +461,10 @@ def _gemini_generate_scene(
             "- CRITICAL: Preserve the person's EXACT height-to-width ratio (aspect ratio). Do NOT compress or stretch the person vertically or horizontally.\n"
         )
 
+        # Intent-driven prompt: the scene description (user direction + shot/angle)
+        # is authoritative. We only constrain host identity/size and forbid text —
+        # no symmetry or layout hints that would fight positional cues like
+        # "우측 하단에 놓여진 1번 상품" ("product #1 placed on the bottom-right").
         if reference_images:
             full_prompt = (
                 "I am providing the following images:\n"
@@ -467,10 +482,13 @@ def _gemini_generate_scene(
                 "- Keep the people's SIZE and ASPECT RATIO EXACTLY as shown. Do NOT resize, reshape, compress, or stretch them.\n"
                 "- Replace ONLY the white background with the described scene.\n"
                 "- Incorporate elements from the reference images naturally into the scene.\n"
+                "- Follow ALL positional cues in the scene description literally "
+                "(e.g., left/right/top/bottom, foreground/background, near/far, "
+                "한국어로 우측·좌측·상단·하단·앞쪽·뒤쪽 등). Do NOT mirror, flip, "
+                "or swap sides relative to the described placement.\n"
                 "- The result should look like a real photograph.\n"
                 "- Do NOT alter the people in any way.\n"
-                "- Do NOT add any text, letters, words, logos, watermarks, or captions anywhere in the image.\n"
-                "- Keep the background SYMMETRIC left-to-right as much as possible."
+                "- Do NOT add any text, letters, words, logos, watermarks, or captions anywhere in the image."
                 + lighting_rules
             )
         else:
@@ -483,10 +501,13 @@ def _gemini_generate_scene(
                 "- Keep the people's positions (left/right) EXACTLY as shown.\n"
                 "- Keep the people's SIZE and ASPECT RATIO EXACTLY as shown. Do NOT resize, reshape, compress, or stretch them.\n"
                 "- Replace ONLY the white background with the described scene.\n"
+                "- Follow ALL positional cues in the scene description literally "
+                "(e.g., left/right/top/bottom, foreground/background, near/far, "
+                "한국어로 우측·좌측·상단·하단·앞쪽·뒤쪽 등). Do NOT mirror, flip, "
+                "or swap sides relative to the described placement.\n"
                 "- The result should look like a real photograph taken at that location.\n"
                 "- Do NOT alter the people in any way.\n"
-                "- Do NOT add any text, letters, words, logos, watermarks, or captions anywhere in the image.\n"
-                "- Keep the background SYMMETRIC left-to-right as much as possible."
+                "- Do NOT add any text, letters, words, logos, watermarks, or captions anywhere in the image."
                 + lighting_rules
             )
 
