@@ -16,6 +16,10 @@ OUTPUTS_DIR = os.path.join(PROJECT_ROOT, "outputs")
 TEMP_DIR = os.path.join(PROJECT_ROOT, "temp")
 EXAMPLES_DIR = os.path.join(PROJECT_ROOT, "examples")
 HOSTS_DIR = os.path.join(OUTPUTS_DIR, "hosts", "saved")
+# Per-task result manifests (one JSON per completed video), used by
+# /api/results/{task_id} and the frontend /result/:taskId page. Queue entries
+# get truncated to last 20; manifests are permanent.
+RESULTS_DIR = os.path.join(OUTPUTS_DIR, "results")
 
 # Whitelisted roots for path-traversal-safe file access (CSO audit).
 # Used by _safe_upload_path() helper; no PROJECT_ROOT fallback.
@@ -31,11 +35,23 @@ FLASHTALK_CKPT_DIR = os.path.join(PROJECT_ROOT, "models", "SoulX-FlashTalk-14B")
 FLASHTALK_WAV2VEC_DIR = os.path.join(PROJECT_ROOT, "models", "chinese-wav2vec2-base")
 
 FLASHTALK_OPTIONS = {
-    "default_prompt": "A person is talking. Only the foreground characters are moving, the background remains static.",
+    # Prompt conditions the T5 text encoder → diffusion model. Emphasize
+    # restraint on both lip and body motion: the unguarded "characters are
+    # moving" hint tended to produce jerky hand swings and exaggerated mouth
+    # openings.
+    "default_prompt": (
+        "A person is talking with subtle, natural hand gestures and minimal, "
+        "stable body movement. The lips move softly and naturally in sync "
+        "with speech, not exaggerated. Only the foreground character moves; "
+        "the background remains static."
+    ),
     "audio_encode_mode": "stream",  # "stream" or "once"
     "base_seed": 9999,
     "cpu_offload": True,  # Enable CPU offload for lower VRAM usage (40GB instead of 64GB)
-    "audio_lufs": -28,  # Audio loudness normalization target (default: -23, lower = subtler mouth movement)
+    # Audio loudness target (default: -23 LUFS). Lower = subtler mouth movement
+    # because FlashTalk maps audio envelope to lip openness. -33 ≈ half the
+    # amplitude of -28 in linear, producing noticeably calmer lip motion.
+    "audio_lufs": -33,
 }
 
 # ========================================
@@ -44,7 +60,12 @@ FLASHTALK_OPTIONS = {
 MULTITALK_CKPT_DIR = os.path.join(PROJECT_ROOT, "models", "MultiTalk-14B-480P")
 
 MULTITALK_OPTIONS = {
-    "default_prompt": "Two people are talking. Only the foreground characters are moving, the background remains static.",
+    "default_prompt": (
+        "Two people are talking with subtle, natural hand gestures and "
+        "minimal, stable body movement. Their lips move softly and naturally "
+        "in sync with speech, not exaggerated. Only the foreground characters "
+        "move; the background remains static."
+    ),
     "base_seed": 9999,
     "cpu_offload": True,
     "sample_steps": 40,  # Non-distilled model needs more steps
