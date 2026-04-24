@@ -34,3 +34,4 @@ frontend.log
 
 # Local dev symlinks to sibling checkouts — keep out of source control
 /justin
+/models
