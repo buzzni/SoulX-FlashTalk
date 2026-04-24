@@ -37,7 +37,7 @@ vi.mock('../../api/file', () => ({
 
 import { fetchQueue } from '../../api/queue';
 import { subscribeProgress } from '../../api/progress';
-import RenderDashboard from '../RenderDashboard.jsx';
+import RenderDashboard from '../render/RenderDashboard.tsx';
 import { __queueStoreInternals } from '../../stores/queueStore';
 
 afterEach(() => {

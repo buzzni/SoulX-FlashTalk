@@ -12,12 +12,17 @@ vi.mock('../../api/queue', () => ({
   fetchQueue: vi.fn().mockResolvedValue({
     running: [
       { task_id: 'task-live', status: 'running', type: 'generate', created_at: '2026-04-24T10:00:00', started_at: '2026-04-24T10:01:00' },
+      // Second live task — the "new taskId" test swaps to this one and
+      // expects useRenderJob to resubscribe. Must be non-terminal or
+      // the terminal-skip optimization will (correctly) suppress the
+      // subscribe.
+      { task_id: 'task-live-2', status: 'running', type: 'generate', created_at: '2026-04-24T10:10:00', started_at: '2026-04-24T10:11:00' },
     ],
     pending: [],
     recent: [
       { task_id: 'task-done', status: 'completed', type: 'generate', created_at: '2026-04-24T09:00:00', started_at: '2026-04-24T09:01:00', completed_at: '2026-04-24T09:05:00' },
     ],
-    total_running: 1,
+    total_running: 2,
     total_pending: 0,
   }),
   cancelQueuedTask: vi.fn(),
@@ -94,7 +99,7 @@ describe('useRenderJob', () => {
     const { rerender } = renderHook(({ id }) => useRenderJob(id), { initialProps: { id: 'task-live' } });
     await waitFor(() => expect(progressCb).toBeTruthy());
     const firstUnsub = progressUnsub;
-    rerender({ id: 'task-done' });
+    rerender({ id: 'task-live-2' });
     await waitFor(() => expect(progressUnsub).not.toBe(firstUnsub));
     expect(firstUnsub).toHaveBeenCalled();
   });

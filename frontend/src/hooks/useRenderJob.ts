@@ -21,7 +21,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { QueueEntry, TaskStateSnapshot } from '../types/app';
 import { subscribeProgress, type ProgressEvent } from '../api/progress';
-import { useQueueEntry } from '../stores/queueStore';
+import { useQueue, useQueueEntry } from '../stores/queueStore';
 
 export interface UseRenderJobReturn {
   /** Queue row (from the shared queue poll). Null until the snapshot
@@ -50,6 +50,12 @@ export interface UseRenderJobReturn {
 
 export function useRenderJob(taskId: string | null | undefined): UseRenderJobReturn {
   const entry = useQueueEntry(taskId ?? null);
+  // `data` flips from null → snapshot once the queue poll fires its
+  // first response. Used below to defer the progress subscription
+  // until we've had a chance to see whether the task is already
+  // terminal (attach-to-completed-task should skip the subscribe
+  // entirely, not subscribe-then-immediately-unsubscribe).
+  const { data: queueSnapshot } = useQueue();
 
   const [progress, setProgress] = useState<number | null>(null);
   const [stage, setStage] = useState<TaskStateSnapshot['stage'] | null>(null);
@@ -59,8 +65,25 @@ export function useRenderJob(taskId: string | null | undefined): UseRenderJobRet
   // Progress subscription — one live connection per taskId. Clean
   // unsubscribe on taskId change or unmount (the subscribe helper
   // owns its own AbortController).
+  //
+  // Short-circuit: if the queue snapshot already shows the task is in
+  // a terminal state (completed / error / cancelled), don't subscribe
+  // — the only data the progress poll would surface is already known
+  // from the queue row, and attached users browsing old tasks would
+  // otherwise fire a needless 1.5s poll that 404s against task_states.
+  const entryStatus = entry?.status;
+  const entryIsTerminal =
+    entryStatus === 'completed' || entryStatus === 'error' || entryStatus === 'cancelled';
+
   useEffect(() => {
     if (!taskId) return;
+    // Wait for the queue snapshot to land — otherwise we can't tell
+    // "task is live and legitimately needs polling" from "task is
+    // already completed and we shouldn't subscribe at all." First
+    // snapshot arrives ~immediately from the store's eager first
+    // poll, so dispatch-mode doesn't feel the delay.
+    if (queueSnapshot === null) return;
+    if (entryIsTerminal) return;
     setPollFailed(false);
     const unsubscribe = subscribeProgress(taskId, (evt: ProgressEvent) => {
       // Discriminate on the `error` variant — the happy-path variant
@@ -75,7 +98,7 @@ export function useRenderJob(taskId: string | null | undefined): UseRenderJobRet
       setMessage(evt.message ?? null);
     });
     return unsubscribe;
-  }, [taskId]);
+  }, [taskId, entryIsTerminal, queueSnapshot]);
 
   // Elapsed ticker — 1s interval ONLY while the task is live.
   // Source-of-truth start time is `entry.started_at` (backend
