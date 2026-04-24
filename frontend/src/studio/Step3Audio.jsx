@@ -21,6 +21,131 @@ const VOICE_SKELETON_COUNT = 6;
 const BREATH_TAG = ' [breath] '; // 좌우 공백 포함 (9 chars)
 const SCRIPT_LIMIT = 5000;
 
+const fmtTime = (s) => {
+  if (!Number.isFinite(s) || s < 0) return '0:00';
+  const m = Math.floor(s / 60);
+  const sec = Math.floor(s % 60);
+  return `${m}:${sec.toString().padStart(2, '0')}`;
+};
+
+const AudioPlayer = ({ src }) => {
+  const audioRef = useRef(null);
+  const barRef = useRef(null);
+  const [playing, setPlaying] = useState(false);
+  const [current, setCurrent] = useState(0);
+  const [duration, setDuration] = useState(0);
+  const [volume, setVolume] = useState(1);
+  const [scrubbing, setScrubbing] = useState(false);
+
+  useEffect(() => {
+    const el = audioRef.current;
+    if (!el) return;
+    setPlaying(false);
+    setCurrent(0);
+    setDuration(0);
+    el.pause();
+    // Browsers lazy-load metadata; bumping load() forces header parse so
+    // duration shows up immediately after a new generation finishes.
+    el.load();
+  }, [src]);
+
+  useEffect(() => {
+    const el = audioRef.current;
+    if (el) el.volume = volume;
+  }, [volume]);
+
+  const toggle = () => {
+    const el = audioRef.current;
+    if (!el) return;
+    if (playing) el.pause();
+    else el.play().catch(() => setPlaying(false));
+  };
+
+  const seekFromEvent = (clientX) => {
+    const el = audioRef.current;
+    const bar = barRef.current;
+    if (!el || !bar || !Number.isFinite(duration) || duration <= 0) return;
+    const rect = bar.getBoundingClientRect();
+    const pct = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
+    const next = pct * duration;
+    el.currentTime = next;
+    setCurrent(next);
+  };
+
+  const onBarMouseDown = (e) => {
+    setScrubbing(true);
+    seekFromEvent(e.clientX);
+  };
+  useEffect(() => {
+    if (!scrubbing) return;
+    const onMove = (e) => seekFromEvent(e.clientX);
+    const onUp = () => setScrubbing(false);
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+    return () => {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+    };
+    // seekFromEvent is stable-enough for this lifecycle; deps intentionally minimal
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scrubbing, duration]);
+
+  const pct = duration > 0 ? Math.max(0, Math.min(100, (current / duration) * 100)) : 0;
+
+  return (
+    <div className="audio-player">
+      <button
+        type="button"
+        className="audio-player__toggle"
+        onClick={toggle}
+        aria-label={playing ? '일시정지' : '재생'}
+      >
+        <Icon name={playing ? 'pause' : 'play'} size={12} />
+      </button>
+      <div
+        ref={barRef}
+        className="audio-player__progress"
+        onMouseDown={onBarMouseDown}
+        role="slider"
+        aria-valuemin={0}
+        aria-valuemax={Math.round(duration)}
+        aria-valuenow={Math.round(current)}
+        tabIndex={0}
+      >
+        <div className="audio-player__bar" style={{ width: `${pct}%` }} />
+        <div className="audio-player__thumb" style={{ left: `${pct}%` }} />
+      </div>
+      <div className="audio-player__time">
+        {fmtTime(current)} / {fmtTime(duration)}
+      </div>
+      <div className="audio-player__volume">
+        <Icon name="sound" size={12} />
+        <input
+          type="range"
+          min={0}
+          max={1}
+          step={0.01}
+          value={volume}
+          onChange={e => setVolume(parseFloat(e.target.value))}
+          aria-label="음량"
+        />
+      </div>
+      <audio
+        ref={audioRef}
+        src={src}
+        preload="metadata"
+        onPlay={() => setPlaying(true)}
+        onPause={() => setPlaying(false)}
+        onEnded={() => { setPlaying(false); setCurrent(0); }}
+        onTimeUpdate={e => setCurrent(e.target.currentTime)}
+        onLoadedMetadata={e => setDuration(e.target.duration)}
+        onDurationChange={e => setDuration(e.target.duration)}
+        style={{ display: 'none' }}
+      />
+    </div>
+  );
+};
+
 const RES_OPTIONS = [
   { key: '448p', label: '보통 화질', tag: '448p', width: 448, height: 768, size: '약 8MB', speed: '가장 빠름', default: true },
   { key: '480p', label: '기본 화질', tag: '480p', width: 480, height: 832, size: '약 14MB', speed: '빠름' },
@@ -69,9 +194,8 @@ const Step3Audio = ({ state, update }) => {
       }))
     : VOICE_PRESETS;
 
-  // Preview audio refs — one for voice-tile previews, one for generated output.
+  // Preview audio ref for voice-tile previews (generated output uses AudioPlayer).
   const previewAudioRef = useRef(null);
-  const generatedAudioRef = useRef(null);
   const [playingPreview, setPlayingPreview] = useState(null);
 
   const playVoicePreview = (voiceItem) => {
@@ -87,19 +211,13 @@ const Step3Audio = ({ state, update }) => {
     el.play().then(() => setPlayingPreview(voiceItem.id)).catch(() => setPlayingPreview(null));
   };
 
-  const playGenerated = () => {
-    const el = generatedAudioRef.current;
-    // Prefer the relative URL the backend now hands back — it routes through
-    // the Vite proxy so we don't have to hardcode :8001 (which broke when the
-    // dev server moved ports + when remote browsers couldn't reach localhost).
-    const src = voice.generatedAudioUrl
-      || (voice.generatedAudioPath && voice.generatedAudioPath.startsWith('http')
-          ? voice.generatedAudioPath
-          : null);
-    if (!el || !src) return;
-    el.src = src;
-    el.play().catch(() => {});
-  };
+  // Prefer the relative URL the backend now hands back — it routes through
+  // the Vite proxy so we don't have to hardcode :8001 (which broke when the
+  // dev server moved ports + when remote browsers couldn't reach localhost).
+  const generatedSrc = voice.generatedAudioUrl
+    || (voice.generatedAudioPath && voice.generatedAudioPath.startsWith('http')
+        ? voice.generatedAudioPath
+        : null);
 
   // Ensure paragraphs always exists with at least one entry
   const paragraphs = (voice.paragraphs && voice.paragraphs.length > 0) ? voice.paragraphs : [''];
@@ -401,21 +519,13 @@ const Step3Audio = ({ state, update }) => {
               <div className="text-xs text-tertiary">
                 {voice.generated ? <Badge variant="success" icon="check_circle">음성 준비 완료 · {estDuration}초</Badge> : '목소리를 고르고 대본을 적은 뒤 만들기 버튼을 눌러주세요'}
               </div>
-              <div style={{ display: 'flex', gap: 8 }}>
-                <Button
-                  size="sm"
-                  icon="play"
-                  disabled={!voice.generated || !voice.generatedAudioPath}
-                  onClick={playGenerated}
-                >
-                  미리 듣기
-                </Button>
-                <Button variant="primary" icon={generating ? undefined : 'sparkles'} onClick={generate} disabled={generating || !voice.voiceId || !combinedScript}>
-                  {generating ? <><span className="spinner"/> 만드는 중</> : '음성 만들기'}
-                </Button>
-              </div>
-              <audio ref={generatedAudioRef} style={{ display: 'none' }} />
+              <Button variant="primary" icon={generating ? undefined : 'sparkles'} onClick={generate} disabled={generating || !voice.voiceId || !combinedScript}>
+                {generating ? <><span className="spinner"/> 만드는 중</> : '음성 만들기'}
+              </Button>
             </div>
+            {voice.generated && generatedSrc && (
+              <AudioPlayer src={generatedSrc} />
+            )}
           </>
         )}
 
