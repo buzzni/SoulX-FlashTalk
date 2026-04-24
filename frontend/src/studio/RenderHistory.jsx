@@ -4,6 +4,7 @@
 import { useState, useEffect } from 'react';
 import Icon from './Icon.jsx';
 import { fetchHistory } from './api.js';
+import { formatTaskTitle } from './taskFormat.js';
 
 const MIN = 60_000;
 const HOUR = 60 * MIN;
@@ -24,6 +25,18 @@ function formatBytes(n) {
   if (n > 1024 * 1024) return `${(n / 1024 / 1024).toFixed(1)}MB`;
   return `${Math.round(n / 1024)}KB`;
 }
+
+// Match ResultPage's `m:ss` duration format so the same elapsed number reads
+// the same way everywhere (previously we had "183.42초 걸림" here vs "3:03"
+// on the result page — inconsistent).
+function formatDuration(sec) {
+  if (sec == null || !Number.isFinite(sec)) return '';
+  const total = Math.max(0, Math.floor(sec));
+  const m = Math.floor(total / 60);
+  const s = total % 60;
+  return `${m}:${s.toString().padStart(2, '0')}`;
+}
+
 
 export default function RenderHistory({ excludeTaskId, limit = 8 }) {
   const [items, setItems] = useState(null);
@@ -63,11 +76,16 @@ export default function RenderHistory({ excludeTaskId, limit = 8 }) {
                 <div className="flex justify-between items-center" style={{ marginBottom: 8 }}>
                   <div style={{ minWidth: 0, flex: 1 }}>
                     <div className="truncate" style={{ fontSize: 13, fontWeight: 500 }}>
-                      {v.script_text || '제목 없음'}
+                      {formatTaskTitle(v.task_id, v.type || 'generate')}
                     </div>
+                    {v.script_text && (
+                      <div className="truncate text-xs text-secondary" style={{ marginTop: 2 }}>
+                        {v.script_text}
+                      </div>
+                    )}
                     <div className="text-xs text-tertiary">
                       {relativeTime(v.timestamp)}
-                      {v.generation_time != null && ` · ${v.generation_time}초 걸림`}
+                      {v.generation_time != null && ` · ${formatDuration(v.generation_time)}`}
                       {v.file_size ? ` · ${formatBytes(v.file_size)}` : ''}
                     </div>
                   </div>
@@ -133,11 +151,16 @@ export default function RenderHistory({ excludeTaskId, limit = 8 }) {
               </div>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div className="truncate" style={{ fontSize: 13, fontWeight: 500 }}>
-                  {v.script_text || '제목 없음'}
+                  {formatTaskTitle(v.task_id, v.type || 'generate')}
                 </div>
+                {v.script_text && (
+                  <div className="truncate text-xs text-secondary" style={{ marginTop: 2 }}>
+                    {v.script_text}
+                  </div>
+                )}
                 <div className="text-xs text-tertiary">
                   {relativeTime(v.timestamp)}
-                  {v.generation_time != null && ` · ${v.generation_time}초`}
+                  {v.generation_time != null && ` · ${formatDuration(v.generation_time)}`}
                   {v.file_size ? ` · ${formatBytes(v.file_size)}` : ''}
                 </div>
               </div>
