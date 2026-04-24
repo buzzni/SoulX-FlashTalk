@@ -25,3 +25,12 @@ node_modules/
 
 # Audit log (runtime)
 logs/audit.log
+
+# Runtime artifacts (generated during a session, never source)
+outputs/
+uploads/
+temp/
+frontend.log
+
+# Local dev symlinks to sibling checkouts — keep out of source control
+/justin
