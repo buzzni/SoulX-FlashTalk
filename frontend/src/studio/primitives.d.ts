@@ -98,8 +98,10 @@ export interface CardProps {
 export const Card: React.FC<CardProps>;
 
 export interface FieldProps {
-  label?: string;
-  hint?: string;
+  label?: ReactNode;
+  /** Korean copy sometimes embeds numbers (`<strong>{count}</strong> / 5000자`)
+   * so hints accept any renderable node, not just string. */
+  hint?: ReactNode;
   children?: ReactNode;
 }
 export const Field: React.FC<FieldProps>;
