@@ -582,6 +582,45 @@ Parallelization: §6 (motion) and §6B (TTS) share only reviewer time.
 Different code areas. #3 and #8 can land in the same week; #4 and #9 too.
 The constraint is the reviewer doing eval scoring, not code conflicts.
 
+### 8.1 Execution adjustment — collapse 12 PRs into 3 (solo + AI)
+
+The 12-PR table above is the full rigorous decomposition, written the
+way a team-review process would want it. In practice the owner here is
+solo + AI-assisted, so the per-PR overhead (rebase, wait-for-CI, 12×
+context switches) outweighs the per-PR benefit (bisectability,
+isolated eval attribution).
+
+Realistic execution plan:
+
+| Grouped PR | What lands | Internal commit structure |
+|---|---|---|
+| **G1. step2-trim** | Everything under §3-§5. Backend `modules/step2/*` (trimmed per Option C++) + app.py SSE extension + `api/composite.ts` + `step2/*.tsx` remap + tests per §10 PR #2. | 1 commit per sub-area (backend, api, hooks, UI, tests). |
+| **G2. step3-motion** | §6 in full. S3-0 eval baseline + S3-A audio_lufs sweep + S3-B prompt sweep + S3-C composite-frame preprocessing + S3-D CFG sweep. | 1 commit per lever so `git bisect` still works within the PR. S3-0 commit lands first; each S3-* commit includes an eval manifest (`eval/step3/results/<commit>.json`). |
+| **G3. step3-tts** | §6B in full. V-0 + V-A/B/C/D. | Same commit-per-lever structure. |
+
+Persona validation checkpoint happens **between refactor-plan merge and
+G1.** 30-min interview, findings written to `docs/persona-validation.md`
+on a tiny PR before G1 starts — this is the one place we don't collapse,
+because G1's UI copy depends on its output.
+
+**Parallelization across worktrees:** G2 and G3 touch disjoint modules
+(FlashTalk path vs ElevenLabs path), share only the reviewer doing eval
+scoring. Launch them in parallel worktrees after G1 merges. G1 itself
+is sequential — step2 surface has tight coupling between backend and
+frontend changes.
+
+**What we're deliberately giving up:**
+- Per-lever eval attribution — inside G2 or G3, if the composite rubric
+  delta is small, we know it's the aggregate change, not pinpointed to
+  one lever. Partially mitigated by the per-commit eval manifest —
+  re-running the rubric against a prior commit is doable locally even
+  if not gated in CI.
+- Per-lever rollback — rolling back G2 reverts all 4 motion levers.
+  Acceptable because they're coherent as a "Step 3 motion tune" unit.
+
+Plan §8 table stays above as the rigorous decomposition; §8.1 is the
+actual execution map.
+
 ---
 
 ## 9. Rollout / feature flag strategy
