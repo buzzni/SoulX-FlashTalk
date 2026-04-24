@@ -1,11 +1,13 @@
 /**
- * QueueStatus — running/pending items are clickable and forward task_id to
- * onTaskClick (used by HostStudio to switch to RenderDashboard in attach mode).
+ * QueueStatus — running/pending items navigate to /?attach=:taskId, completed
+ * items navigate to /result/:taskId. Self-contained (no onTaskClick prop);
+ * uses react-router's useNavigate directly.
  *
  * @vitest-environment jsdom
  */
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
 import { render, screen, fireEvent, cleanup, act } from '@testing-library/react';
+import { MemoryRouter, useLocation } from 'react-router-dom';
 
 vi.mock('../api.js', () => ({
   fetchQueue: vi.fn(),
@@ -33,63 +35,70 @@ beforeEach(() => {
   });
 });
 
-async function renderAndExpand(props = {}) {
+// Route spy — renders "LANDED: {location}" so tests can read where QueueStatus
+// navigated to. MemoryRouter's useLocation is read via a sibling <Route> that
+// matches the wildcard and stringifies its location.
+function LocationSpy() {
+  // Exposes current MemoryRouter location to assertions. jsdom's
+  // window.location doesn't sync with MemoryRouter, so we have to read
+  // from the router context.
+  const loc = useLocation();
+  return <div data-testid="landed">LANDED:{loc.pathname}{loc.search}</div>;
+}
+
+async function renderAndExpand() {
   const result = render(
-    <QueueProvider>
-      <QueueStatus {...props} />
-    </QueueProvider>
+    <MemoryRouter initialEntries={["/"]}>
+      <QueueProvider>
+        <QueueStatus />
+        <LocationSpy />
+      </QueueProvider>
+    </MemoryRouter>
   );
   await act(async () => { await Promise.resolve(); });
-  // Click the floating "작업" button to expand
   fireEvent.click(screen.getByTitle('작업 목록 보기'));
   return result;
 }
 
 describe('QueueStatus click-to-navigate', () => {
-  it('calls onTaskClick(taskId) when a running item is clicked', async () => {
-    const onTaskClick = vi.fn();
-    await renderAndExpand({ onTaskClick });
+  it('navigates to /?attach=:taskId when a running item is clicked', async () => {
+    await renderAndExpand();
     fireEvent.click(screen.getByText('running script'));
-    expect(onTaskClick).toHaveBeenCalledWith('run-1');
+    expect(screen.getByTestId('landed').textContent).toBe('LANDED:/?attach=run-1');
   });
 
-  it('calls onTaskClick(taskId) when a pending item is clicked', async () => {
-    const onTaskClick = vi.fn();
-    await renderAndExpand({ onTaskClick });
+  it('navigates to /?attach=:taskId when a pending item is clicked', async () => {
+    await renderAndExpand();
     fireEvent.click(screen.getByText('first pending'));
-    expect(onTaskClick).toHaveBeenCalledWith('pend-1');
+    expect(screen.getByTestId('landed').textContent).toBe('LANDED:/?attach=pend-1');
   });
 
-  it('items are disabled when no onTaskClick handler is supplied', async () => {
-    await renderAndExpand({});
-    const btn = screen.getByText('running script').closest('button');
-    expect(btn.disabled).toBe(true);
-  });
-
-  it('pending row exposes an enabled cancel button that calls cancelQueuedTask', async () => {
+  it('pending rows expose an enabled cancel button that calls cancelQueuedTask', async () => {
     cancelQueuedTask.mockResolvedValue({ message: 'cancelled' });
     vi.spyOn(window, 'confirm').mockReturnValue(true);
 
-    await renderAndExpand({});
+    await renderAndExpand();
+    // Running rows have no cancel button at all (backend can't kill in-flight
+    // jobs, so the button was dead weight). Only the 2 pending rows show it.
     const cancelBtns = screen.getAllByLabelText('작업 취소');
-    // Order: running first (disabled), then 2 pending (enabled)
-    expect(cancelBtns).toHaveLength(3);
-    const [runCancel, firstPendCancel] = cancelBtns;
-    expect(runCancel.disabled).toBe(true);            // running can't be cancelled
-    expect(firstPendCancel.disabled).toBe(false);     // pending CAN
+    expect(cancelBtns).toHaveLength(2);
+    expect(cancelBtns[0].disabled).toBe(false);
 
-    await act(async () => { fireEvent.click(firstPendCancel); await Promise.resolve(); });
+    await act(async () => { fireEvent.click(cancelBtns[0]); await Promise.resolve(); });
     expect(cancelQueuedTask).toHaveBeenCalledWith('pend-1');
   });
 
-  it('cancel button is disabled for running rows (no in-flight cancellation)', async () => {
-    await renderAndExpand({});
+  it('running rows do not render a cancel button', async () => {
+    await renderAndExpand();
+    // One running row ('running script') exists but has no cancel control —
+    // users should not see a disabled X that they can never use.
+    expect(screen.getByText('running script')).toBeTruthy();
     const cancelBtns = screen.getAllByLabelText('작업 취소');
-    expect(cancelBtns[0].disabled).toBe(true);
-    expect(cancelBtns[0].getAttribute('title')).toMatch(/실행 중/);
+    // Only pending rows contribute cancel buttons.
+    expect(cancelBtns).toHaveLength(2);
   });
 
-  it('completed recent items are clickable and forward task_id', async () => {
+  it('completed recent items navigate to /result/:taskId', async () => {
     fetchQueue.mockReset();
     fetchQueue.mockResolvedValue({
       running: [],
@@ -100,14 +109,13 @@ describe('QueueStatus click-to-navigate', () => {
       total_running: 0,
       total_pending: 0,
     });
-    const onTaskClick = vi.fn();
-    await renderAndExpand({ onTaskClick });
+    await renderAndExpand();
 
     const finishedRow = screen.getByText('finished clip').closest('button');
     expect(finishedRow).toBeTruthy();
     expect(finishedRow.getAttribute('title')).toMatch(/결과 영상/);
     fireEvent.click(finishedRow);
-    expect(onTaskClick).toHaveBeenCalledWith('done-1');
+    expect(screen.getByTestId('landed').textContent).toBe('LANDED:/result/done-1');
   });
 
   it('errored recent items are NOT clickable (no result to show)', async () => {
@@ -121,9 +129,8 @@ describe('QueueStatus click-to-navigate', () => {
       total_running: 0,
       total_pending: 0,
     });
-    await renderAndExpand({ onTaskClick: vi.fn() });
+    await renderAndExpand();
 
-    // Errored row renders but as <div>, not <button> — confirm no button wraps it
     const label = screen.getByText('failed clip');
     expect(label.closest('button')).toBeNull();
   });

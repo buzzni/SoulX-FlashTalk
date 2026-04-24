@@ -1,15 +1,17 @@
 // QueueStatus — floating queue badge/panel.
 // Reads from the shared QueueProvider so the queue is fetched once per app
 // regardless of how many components display it (this + RenderDashboard).
+// Navigation is self-contained via react-router:
+//   - completed → /result/:taskId (dedicated result page)
+//   - running/pending → /?attach=:taskId (wizard route w/ attach hint that
+//     HostStudio picks up via useSearchParams)
 import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import Icon from './Icon.jsx';
 import { cancelQueuedTask, humanizeError } from './api.js';
 import { useQueue } from './QueueContext.jsx';
+import { formatTaskTitle } from './taskFormat.js';
 
-const typeLabel = (type) => ({
-  generate: '쇼호스트 영상',
-  conversation: '멀티 대화',
-}[type] || (type || '작업'));
 const statusLabel = (status) => ({
   pending: '대기 중',
   running: '실행 중',
@@ -24,24 +26,33 @@ const formatTime = (isoStr) => {
   return d.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 };
 
-export default function QueueStatus({ onTaskClick }) {
+export default function QueueStatus() {
+  const navigate = useNavigate();
   const { data: queueData, error, refresh } = useQueue();
   const [expanded, setExpanded] = useState(false);
   const [cancellingIds, setCancellingIds] = useState(new Set());
   const [cancelError, setCancelError] = useState(null);
 
-  if (!queueData) return null;
+  // Queue snapshot not loaded yet — keep the button in place so the header
+  // layout doesn't shift, but disable interaction until we have data. Hiding
+  // the button created a visible "it was here a second ago" flicker every
+  // time the header re-mounted.
+  const loading = !queueData;
 
-  // Click handler for live (running/pending) items — jumps the user to the
-  // RenderDashboard for that task. Recent/finished items are not clickable
-  // (would need to re-fetch state to show the played video; out of scope).
-  const handleItemClick = (taskId) => {
-    if (typeof onTaskClick === 'function' && taskId) {
-      onTaskClick(taskId);
-      setExpanded(false);
-    }
+  // Live item click → attach to the running/pending task from the wizard
+  // route. HostStudio reads ?attach= on mount and switches into attach mode.
+  const handleLiveClick = (taskId) => {
+    if (!taskId) return;
+    setExpanded(false);
+    navigate(`/?attach=${encodeURIComponent(taskId)}`);
   };
-  const clickable = typeof onTaskClick === 'function';
+  // Finished task → dedicated result page.
+  const handleRecentClick = (taskId, status) => {
+    if (!taskId) return;
+    setExpanded(false);
+    if (status === 'completed') navigate(`/result/${encodeURIComponent(taskId)}`);
+    // error/cancelled: no clickable target (no video to show)
+  };
 
   const handleCancel = async (taskId, label) => {
     if (!window.confirm(`이 작업을 취소할까요?\n${label || taskId}`)) return;
@@ -57,7 +68,7 @@ export default function QueueStatus({ onTaskClick }) {
     }
   };
 
-  const totalActive = (queueData.total_running || 0) + (queueData.total_pending || 0);
+  const totalActive = queueData ? (queueData.total_running || 0) + (queueData.total_pending || 0) : 0;
 
   const sectionStyle = { marginTop: 10 };
   const sectionHeaderStyle = { fontSize: 11, fontWeight: 600, color: 'var(--text-tertiary)', textTransform: 'uppercase', letterSpacing: 0.04, marginBottom: 6 };
@@ -93,7 +104,7 @@ export default function QueueStatus({ onTaskClick }) {
   const liveItemButtonStyle = {
     ...itemStyle,
     width: '100%',
-    cursor: clickable ? 'pointer' : 'default',
+    cursor: 'pointer',
     color: 'inherit',
     fontFamily: 'inherit',
     fontSize: 12,
@@ -113,33 +124,43 @@ export default function QueueStatus({ onTaskClick }) {
     padding: 0,
   });
 
-  const renderLiveRow = (t, { canCancel, cancelTitle, prefix, rightSlot }) => {
+  const renderLiveRow = (t, { showCancel, cancelTitle, prefix, rightSlot }) => {
     const cancelling = cancellingIds.has(t.task_id);
+    // When the cancel button is hidden (running tasks — backend can't kill
+    // them), drop the grid's second column so the main button fills the row.
+    const wrapperStyle = showCancel
+      ? liveRowWrapperStyle
+      : { marginBottom: 4, minWidth: 0 };
     return (
-      <div key={t.task_id} style={liveRowWrapperStyle}>
+      <div key={t.task_id} style={wrapperStyle}>
         <button
           type="button"
-          onClick={() => handleItemClick(t.task_id)}
-          disabled={!clickable}
-          style={liveItemButtonStyle}
-          title={clickable ? '클릭하면 진행 화면으로 이동해요' : undefined}
+          onClick={() => handleLiveClick(t.task_id)}
+          style={{ ...liveItemButtonStyle, width: '100%' }}
+          title="클릭하면 진행 화면으로 이동해요"
         >
           <div style={{ minWidth: 0, overflow: 'hidden' }}>
-            <div style={{ fontWeight: 500 }} className="truncate">{prefix}{typeLabel(t.type)}</div>
-            <div style={{ fontSize: 10, color: 'var(--text-tertiary)' }} className="mono truncate">{t.label || t.task_id.slice(0, 8)}</div>
+            <div style={{ fontWeight: 500 }} className="truncate">
+              {prefix}{formatTaskTitle(t.task_id, t.type)}
+            </div>
+            {t.label && (
+              <div style={{ fontSize: 10, color: 'var(--text-tertiary)' }} className="truncate">{t.label}</div>
+            )}
           </div>
           {rightSlot}
         </button>
-        <button
-          type="button"
-          onClick={(e) => { e.stopPropagation(); if (canCancel && !cancelling) handleCancel(t.task_id, t.label); }}
-          disabled={!canCancel || cancelling}
-          aria-label="작업 취소"
-          title={cancelTitle}
-          style={cancelBtnStyle(canCancel && !cancelling)}
-        >
-          {cancelling ? <span className="spinner" style={{ width: 11, height: 11 }} /> : <Icon name="close" size={11} />}
-        </button>
+        {showCancel && (
+          <button
+            type="button"
+            onClick={(e) => { e.stopPropagation(); if (!cancelling) handleCancel(t.task_id, t.label); }}
+            disabled={cancelling}
+            aria-label="작업 취소"
+            title={cancelTitle}
+            style={cancelBtnStyle(!cancelling)}
+          >
+            {cancelling ? <span className="spinner" style={{ width: 11, height: 11 }} /> : <Icon name="close" size={11} />}
+          </button>
+        )}
       </div>
     );
   };
@@ -151,7 +172,8 @@ export default function QueueStatus({ onTaskClick }) {
   return (
     <div style={{ position: 'relative', display: 'inline-block', zIndex: 45 }}>
       <button
-        onClick={() => setExpanded(e => !e)}
+        onClick={() => { if (!loading) setExpanded(e => !e); }}
+        disabled={loading}
         style={{
           display: 'inline-flex',
           alignItems: 'center',
@@ -163,10 +185,11 @@ export default function QueueStatus({ onTaskClick }) {
           borderRadius: 'var(--r-sm)',
           fontSize: 12,
           fontWeight: 500,
-          cursor: 'pointer',
+          cursor: loading ? 'wait' : 'pointer',
+          opacity: loading ? 0.6 : 1,
           boxShadow: 'var(--shadow-sm)',
         }}
-        title="작업 목록 보기"
+        title={loading ? '작업 목록 불러오는 중…' : '작업 목록 보기'}
       >
         <Icon name="settings" size={12} />
         작업
@@ -218,9 +241,9 @@ export default function QueueStatus({ onTaskClick }) {
               <div style={sectionHeaderStyle}>실행 중</div>
               {queueData.running.map(t => renderLiveRow(t, {
                 // Backend can't kill a task mid-inference (worker is in a sync
-                // FlashTalk/Gemini call) — surface this honestly with a disabled X.
-                canCancel: false,
-                cancelTitle: '실행 중인 작업은 취소할 수 없어요',
+                // FlashTalk/Gemini call) — just hide the cancel button rather
+                // than showing a dead control that always says "can't cancel".
+                showCancel: false,
                 prefix: '',
                 rightSlot: (
                   <div style={{ textAlign: 'right', fontSize: 10, color: 'var(--success)' }}>
@@ -235,7 +258,7 @@ export default function QueueStatus({ onTaskClick }) {
             <div style={sectionStyle}>
               <div style={sectionHeaderStyle}>대기 중 ({queueData.pending.length})</div>
               {queueData.pending.map((t, idx) => renderLiveRow(t, {
-                canCancel: true,
+                showCancel: true,
                 cancelTitle: '대기 중인 작업 취소',
                 prefix: `#${idx + 1} · `,
                 rightSlot: (
@@ -257,13 +280,13 @@ export default function QueueStatus({ onTaskClick }) {
             <div style={sectionStyle}>
               <div style={sectionHeaderStyle}>최근 완료</div>
               {queueData.recent.slice(0, 5).map(t => {
-                // Completed tasks → clickable so users can see the finished
-                // video. Error/cancelled tasks have no result to show.
-                const canOpen = clickable && t.status === 'completed';
+                // Completed tasks → clickable, navigates to /result/:taskId.
+                // Error/cancelled tasks stay static (no result to show).
+                const canOpen = t.status === 'completed';
                 const Wrapper = canOpen ? 'button' : 'div';
                 const wrapperProps = canOpen ? {
                   type: 'button',
-                  onClick: () => handleItemClick(t.task_id),
+                  onClick: () => handleRecentClick(t.task_id, t.status),
                   style: {
                     ...itemStyle,
                     width: '100%',
@@ -278,8 +301,12 @@ export default function QueueStatus({ onTaskClick }) {
                 return (
                   <Wrapper key={t.task_id} {...wrapperProps}>
                     <div style={{ minWidth: 0, overflow: 'hidden' }}>
-                      <div style={{ fontWeight: 500 }} className="truncate">{typeLabel(t.type)}</div>
-                      <div style={{ fontSize: 10, color: 'var(--text-tertiary)' }} className="mono truncate">{t.label || t.task_id.slice(0, 8)}</div>
+                      <div style={{ fontWeight: 500 }} className="truncate">
+                        {formatTaskTitle(t.task_id, t.type)}
+                      </div>
+                      {t.label && (
+                        <div style={{ fontSize: 10, color: 'var(--text-tertiary)' }} className="truncate">{t.label}</div>
+                      )}
                     </div>
                     <div style={{ textAlign: 'right', fontSize: 10, color: t.status === 'error' ? 'var(--danger)' : 'var(--text-tertiary)' }}>
                       {statusLabel(t.status)}
