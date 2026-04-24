@@ -482,16 +482,20 @@ validation fails, show warning inline on the voice-cloner UI and block
 Generate until dismissed (hard gate once calibrated; non-blocking
 warning until then).
 
-- Minimum length (e.g. 30 seconds)
-- Maximum silence ratio (>20% silence → reject)
-- Minimum SNR (simple: RMS over silence threshold)
-- Warn user with actionable copy ("목소리 샘플이 짧아요 — 최소 30초 녹음 권장")
+**PROVISIONAL thresholds (need calibration before any hard gate):**
+- Minimum length: 30 seconds (industry common; NOT validated for ElevenLabs clone specifically)
+- Maximum silence ratio: 20% (eyeballed; real data may show different floor)
+- Minimum SNR: RMS over silence threshold (ratio TBD)
 
-Runs in `modules/audio_validation.py`. Wired into the
-pre-Generate validation hook in `useTTSGeneration.ts` AND surfaced at
-`VoiceCloner.tsx` (UI warning). Non-blocking warning by default; turn
-into hard reject once thresholds are calibrated against real B2B
-customer samples.
+These numbers MUST stay out of operator copy during demo phase. Even
+if V-B warning UI gets rescued from §14.2b's backend-only scope (via
+contingency), copy may not say "30초 이상 권장" as fact — write as
+"이 샘플이 짧을 수 있어요" at most, no number.
+
+Runs in `modules/audio_validation.py`. **In demo phase: backend
+validation + logging only per §14.2b**. No `useTTSGeneration.ts` UI
+hook, no `VoiceCloner.tsx` surface. Post-contract, thresholds
+calibrated against real B2B customer samples; then decide UI.
 
 **Codex #3 — TTS path fragmentation:** TTS runs on TWO endpoints:
 - `/api/elevenlabs/generate` — preview (Step 3 UI "목소리 듣기" button)
@@ -610,11 +614,15 @@ isolated eval attribution).
 
 Realistic execution plan:
 
-| Grouped PR | What lands | Internal commit structure |
+⚠️ **§8.1 contents below are superseded by §14** for demo-phase. §14
+corrects the S3-C target (Step 1 not composite) and clarifies which
+levers actually ship. Kept here as the rigorous decomposition reference.
+
+| Grouped PR | What lands (original draft — see §14 for actual) | Internal commit structure |
 |---|---|---|
-| **G1. step2-trim** | Everything under §3-§5. Backend `modules/step2/*` (trimmed per Option C++) + app.py SSE extension + `api/composite.ts` + `step2/*.tsx` remap + tests per §10 PR #2. | 1 commit per sub-area (backend, api, hooks, UI, tests). |
-| **G2. step3-motion** | §6 in full. S3-0 eval baseline + S3-A audio_lufs sweep + S3-B prompt sweep + S3-C composite-frame preprocessing + S3-D CFG sweep. | 1 commit per lever so `git bisect` still works within the PR. S3-0 commit lands first; each S3-* commit includes an eval manifest (`eval/step3/results/<commit>.json`). |
-| **G3. step3-tts** | §6B in full. V-0 + V-A/B/C/D. | Same commit-per-lever structure. |
+| **G1. step2-trim** | Backend `modules/step2/*` (trimmed per Option C++) + app.py SSE extension + `api/composite.ts` + `step2/*.tsx` remap + tests per §10 PR #2. **No crown UI in demo phase (§14.2).** | 1 commit per sub-area (backend, api, hooks, UI, tests). |
+| **G2. step3-motion** | S3-0 eval baseline + S3-A audio_lufs sweep + S3-B prompt sweep + S3-C **Step 1 reference frame** (not composite — retargeted per §14) + S3-D CFG sweep. | 1 commit per lever. S3-0 first; each S3-* commit includes an eval manifest. |
+| **G3. step3-tts** | V-0 + V-A + V-B **as backend-only validation + logging (no UI warning — see §14.2b)** + V-C param sweep + V-D **scoring logic only, N=1 default (dormant, see §14.2e)**. | Same commit-per-lever structure. |
 
 Persona validation checkpoint happens **between refactor-plan merge and
 G1.** 30-min interview, findings written to `docs/persona-validation.md`
@@ -862,7 +870,7 @@ code-readiness reasons). Actual execution order:
 |---|---|---|---|
 | **🥇 G2** | step3-motion | S3-0 eval + S3-A audio_lufs sweep + S3-B FlashTalk prompt + S3-C Step 1 reference frame + S3-D CFG sweep. All commits in one PR, one-commit-per-lever for bisectability. | 80% of user-visible pain. Demo-blocking if unfixed. |
 | **🥇 G3** | step3-tts | V-0 eval + V-A script preproc + V-B clone gate + V-C param sweep + V-D multi-gen auto-reject. Parallel with G2 (different subsystem). | Other half of 80% pain. |
-| **🥈 G1** | step2-trim | Option C++ scope (§3-§5). Backend `modules/step2/*` trim + app.py SSE extension + frontend remap into `step2/*.tsx` + judge crown. | Lower urgency at 20% pain. Judge crown still ships because 12-candidate scenario makes decision fatigue real. |
+| **🥈 G1** | step2-trim | Option C++ scope (§3-§5). Backend `modules/step2/*` trim + app.py SSE extension + frontend remap into `step2/*.tsx`. **Judge runs as offline batch, no crown UI** (per §14.2a). | Lower urgency at 20% pain. Step 2 B1/B2/B3 prompt fixes are the demo value here. No operator-visible UX added. |
 
 **Dependency reality:**
 - G2 and G3 touch disjoint code (FlashTalk path vs ElevenLabs path).
@@ -871,23 +879,123 @@ code-readiness reasons). Actual execution order:
   current main. Not dependent on G2 or G3, but deliberately scheduled
   after them to preserve focus on demo-critical work.
 
-### 14.2 Demo-phase UI defaults (conservative)
+### 14.2 Demo-phase UI defaults — **all operator-visible UX changes DROPPED**
 
-Since operators don't exist yet (demo evaluation), we cannot calibrate
-UI to them. Ship conservative defaults and revalidate post-contract:
+Correction after user caught inconsistency: the earlier draft kept the
+judge crown based on my inference about 12-candidate decision fatigue,
+but that's exactly the kind of unvalidated UX claim the demo-phase
+principle rejects. Honoring the principle consistently: **no
+operator-visible UX additions in demo phase**. Period.
 
-| Control | Demo-phase default | Revalidate when |
+| Control | Demo-phase | Notes |
 |---|---|---|
-| Judge "★ AI 추천" crown | **Shown** | Real operator data shows pick-winner rate < 50% |
-| Pro 모드 toggle | **Hidden entirely** (backend always Flash) | Volume/cost data justifies Pro escalation |
-| Cost preview | **Hidden** | Operators request it post-contract |
-| Mode selector | **Hidden** | Admin panel (E2 auth track) |
-| Pass progress badge | **Hidden** (no 2-pass anyway) | — |
-| Rate-limit warning banner | **Hidden** (backend enforces silently) | — |
+| Judge "★ AI 추천" crown | ❌ **Not shown** | Judge runs backend-only (see §14.2a) |
+| Pro 모드 toggle | ❌ **Hidden**, always Flash | — |
+| Cost preview | ❌ **Hidden** | — |
+| Mode selector | ❌ **Hidden** | Always "v1" backend-default |
+| Pass progress badge | ❌ **Hidden** | 2-pass removed anyway |
+| Rate-limit warning banner | ❌ **Hidden** | Backend enforces silently |
+| TTS clone quality warning (V-B) | 🟡 **Kept** — see §14.2b | |
 
-The judge crown is the ONE end-user-facing UX addition from step2-rebuild
-that survives. At 12 candidates across 3 iterations, decision fatigue
-is real and the crown's "I'd pick this one" prompt has measurable value.
+### 14.2a Judge runs **offline batch** — data asset, zero runtime cost
+
+Codex correction #2: earlier draft claimed judge was "backend-only" but
+admitted +2-3s latency on every generation. That IS operator-visible
+(longer wait → "TTS 뭐가 이렇게 느려?"), which is exactly the reason
+V-D was demoted to dormant in §14.2e. Applying the filter consistently:
+
+Judge does NOT run during the generation request. Instead, a scheduled
+batch job (`scripts/step2_judge_audit.py`, nightly cron or on-demand)
+reads the last N completed generations from the queue store, fetches
+each's 4 candidate images, and ranks them retrospectively. Output
+written to a separate log `outputs/judge-audit/{date}.json`.
+
+Data collected is the same as inline judge: `(user_pick_seed,
+judge_winner_seed, score_deltas)`. Purpose identical: post-contract,
+if pick-match rate exceeds ~65% we surface the crown UI with real
+backing. Below, judge is dropped entirely.
+
+Runtime latency: zero. Operator-visible change: none. Passes §14.2c
+filter on step 4.
+
+Cost trade-off: the LLM calls still happen, just async. Monthly cost
+identical to inline. If cost matters, sample (e.g. 20% of generations
+audited) rather than running on every one.
+
+### 14.2b V-B clone quality — **validation is backend-only in demo phase**
+
+Codex correction #1: earlier draft kept V-B warning as "protective
+fact" but the plan ALSO said it could block Generate or be dismissed.
+"Block or dismiss" is operator interaction, not a fact display. Fails
+filter step 2 (choice prompt).
+
+Consistent resolution: **V-B ships as backend validation + logging
+only**. No warning UI, no blocking gate.
+
+- `modules/audio_validation.py` runs on every clone request
+- Validation result logged to `outputs/clone-audit/{date}.json`:
+  `{session_id, duration_s, silence_ratio, snr_db, passed: bool}`
+- **If failed**: generation proceeds anyway; the bad clone produces a
+  lower-quality TTS. We accept that residual quality loss in demo phase.
+- **Data value**: post-contract, if correlation is strong between
+  "failed validation" and "operator complained about TTS quality", we
+  introduce the warning UI with real calibration.
+
+Trade-off being made: during demo phase, the user might submit a 10s
+noisy clone, get bad TTS, and blame us. Codex's framing accepts this
+because the alternative (ship UI we haven't calibrated) is worse.
+
+If observed failure rate during demo is high (>30%), emergency
+escalation path: ship warning as read-only text block, no dismiss, no
+block. Not planned — contingency only.
+
+### 14.2c Demo-phase decision filter (apply to every future change)
+
+Explicit test for "does this change count as UX that we're supposed to
+be NOT doing in demo phase?":
+
+1. **Does the operator see a new pixel or interaction?** → candidate UX
+2. **If yes, is it presenting a choice the operator must make?** → UX, DROP
+3. **If yes, is it surfacing a fact the operator needs to know to not
+   produce bad output?** → protective, keep IF copy is factual not
+   choice-framed
+4. **If no pixel/interaction changes, only backend behavior shifts?**
+   → not UX, OK to ship
+
+Every proposed change goes through this filter. `judge crown` failed
+step 2 (it's a choice prompt — "I'd pick this, but you can override").
+`V-B warning` passes because it's step 3 (fact) not step 2 (choice).
+
+### 14.2d All backend quality work is unaffected
+
+Demo-phase principle gates UI, not code. The following all ship as
+planned:
+- S3-A audio_lufs sweep (backend config)
+- S3-B FlashTalk prompt tuning (backend config)
+- S3-C Step 1 reference frame regen with closed-mouth hint (backend, invisible)
+- S3-D CFG sweep (backend config)
+- V-A script preprocessing (silent input transform)
+- V-C param sweep (backend config)
+- V-D multi-gen auto-reject (backend; only user-visible effect is 3× longer generation time — see §14.2e)
+- Option C++ step2-trim prompt rewrite (backend prompt + judge + policy, all backend-only)
+
+### 14.2e V-D latency side-effect
+
+V-D (multi-gen N=3 with auto-reject) is backend logic but has a
+user-visible side-effect: TTS generation wall-clock roughly triples.
+This violates step 4 of the §14.2c filter ("no pixel/interaction
+changes") because operators will perceive "TTS는 왜 이렇게 느려?".
+
+Two mitigations to consider at G3 scope:
+- Keep V-D default N=1 during demo phase (auto-reject doesn't fire),
+  ship only the scoring logic. Flip to N=3 post-contract when latency
+  trade-off is customer-validated.
+- OR ship N=3 with a progress indicator — but that IS UX addition,
+  violates principle. First mitigation preferred.
+
+**Decision:** V-D ships with default `TTS_MULTI_GEN_N=1` in demo
+phase. Scoring module lands but doesn't fire. Flag flipped after
+contract when operator feedback justifies the latency trade.
 
 ### 14.3 Demo-phase eval rubric (scope-reduced from §6.0 / §6B.0)
 
