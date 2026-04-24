@@ -550,15 +550,71 @@ export async function cancelQueuedTask(taskId) {
   return jsonOrThrow(res, '작업 취소');
 }
 
-// SSE subscription. Returns unsubscribe fn.
+// Poll-based progress subscription. Returns unsubscribe fn.
+//
+// History: we used to use EventSource (SSE) at /api/progress/{task_id}, and
+// the backend still serves that — but some client environments silently block
+// EventSource (certain browser extensions, corporate proxies, stuck HTTP/1.1
+// connection pools) while allowing ordinary fetch. In those environments the
+// render dashboard froze at the initial placeholder forever because no SSE
+// frame ever arrived. Polling /api/tasks/{id}/state every ~1.5s works
+// everywhere and the bandwidth cost is negligible (one small JSON per tick).
+//
+// Contract: emits `onUpdate({stage, progress, message, video_url?})` whenever
+// the snapshot changes; emits `onUpdate({error: true})` after enough
+// consecutive fetch failures. `progress` is normalised to match the SSE event
+// shape so the caller (RenderDashboard) doesn't need a second code path.
+const PROGRESS_POLL_MS = 1500;
+const PROGRESS_MAX_CONSECUTIVE_ERRORS = 8;  // ~12s of downtime before giving up
+
 export function subscribeProgress(taskId, onUpdate) {
-  const es = new EventSource(`${API_BASE}/api/progress/${taskId}`);
-  es.onmessage = (e) => {
-    try { onUpdate(JSON.parse(e.data)); } catch { onUpdate({ raw: e.data }); }
+  const url = `${API_BASE}/api/tasks/${taskId}/state`;
+  let cancelled = false;
+  let consecutiveErrors = 0;
+  let timer = null;
+  let lastSignature = null;  // "stage|progress|message" — skip onUpdate if unchanged
+
+  const tick = async () => {
+    if (cancelled) return;
+    try {
+      const res = await fetch(url, { cache: 'no-store' });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const snapshot = await res.json();
+      consecutiveErrors = 0;
+
+      const sig = `${snapshot.stage}|${snapshot.progress}|${snapshot.message}`;
+      if (sig !== lastSignature) {
+        lastSignature = sig;
+        onUpdate({
+          stage: snapshot.stage,
+          progress: snapshot.progress,
+          message: snapshot.message,
+          // Terminal stages need to propagate through the same paths the SSE
+          // handler used — keep field names aligned.
+          video_url: snapshot.output_path ? undefined : undefined,
+        });
+      }
+      // Stop polling on terminal stages to avoid pointless traffic. The
+      // caller's onUpdate handler navigates away on "complete" / shows
+      // error UI on "error".
+      if (snapshot.stage === 'complete' || snapshot.stage === 'error') {
+        cancelled = true;
+        return;
+      }
+    } catch (_err) {
+      consecutiveErrors += 1;
+      if (consecutiveErrors >= PROGRESS_MAX_CONSECUTIVE_ERRORS) {
+        onUpdate({ error: true });
+        cancelled = true;
+        return;
+      }
+    }
+    if (!cancelled) timer = setTimeout(tick, PROGRESS_POLL_MS);
   };
-  es.onerror = () => {
-    onUpdate({ error: true });
-    es.close();
+
+  tick();  // fire immediately so first render shows real state
+  return () => {
+    cancelled = true;
+    if (timer) clearTimeout(timer);
   };
-  return () => es.close();
 }
