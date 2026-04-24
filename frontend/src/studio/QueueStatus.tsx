@@ -6,8 +6,7 @@
  * network traffic when unmounted without any Provider plumbing.
  *
  * Navigation is self-contained via react-router:
- *   - running/pending → `/?attach=:taskId` (HostStudio picks up
- *     `?attach=` via useSearchParams and flips into attach mode)
+ *   - running/pending → `/render/:taskId` (attach-mode dashboard)
  *   - completed → `/result/:taskId` (dedicated result page)
  *   - error/cancelled → no target (no video to show)
  *
@@ -39,7 +38,7 @@ export default function QueueStatus() {
   const handleOpenLive = (taskId: string) => {
     if (!taskId) return;
     setExpanded(false);
-    navigate(`/?attach=${encodeURIComponent(taskId)}`);
+    navigate(`/render/${encodeURIComponent(taskId)}`);
   };
 
   const handleOpenRecent = (taskId: string, status: string) => {

@@ -1,7 +1,7 @@
 /**
- * QueueStatus — running/pending items navigate to /?attach=:taskId, completed
- * items navigate to /result/:taskId. Self-contained (no onTaskClick prop);
- * uses react-router's useNavigate directly.
+ * QueueStatus — running/pending items navigate to /render/:taskId (attach-mode
+ * dashboard), completed items navigate to /result/:taskId. Self-contained
+ * (no onTaskClick prop); uses react-router's useNavigate directly.
  *
  * @vitest-environment jsdom
  */
@@ -66,16 +66,16 @@ async function renderAndExpand() {
 }
 
 describe('QueueStatus click-to-navigate', () => {
-  it('navigates to /?attach=:taskId when a running item is clicked', async () => {
+  it('navigates to /render/:taskId when a running item is clicked', async () => {
     await renderAndExpand();
     fireEvent.click(screen.getByText('running script'));
-    expect(screen.getByTestId('landed').textContent).toBe('LANDED:/?attach=run-1');
+    expect(screen.getByTestId('landed').textContent).toBe('LANDED:/render/run-1');
   });
 
-  it('navigates to /?attach=:taskId when a pending item is clicked', async () => {
+  it('navigates to /render/:taskId when a pending item is clicked', async () => {
     await renderAndExpand();
     fireEvent.click(screen.getByText('first pending'));
-    expect(screen.getByTestId('landed').textContent).toBe('LANDED:/?attach=pend-1');
+    expect(screen.getByTestId('landed').textContent).toBe('LANDED:/render/pend-1');
   });
 
   it('pending rows expose an enabled cancel button that calls cancelQueuedTask', async () => {

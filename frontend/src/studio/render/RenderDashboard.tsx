@@ -82,13 +82,17 @@ export default function RenderDashboard({
           return;
         }
         setTaskId(id);
+        // Promote the URL from /render → /render/:taskId so refresh
+        // survives and the task is permalink-able. `replace: true` so
+        // the back button skips the transient dispatch URL.
+        navigate(`/render/${id}`, { replace: true });
       } catch (err) {
         // eslint-disable-next-line no-console
         console.error('render dispatch failed', err);
         setDispatchError(humanizeError(err));
       }
     })();
-  }, [attachToTaskId, state]);
+  }, [attachToTaskId, state, navigate]);
 
   // ── Attach mode: if the task already finished before we attached,
   //    redirect to /result. Terminal errors surface as dispatchError so

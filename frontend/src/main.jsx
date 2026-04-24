@@ -9,7 +9,7 @@ import './index.css'
 import './studio/styles/tokens.css'
 import './studio/styles/app.css'
 import './studio/styles/tailwind.css'
-import App from './App.jsx'
+import App from './App'
 
 createRoot(document.getElementById('root')).render(
   <StrictMode>
