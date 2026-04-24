@@ -61,7 +61,7 @@ app.add_middleware(ApiKeyAuth)
 app.add_middleware(ContentLengthLimit)
 
 # Create directories
-for d in [config.UPLOADS_DIR, config.OUTPUTS_DIR, config.TEMP_DIR, config.EXAMPLES_DIR, config.HOSTS_DIR]:
+for d in [config.UPLOADS_DIR, config.OUTPUTS_DIR, config.TEMP_DIR, config.EXAMPLES_DIR, config.HOSTS_DIR, config.RESULTS_DIR]:
     os.makedirs(d, exist_ok=True)
 
 # Mount static files (UPLOADS only — NOT PROJECT_ROOT; Phase 0 Critical #1)
@@ -340,6 +340,22 @@ def _ensure_multitalk_pipeline(cpu_offload: bool):
 # Video Generation (async)
 # ========================================
 
+def _write_result_manifest(task_id: str, manifest: dict) -> str:
+    """Persist a per-task result manifest to outputs/results/{task_id}.json.
+
+    Called on successful render — the manifest is the source of truth for the
+    frontend /result/:taskId page. Unlike the task queue (which trims to the
+    last 20 entries), manifests live forever so old completions remain viewable.
+    """
+    os.makedirs(config.RESULTS_DIR, exist_ok=True)
+    path = os.path.join(config.RESULTS_DIR, f"{task_id}.json")
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(manifest, f, ensure_ascii=False, indent=2)
+    os.replace(tmp, path)
+    return path
+
+
 async def generate_video_task(
     task_id: str,
     host_image: str,
@@ -352,9 +368,20 @@ async def generate_video_task(
     resolution: str = "1280x720",
     scene_prompt: str = "",
     reference_image_paths: list = None,
+    meta: Optional[dict] = None,
 ):
     """Run SoulX-FlashTalk video generation in background"""
     global pipeline, pipeline_lock
+
+    # `task_states` is in-memory (module-level dict) and is wiped on backend
+    # restart. The persisted queue survives the restart and `_recover_interrupted`
+    # flips any in-flight entry back to "pending", so the worker picks it up
+    # again here — but without a task_states row every update_task() call is a
+    # silent no-op and the SSE endpoint returns 404. Initialize on pickup if
+    # missing; keep the existing row (including prior "queued" update) when
+    # the task was dispatched in this process lifetime.
+    if task_id not in task_states:
+        create_task(task_id)
 
     start_time = time.time()
 
@@ -448,6 +475,22 @@ async def generate_video_task(
 
                 human_speech_array_all, _ = librosa.load(audio_path, sr=sample_rate, mono=True)
 
+                # Pre-attenuate to target LUFS. FlashTalk's internal
+                # loudness_norm() targets -23 LUFS; lowering below that reduces
+                # lip openness because the audio envelope drives the mouth
+                # motion. Conversation path does the same (see
+                # modules/conversation_generator.py); this keeps single-host
+                # behavior aligned.
+                target_lufs = config.FLASHTALK_OPTIONS.get("audio_lufs", -23)
+                if target_lufs < -23:
+                    attenuation_db = target_lufs - (-23)  # negative
+                    attenuation_linear = 10.0 ** (attenuation_db / 20.0)
+                    human_speech_array_all = human_speech_array_all * attenuation_linear
+                    logger.info(
+                        f"Audio pre-attenuated by {attenuation_db:.1f}dB "
+                        f"(target LUFS: {target_lufs})"
+                    )
+
                 audio_encode_mode = config.FLASHTALK_OPTIONS.get("audio_encode_mode", "stream")
                 generated_list = []
 
@@ -464,13 +507,23 @@ async def generate_video_task(
                     chunks = [audio_embedding_all[:, i * slice_len: i * slice_len + frame_num].contiguous()
                               for i in range((audio_embedding_all.shape[1] - frame_num) // slice_len)]
 
+                    total = len(chunks)
                     for idx, chunk in enumerate(chunks):
                         torch.cuda.synchronize()
                         video = run_pipeline(pipeline, chunk)
                         if idx != 0:
                             video = video[motion_frames_num:]
                         generated_list.append(video.cpu())
-                        logger.info(f"Chunk {idx}/{len(chunks)} done")
+                        logger.info(f"Chunk {idx}/{total} done")
+                        # Per-chunk progress: scale 0.3 → 0.9 linearly across chunks.
+                        # Without this the UI freezes at 30% for the full inference
+                        # window (~60-90s/chunk × 45 chunks = 45+ min for a typical
+                        # script), making a healthy job look hung.
+                        update_task(
+                            task_id, "generating",
+                            0.3 + 0.6 * (idx + 1) / total,
+                            f"쇼호스트 움직임 만드는 중 ({idx + 1}/{total})",
+                        )
 
                 else:  # stream
                     human_speech_array_slice_len = slice_len * sample_rate // tgt_fps
@@ -487,6 +540,7 @@ async def generate_video_task(
 
                     slices = human_speech_array_all.reshape(-1, human_speech_array_slice_len)
 
+                    total = len(slices)
                     for idx, audio_slice in enumerate(slices):
                         audio_dq.extend(audio_slice.tolist())
                         audio_array = np.array(audio_dq)
@@ -496,7 +550,13 @@ async def generate_video_task(
                         video = run_pipeline(pipeline, audio_embedding)
                         video = video[motion_frames_num:]
                         generated_list.append(video.cpu())
-                        logger.info(f"Chunk {idx}/{len(slices)} done")
+                        logger.info(f"Chunk {idx}/{total} done")
+                        # Per-chunk progress (see 'once' branch above for rationale).
+                        update_task(
+                            task_id, "generating",
+                            0.3 + 0.6 * (idx + 1) / total,
+                            f"쇼호스트 움직임 만드는 중 ({idx + 1}/{total})",
+                        )
 
                 return generated_list, tgt_fps
 
@@ -533,6 +593,44 @@ async def generate_video_task(
             task_states[task_id]["output_path"] = output_path
             generation_time = time.time() - start_time
             add_to_history(task_id, script_text, host_image, audio_source_label, output_path, generation_time)
+
+            # Result manifest — source of truth for the frontend /result/:taskId
+            # page. Kept separate from task_queue.json because the queue trims
+            # to the last 20 entries (we want completed renders viewable
+            # forever). Captures both sides: the backend payload actually used
+            # (resolution AFTER 16× snap, file stats, seed, output path) AND
+            # the client snapshot (`meta`) when one was attached at dispatch.
+            try:
+                video_bytes = os.path.getsize(output_path) if os.path.exists(output_path) else 0
+                _write_result_manifest(task_id, {
+                    "task_id": task_id,
+                    "type": "generate",
+                    "status": "completed",
+                    "completed_at": datetime.now().isoformat(),
+                    "generation_time_sec": round(generation_time, 2),
+                    "video_url": f"/api/videos/{task_id}",
+                    "video_path": output_path,
+                    "video_bytes": video_bytes,
+                    "video_filename": os.path.basename(output_path),
+                    "params": {
+                        "host_image": host_image,
+                        "audio_path": audio_path,
+                        "audio_source_label": audio_source_label,
+                        "prompt": prompt,
+                        "seed": seed,
+                        "cpu_offload": cpu_offload,
+                        "script_text": script_text,
+                        "resolution_requested": resolution,
+                        "resolution_actual": f"{target_h}x{target_w}",
+                        "scene_prompt": scene_prompt,
+                        "reference_image_paths": reference_image_paths or [],
+                    },
+                    "meta": meta,
+                })
+            except Exception as e:
+                # Never fail the task because the manifest write failed; log
+                # and move on — the video itself already landed on disk.
+                logger.warning(f"Task {task_id}: manifest write failed: {e}")
 
             update_task(task_id, "complete", 1.0, f"비디오 생성 완료! ({generation_time:.1f}초)")
             logger.info(f"Task {task_id} completed: {output_path}")
@@ -596,6 +694,7 @@ async def _queue_generate_handler(task_id: str, **params):
         resolution=params.get("resolution", "1280x720"),
         scene_prompt=params.get("scene_prompt", ""),
         reference_image_paths=params.get("reference_image_paths"),
+        meta=params.get("meta"),
     )
 
 
@@ -1231,6 +1330,28 @@ async def progress_stream(task_id: str):
     return StreamingResponse(_progress_event_generator(task_id), media_type="text/event-stream")
 
 
+@app.get("/api/tasks/{task_id}/state")
+async def task_state_snapshot(task_id: str):
+    """Plain-JSON snapshot of current task state — polling alternative to the
+    SSE endpoint above. Exists because some client environments (certain
+    browser extensions, corporate proxies, weird connection-pool states) block
+    EventSource while allowing ordinary fetch requests, leaving the render
+    dashboard permanently stuck at the placeholder 0%. The polling path uses
+    this endpoint; SSE stays in place for clients that can use it.
+    """
+    state = task_states.get(task_id)
+    if not state:
+        raise HTTPException(status_code=404, detail="Task not found")
+    return {
+        "task_id": task_id,
+        "stage": state.get("stage"),
+        "progress": state.get("progress"),
+        "message": state.get("message"),
+        "error": state.get("error"),
+        "output_path": state.get("output_path"),
+    }
+
+
 @app.api_route("/api/videos/{task_id}", methods=["GET", "HEAD"])
 async def get_video(task_id: str, download: bool = False):
     """Serve generated video. HEAD returns headers only (used by the
@@ -1277,6 +1398,12 @@ async def generate_conversation_task(
 ):
     """Run multi-agent conversation video generation in background."""
     global pipeline, pipeline_lock
+
+    # See generate_video_task for rationale: recovered tasks have no
+    # task_states row after a backend restart, so update_task() silently
+    # no-ops unless we re-init here.
+    if task_id not in task_states:
+        create_task(task_id)
 
     start_time = time.time()
 
@@ -1584,6 +1711,109 @@ async def cancel_queued_task(task_id: str):
     if task_id in task_states:
         set_task_error(task_id, "사용자가 작업을 취소했습니다")
     return {"message": "Task cancelled", "task_id": task_id}
+
+
+def _synthesize_result_from_queue(entry: dict) -> dict:
+    """Build a result manifest on the fly from a task_queue entry.
+
+    Used as a fallback for completed tasks that predate the manifest writer —
+    their outputs/results/{task_id}.json doesn't exist, but we still have
+    their params (and possibly meta) in task_queue.json. Synthesized
+    manifests mirror the schema of real ones so the frontend doesn't need
+    a separate code path.
+    """
+    task_id = entry["task_id"]
+    params = entry.get("params", {}) or {}
+    meta = params.get("meta")
+
+    # Best effort — find the output file by scanning OUTPUTS_DIR for the
+    # {task_id[:8]} suffix the writer uses. Missing file is fine, just 0.
+    video_path = None
+    video_bytes = 0
+    try:
+        short = task_id[:8]
+        for name in os.listdir(config.OUTPUTS_DIR):
+            if name.endswith(".mp4") and short in name:
+                p = os.path.join(config.OUTPUTS_DIR, name)
+                if os.path.isfile(p):
+                    video_path = p
+                    video_bytes = os.path.getsize(p)
+                    break
+    except Exception:
+        pass
+
+    # generation_time from queue timestamps when both are present
+    gen_sec = None
+    try:
+        if entry.get("started_at") and entry.get("completed_at"):
+            from datetime import datetime as _dt
+            s = _dt.fromisoformat(entry["started_at"])
+            c = _dt.fromisoformat(entry["completed_at"])
+            gen_sec = round((c - s).total_seconds(), 2)
+    except Exception:
+        pass
+
+    return {
+        "task_id": task_id,
+        "type": entry.get("type", "generate"),
+        "status": entry.get("status", "completed"),
+        "created_at": entry.get("created_at"),
+        "started_at": entry.get("started_at"),
+        "completed_at": entry.get("completed_at"),
+        "generation_time_sec": gen_sec,
+        "video_url": f"/api/videos/{task_id}",
+        "video_path": video_path,
+        "video_bytes": video_bytes,
+        "video_filename": os.path.basename(video_path) if video_path else None,
+        # No resolution_actual — the snap wasn't recorded for pre-manifest
+        # tasks. Frontend treats missing fields as "—".
+        "params": {
+            "host_image": params.get("host_image"),
+            "audio_path": params.get("audio_path"),
+            "audio_source_label": params.get("audio_source_label"),
+            "prompt": params.get("prompt"),
+            "seed": params.get("seed"),
+            "cpu_offload": params.get("cpu_offload"),
+            "script_text": params.get("script_text", ""),
+            "resolution_requested": params.get("resolution"),
+            "resolution_actual": None,
+            "scene_prompt": params.get("scene_prompt", ""),
+            "reference_image_paths": params.get("reference_image_paths", []),
+        },
+        "meta": meta,
+        "error": entry.get("error"),
+        "synthesized": True,
+    }
+
+
+@app.get("/api/results/{task_id}")
+async def get_result(task_id: str):
+    """Return the result manifest for a completed task.
+
+    Reads outputs/results/{task_id}.json when present (written by the worker
+    at completion). Falls back to synthesizing from task_queue.json so
+    pre-manifest tasks remain viewable in the frontend /result/:taskId page.
+    """
+    # Path-traversal guard — task_id is user-supplied in the URL.
+    if not task_id or "/" in task_id or "\\" in task_id or ".." in task_id:
+        raise HTTPException(status_code=400, detail="Invalid task_id")
+
+    manifest_path = os.path.join(config.RESULTS_DIR, f"{task_id}.json")
+    if os.path.exists(manifest_path):
+        try:
+            with open(manifest_path, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception as e:
+            logger.warning(f"Failed to read manifest for {task_id}: {e}")
+
+    # Fallback: scan task_queue for this id
+    status = await task_queue.get_status()
+    for bucket in ("running", "pending", "recent"):
+        for entry in status.get(bucket, []):
+            if entry.get("task_id") == task_id:
+                return _synthesize_result_from_queue(entry)
+
+    raise HTTPException(status_code=404, detail=f"Result for task {task_id} not found")
 
 
 @app.get("/api/files/{filename:path}")

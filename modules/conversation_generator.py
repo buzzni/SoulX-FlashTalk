@@ -59,8 +59,14 @@ def generate_turn_video(
     prompt: str,
     seed: int,
     resolution: str = "1280x720",
+    progress_callback: Optional[Callable[[float, str], None]] = None,
 ) -> str:
-    """Generate lip-sync video for a single turn using FlashTalk."""
+    """Generate lip-sync video for a single turn using FlashTalk.
+
+    progress_callback(frac, message) — invoked after each chunk with `frac` in
+    [0, 1] covering the turn's chunk loop only. Callers map this into the
+    overall job progress range (see generate_conversation).
+    """
     import numpy as np
     import librosa
     import torch
@@ -122,6 +128,7 @@ def generate_turn_video(
     slices = human_speech_array_all.reshape(-1, human_speech_array_slice_len)
     generated_list = []
 
+    total = len(slices)
     for idx, audio_slice in enumerate(slices):
         audio_dq.extend(audio_slice.tolist())
         audio_array = np.array(audio_dq)
@@ -131,7 +138,9 @@ def generate_turn_video(
         video = run_pipeline(pipeline, audio_embedding)
         video = video[motion_frames_num:]
         generated_list.append(video.cpu())
-        logger.info(f"  Turn chunk {idx}/{len(slices)} done")
+        logger.info(f"  Turn chunk {idx}/{total} done")
+        if progress_callback:
+            progress_callback((idx + 1) / total, f"쇼호스트 움직임 만드는 중 ({idx + 1}/{total})")
 
     # Save video
     filename = f"turn_{agent.id}_{uuid.uuid4().hex[:8]}.mp4"
@@ -298,9 +307,26 @@ def generate_conversation(
                 f"턴 {i+1}/{total_turns}: {agent.name} 비디오 생성 중..."
             )
 
+        # Per-chunk progress inside the turn's video generation, mapped to the
+        # second half of this turn's slice of the overall range (TTS occupies
+        # the first half). Without this the bar would freeze at the turn-start
+        # value for the entire FlashTalk inference — usually the longest phase.
+        def _video_chunk_cb(frac: float, msg: str, _i=i) -> None:
+            if not progress_callback:
+                return
+            turn_start = 0.1 + ((_i + 0.5) / total_turns) * 0.8
+            turn_end = 0.1 + ((_i + 1.0) / total_turns) * 0.8
+            scaled = turn_start + (turn_end - turn_start) * frac
+            progress_callback(
+                f"turn_{_i+1}_video",
+                scaled,
+                f"턴 {_i+1}/{total_turns}: {msg}",
+            )
+
         # Generate lip-sync video (use per-agent prompt if set)
         video_path = generate_turn_video(
-            pipeline, agent, audio_path, output_dir, agent_prompt, seed, resolution
+            pipeline, agent, audio_path, output_dir, agent_prompt, seed, resolution,
+            progress_callback=_video_chunk_cb,
         )
         logger.info(f"Turn {i+1}/{total_turns}: Video done for {agent.name}")
 
