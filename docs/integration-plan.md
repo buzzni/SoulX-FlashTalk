@@ -113,6 +113,12 @@ start using the tool.
 
 ### 3.3 Remap into refactor-plan's decomposed structure
 
+⚠️ **§14 supersedes this section for demo phase.** Table below describes
+the Option C++ UI remap AS ORIGINALLY DRAFTED; §14.2 drops every
+operator-visible row (Pro badge, judge crown). In demo phase only the
+backend changes + silent `api/composite.ts` step2Mode/proMode field
+wiring ship. The UI remap table below applies post-contract.
+
 refactor-plan's `frontend/src/studio/step2/` layout:
 - `Step2Composite.tsx` (container, 285 LOC)
 - `ProductList.tsx`
@@ -198,6 +204,15 @@ surface is:
   pytest. ~3-4 hours.
 
 **Revised total: 1.5-2 days** for merge + verification, not half-day.
+
+**Demo-phase adjustment (§14):** frontend work drops to minimal (remove
+lines about Pro toggle chip, judge crown rendering, streamState UI
+consumption). Remaining frontend = `api/composite.ts` silent field
+wiring (~30 min), extend `useCompositeGeneration.ts` to consume new
+SSE events internally for telemetry only (~1 hour), no step2/*.tsx
+changes. Frontend effort drops from ~5 hours to ~1.5 hours.
+Revised demo-phase G1 total: **~1 day** (backend + tests + minimal
+frontend field wiring).
 
 Break into 2 sub-PRs to keep each reviewable:
 - **PR #2a:** backend (modules/step2/*, app.py SSE extension) — mergeable
@@ -475,12 +490,16 @@ New module `modules/tts_preproc.py`. Feature flag
 stages a file; the ElevenLabs clone call fires on "Generate." So
 "upload gate" language was wrong. Correct framing:
 
-Validate at the **post-upload, pre-Generate** step (file-staging), not
-at file-select. The operator uploads → file sits in state → operator
-hits Generate → validation runs before the ElevenLabs API call. If
-validation fails, show warning inline on the voice-cloner UI and block
-Generate until dismissed (hard gate once calibrated; non-blocking
-warning until then).
+**DEMO PHASE: backend-only per §14.2b.** Validation runs server-side
+before ElevenLabs clone call. Result logged to `outputs/clone-audit/`,
+does NOT surface as UI warning, does NOT block Generate. Operator
+sees no change; we accept the quality risk as the cost of not
+shipping uncalibrated UI copy.
+
+Post-contract path (for reference, NOT in demo scope): validation
+runs at pre-Generate step, if it fails show warning inline on the
+voice-cloner UI, non-blocking until thresholds calibrated against
+real samples, then hard-gate.
 
 **PROVISIONAL thresholds (need calibration before any hard gate):**
 - Minimum length: 30 seconds (industry common; NOT validated for ElevenLabs clone specifically)
@@ -581,6 +600,13 @@ Gated on E2 (auth + user-scoping) from `REFACTOR_PLAN.md §Decisions #11`. Admin
 ---
 
 ## 8. Sequence / PR plan
+
+⚠️ **§14 supersedes this entire section for execution order.** Table
+below is the original draft (pre customer-context discovery); it
+still has the persona validation checkpoint row and the "G2/G3 after
+G1" dependency that §14 inverted. Kept for change-history reference
+only.
+
 
 | PR | Branch | Base | Contents | Merge criteria |
 |---|---|---|---|---|
@@ -687,6 +713,11 @@ Add unit tests for the parser at introduction time. Not per-flag.
 ---
 
 ## 10. Test coverage additions
+
+⚠️ **Test specs below written against the pre-§14 plan.** Several
+assertions assume UI elements that §14.2 drops (judge crown, Pro
+toggle, V-B warning surface). Demo-phase test scope is narrower —
+see §14.7 below for the actual demo-phase test set.
 
 Each PR in §8 lands with tests matching the coverage diagram §3 produced.
 Requirements per PR, in plan order:
@@ -1026,6 +1057,42 @@ Dropped entirely. §8 sequence table's row labeled "Persona validation
 checkpoint" is no longer a gate. The R8 risk (persona assumption) is
 retained but accepted — conservative UI defaults in §14.2 are the
 mitigation.
+
+### 14.7 Demo-phase test scope (supersedes §10 for demo PRs)
+
+Since demo phase drops all operator-visible UX additions, many §10
+test specs no longer apply. Demo-phase test scope collapses to:
+
+**G1 step2-trim tests:**
+- `tests/test_step2_mode_plumbing.py` — pytest, step2Mode form field
+  accepted, default = "v1" (keep per §10)
+- `tests/test_step2_v1_prompt_output.py` — new test, assert v1 prompt
+  produces expected scene structure on 3 fixture inputs (keep)
+- ❌ `step2_judge_crown.test.jsx` — drop, no crown in demo
+- ❌ `frontend/e2e/step2-pro-toggle.spec.ts` — drop, no toggle in demo
+- ❌ `tests/integration/test_step2_remap.py` snapshot — narrow to only
+  the backend fields (step2Mode wiring). UI snapshot is unnecessary
+  because UI doesn't change from refactor-plan.
+- `scripts/step2_judge_audit.py` — standalone batch script, smoke
+  test that runs against last N queue entries without crashing.
+
+**G2 step3-motion tests:**
+- `tests/test_audio_preproc.py` (if S3-A compressor ships) (keep)
+- Eval rubric fixture assertions (keep, §14.3)
+- `tests/test_multitalk_prompt_injection.py` renamed to
+  `tests/test_flashtalk_prompt_injection.py` (fix per §6.baseline)
+
+**G3 step3-tts tests:**
+- `tests/test_tts_preproc.py` V-A script normalization (keep)
+- `tests/test_audio_validation.py` V-B backend validation (keep but
+  assert NO UI side effect)
+- ❌ `frontend/e2e/voice-cloner-quality-gate.spec.ts` — drop, no UI
+  warning in demo
+- `tests/test_tts_param_parity.py` parametrized across preview +
+  final paths (keep per Codex #3)
+- ❌ `tests/test_multi_gen_reject.py` — narrow: test the scoring
+  function in isolation with N=1 default. Don't test N=3 rejection
+  path since it's dormant.
 
 ### 14.6 Admin panel (E2 auth) unlocks all the deferred UI
 
