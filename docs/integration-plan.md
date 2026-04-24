@@ -302,21 +302,26 @@ Sweep design: baseline vs {prompt_v2, prompt_v3, neg_v2, prompt_v2+neg_v2}.
 pipeline exposes override path — verify; falls back to pipeline default
 if not).
 
-### 6.3 S3-C: reference frame preprocessing — Step 1 first, Step 2 later
+### 6.3 S3-C: DROPPED
 
-Originally targeted the post-Step-2 composite frame per Codex finding
-#5. Retargeted after §14 reordering: step2-trim ships LAST, so S3-C
-cannot depend on step2 code changes in its first iteration.
+Earlier drafts proposed preprocessing the reference frame (Step 1 or
+post-composite) to have a closed-mouth pose, arguing diffusion
+talking-head models amplify the reference's pose characteristics.
 
-**Revised (G2 scope):** apply at Step 1 reference frame. Detect mouth
-aperture on Step 1 candidates (MediaPipe face mesh). If open >
-threshold, regenerate with "closed mouth, neutral expression" prompt
-addition. Yes — Step 2 composite may "overwrite" this (Codex correction),
-but at 20% pain distribution the residual loss is acceptable.
+**Reconsidered:** FlashTalk is audio-driven. Mouth aperture in the
+animated output tracks audio energy + model's training distribution
++ CFG guidance. The reference frame's initial pose has weak secondary
+influence at best. The real levers for Step 3 over-articulation are
+already in plan at S3-A (audio energy), S3-B (prompt), S3-D (CFG) —
+all direct causes.
 
-**Deferred follow-up (post-G1 step2-trim):** extend the same check to
-the selected composite, with an operator hint "선택한 이미지의 입이
-열려 있어요, 움직임이 과해질 수 있어요". Tracked as a §13 non-goal.
+S3-C as a "Step 1 fix for a Step 3 problem" was reaching. Dropped
+entirely from G2. G2 scope now: **S3-0 eval baseline + S3-A + S3-B +
+S3-D** (four items, not five).
+
+Reference-frame experiments can return if S3-A/B/D hit a ceiling and
+we have measurement data showing reference-pose influence matters.
+Until then, not a lever.
 
 ### 6.4 S3-D: CFG scale sweep (FlashTalk)
 
@@ -341,15 +346,18 @@ signal strength regardless of count.
 Establishes:
 
 - **6-8 input fixtures** in `eval/step3/fixtures/` (not 20):
-  - Prioritize **real B2B operator submissions** (with permission) over
-    synthetic. 4-6 real samples beats 20 synthetic.
+  - **Demo-phase constraint:** "real B2B customer samples (with
+    permission)" is dropped. Contract not signed — asking the customer
+    for sample recordings is persona-validation-by-another-name, which
+    §14.5 ruled out.
+  - Use **synthetic + existing internal test samples** instead. We
+    (jack + past dev sessions) already have voice recordings + host
+    images lying around from development; use those.
   - Cover 3 known failure modes explicitly: short-script (common
     failure), long-script (rare failure, high value if caught), emotional
     register (mid-severity, non-obvious).
   - Each fixture = `(audio.wav, reference_frame.png, script.txt)` triple.
-  - If <4 real samples available, pad with synthetic targeting the same
-    failure modes — but label them distinctly so we know which are
-    "real-world signal" vs "synthetic probe".
+  - Post-contract, swap in real operator samples and re-baseline.
 - **Baseline renders** at `eval/step3/baseline/`: current `MULTITALK_OPTIONS`
   run through unchanged code, one render per fixture, hash-pinned.
 - **Rubric** in `eval/step3/RUBRIC.md`:
@@ -647,7 +655,7 @@ levers actually ship. Kept here as the rigorous decomposition reference.
 | Grouped PR | What lands (original draft — see §14 for actual) | Internal commit structure |
 |---|---|---|
 | **G1. step2-trim** | Backend `modules/step2/*` (trimmed per Option C++) + app.py SSE extension + `api/composite.ts` + `step2/*.tsx` remap + tests per §10 PR #2. **No crown UI in demo phase (§14.2).** | 1 commit per sub-area (backend, api, hooks, UI, tests). |
-| **G2. step3-motion** | S3-0 eval baseline + S3-A audio_lufs sweep + S3-B prompt sweep + S3-C **Step 1 reference frame** (not composite — retargeted per §14) + S3-D CFG sweep. | 1 commit per lever. S3-0 first; each S3-* commit includes an eval manifest. |
+| **G2. step3-motion** | S3-0 eval baseline + S3-A audio_lufs sweep + S3-B prompt sweep + S3-D CFG sweep. (S3-C dropped — unsound mechanism hypothesis, see §6.3.) | 1 commit per lever. S3-0 first; each S3-* commit includes an eval manifest. |
 | **G3. step3-tts** | V-0 + V-A + V-B **as backend-only validation + logging (no UI warning — see §14.2b)** + V-C param sweep + V-D **scoring logic only, N=1 default (dormant, see §14.2e)**. | Same commit-per-lever structure. |
 
 Persona validation checkpoint happens **between refactor-plan merge and
@@ -899,7 +907,7 @@ code-readiness reasons). Actual execution order:
 
 | Order | PR | Contents | Why first/last |
 |---|---|---|---|
-| **🥇 G2** | step3-motion | S3-0 eval + S3-A audio_lufs sweep + S3-B FlashTalk prompt + S3-C Step 1 reference frame + S3-D CFG sweep. All commits in one PR, one-commit-per-lever for bisectability. | 80% of user-visible pain. Demo-blocking if unfixed. |
+| **🥇 G2** | step3-motion | S3-0 eval + S3-A audio_lufs sweep + S3-B FlashTalk prompt/neg-prompt sweep + S3-D CFG sweep. (S3-C dropped — see §6.3.) One commit per lever. | 80% of user-visible pain. All 3 active levers are direct causes of over-articulation (audio energy, prompt interpretation, CFG strength). |
 | **🥇 G3** | step3-tts | V-0 eval + V-A script preproc + V-B clone gate + V-C param sweep + V-D multi-gen auto-reject. Parallel with G2 (different subsystem). | Other half of 80% pain. |
 | **🥈 G1** | step2-trim | Option C++ scope (§3-§5). Backend `modules/step2/*` trim + app.py SSE extension + frontend remap into `step2/*.tsx`. **Judge runs as offline batch, no crown UI** (per §14.2a). | Lower urgency at 20% pain. Step 2 B1/B2/B3 prompt fixes are the demo value here. No operator-visible UX added. |
 
@@ -999,16 +1007,23 @@ step 2 (it's a choice prompt — "I'd pick this, but you can override").
 
 ### 14.2d All backend quality work is unaffected
 
-Demo-phase principle gates UI, not code. The following all ship as
-planned:
-- S3-A audio_lufs sweep (backend config)
-- S3-B FlashTalk prompt tuning (backend config)
-- S3-C Step 1 reference frame regen with closed-mouth hint (backend, invisible)
-- S3-D CFG sweep (backend config)
-- V-A script preprocessing (silent input transform)
-- V-C param sweep (backend config)
-- V-D multi-gen auto-reject (backend; only user-visible effect is 3× longer generation time — see §14.2e)
-- Option C++ step2-trim prompt rewrite (backend prompt + judge + policy, all backend-only)
+Demo-phase principle gates UI (operator-chosen behavior), not code.
+Backend quality improvements that change output characteristics but
+don't ask the operator to choose anything all ship:
+
+- **S3-A** audio_lufs sweep (backend config, affects output motion) — passes filter step 4
+- **S3-B** FlashTalk prompt + neg_prompt tuning (backend config, affects output motion) — passes step 4
+- **S3-D** CFG sweep (backend config, affects output motion) — passes step 4
+- **V-A** script preprocessing (silent input transform; TTS output has different pause structure so operator may notice "더 끊긴다" — but no choice asked, filter step 2 passes, lands as quality delta)
+- **V-C** ElevenLabs param sweep (backend config, affects TTS output)
+- **V-D** multi-gen scoring logic (ships as code but N=1 default in demo — dormant, no runtime effect; see §14.2e)
+- **Judge** runs as nightly batch (see §14.2a, zero runtime latency)
+- **V-B** clone validation (backend-only logging, see §14.2b)
+- **Option C++ step2-trim** — prompt rewrite + sanitize + spatial-keywords detector + policy resolver + rate limiter + cost tracker all backend. Judge batch above. No frontend UI surface.
+
+Changes explicitly DROPPED (not just hidden):
+- S3-C reference frame regen — unsound mechanism for audio-driven model (§6.3)
+- 2-pass orchestration — anti-pattern for Gemini 3 (§3.2)
 
 ### 14.2e V-D latency side-effect
 
