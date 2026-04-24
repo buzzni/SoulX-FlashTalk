@@ -15,6 +15,8 @@
     "format": "prettier --write \"src/**/*.{js,jsx,ts,tsx,css,json,md}\"",
     "format:check": "prettier --check \"src/**/*.{js,jsx,ts,tsx,css,json,md}\"",
     "gen:types": "openapi-typescript http://localhost:8001/openapi.json -o src/types/generated/api.d.ts",
+    "e2e": "playwright test",
+    "e2e:headed": "playwright test --headed",
     "check": "npm run typecheck && npm run lint && npm run test -- --run"
   },
   "dependencies": {
@@ -25,6 +27,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^9.39.4",
+    "@playwright/test": "^1.59.1",
     "@tailwindcss/vite": "^4.2.4",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.2",
