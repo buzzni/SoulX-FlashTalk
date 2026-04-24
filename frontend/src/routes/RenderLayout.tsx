@@ -10,6 +10,7 @@ import RenderDashboard from '../studio/render/RenderDashboard';
 import QueueStatus from '../studio/QueueStatus';
 import { useWizardStore } from '../stores/wizardStore';
 import { TopBar } from './TopBar';
+import { computeValidity, deepestReachableStep } from './wizardValidation';
 
 interface RenderLayoutProps {
   attachToTaskId?: string | null;
@@ -27,11 +28,16 @@ export default function RenderLayout({ attachToTaskId = null }: RenderLayoutProp
   };
 
   const handleBack = () => {
-    // From the render view the only sensible "back" target is the last
-    // wizard step — the user just came from step 3 for a fresh dispatch,
-    // or they landed here from the queue and we want them to be able to
-    // tweak and re-run. Step 3 respects the URL-as-source-of-truth model.
-    navigate('/step/3');
+    // Navigate to the deepest wizard step the user has actually earned.
+    // Dispatch-from-step-3 case: wizard is fully valid, this lands at
+    // /step/3 as before. Queue-click-attach case: user may have empty
+    // wizard state (e.g. opened /render/:taskId in a fresh session),
+    // in which case /step/3 would just get bounced to /step/1 by the
+    // WizardLayout guard. Computing the deepest reachable step up
+    // front avoids that bounce and matches what the button label
+    // promises — "go back to a place you can actually work from".
+    const valid = computeValidity(state);
+    navigate(`/step/${deepestReachableStep(valid)}`);
   };
 
   return (

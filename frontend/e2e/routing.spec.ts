@@ -138,3 +138,62 @@ test.describe('route guards (with valid wizard state)', () => {
     await expect(page).toHaveURL(/\/step\/2$/);
   });
 });
+
+test.describe('render back button targets the deepest reachable step', () => {
+  test.beforeEach(async ({ page }) => {
+    await mockQueue(page);
+    await page.route('**/api/tasks/*/state', (route) =>
+      route.fulfill({ status: 404, body: 'not found' }),
+    );
+  });
+
+  test('attached user with empty wizard state lands at /step/1 (not bounced through /step/3)', async ({
+    page,
+  }) => {
+    // No seed — wizard state is empty, simulating a user who clicked a
+    // queue item in a fresh session. handleBack used to unconditionally
+    // go to /step/3, which the WizardLayout guard then bounced back to
+    // /step/1. Now it asks deepestReachableStep(valid) up front and
+    // routes straight to /step/1 — no visible bounce, no misleading
+    // "go edit" button label.
+    await page.addInitScript(() => {
+      try {
+        localStorage.clear();
+      } catch {
+        /* ignore */
+      }
+    });
+    await page.goto('/render/bogus-task');
+    await page.getByRole('button', { name: /앞으로 돌아가서 수정/ }).click();
+    await expect(page).toHaveURL(/\/step\/1$/);
+  });
+
+  test('attached user with full wizard state lands at /step/3', async ({ page }) => {
+    // Seed a fully-valid wizard so deepestReachableStep returns 3.
+    await page.addInitScript(() => {
+      try {
+        localStorage.clear();
+        const state = {
+          host: { generated: true, imageUrl: '/fake/host.png' },
+          composition: { generated: true, selectedSeed: 10 },
+          voice: {
+            source: 'tts',
+            generated: true,
+            generatedAudioPath: '/fake/audio.wav',
+            script: '테스트 대본',
+          },
+          resolution: { key: '448p', width: 448, height: 768, label: '448p' },
+        };
+        localStorage.setItem(
+          'showhost.wizard.v1',
+          JSON.stringify({ state, version: 1 }),
+        );
+      } catch {
+        /* ignore */
+      }
+    });
+    await page.goto('/render/bogus-task');
+    await page.getByRole('button', { name: /앞으로 돌아가서 수정/ }).click();
+    await expect(page).toHaveURL(/\/step\/3$/);
+  });
+});

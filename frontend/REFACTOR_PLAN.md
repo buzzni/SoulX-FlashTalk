@@ -664,17 +664,22 @@ after the route split has settled.
 **Complexity:** half a day per step tree. Ideally tied to a DevTools
 before/after measurement so the selector win is visible.
 
-### 13.3 `RenderLayout.handleBack` navigates to `/step/3` unconditionally
+### 13.3 `RenderLayout.handleBack` navigates to `/step/3` unconditionally — RESOLVED
 
-**Raised by:** Claude review (internal).
+**Raised by:** Claude review (internal). **Fixed in the same pass as the
+Codex review follow-ups.**
 
 **Problem:** For a user who attached to `/render/:taskId` via queue click
-with an empty wizard state, "앞으로 돌아가서 수정" navigates to `/step/3`,
-which the `WizardLayout` guard then bounces to `/step/1`. The button
-label promises "go back and edit" but lands them at an empty form.
+with an empty wizard state, "앞으로 돌아가서 수정" navigated to `/step/3`,
+which the `WizardLayout` guard then bounced to `/step/1`. The button
+label promised "go back and edit" but landed them at an empty form.
 
-**Recommended fix:** `navigate(/step/${deepestReachableStep(valid)})`,
-or hide the button when `!isAllValid(valid)`.
+**Fix applied:** `handleBack` now calls
+`navigate(/step/${deepestReachableStep(valid)})`. Dispatch-from-step-3
+flow is unchanged (wizard is fully valid → lands at `/step/3`). Queue-
+click attach with empty wizard lands at `/step/1` directly, no bounce.
 
-**Complexity:** 15 minutes.
+E2E regression test lives at `frontend/e2e/routing.spec.ts` under
+"render back button targets the deepest reachable step" — one
+assertion per branch.
 
