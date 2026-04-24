@@ -1,9 +1,10 @@
-// HostStudio main app — state, stepper, validation.
-// Mounts under div.studio-root (not #root), so it coexists with the existing
-// VideoGenerator / ConversationGenerator app shell. Density "comfortable"
-// is now the only mode — the tweaks panel + settings button + localStorage
-// density key were removed (2026-04-23) because nobody used the "compact"
-// option and the panel cluttered the header.
+// HostStudio main app — stepper, validation, route orchestration.
+// Wizard state (host / products / background / composition / voice /
+// script / resolution / imageQuality) lives in the Zustand wizardStore
+// (Phase 2b). This component owns only the local UI shell state:
+// current step, whether we're rendering, and the one-shot ?attach=
+// URL pickup. Phase 5 will move `step` / `rendering` / `attachToTaskId`
+// into the route itself.
 import { Fragment, useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import Icon from './Icon.jsx';
@@ -14,6 +15,8 @@ import Step3Audio from './Step3Audio.jsx';
 import PreviewPanel from './PreviewPanel.jsx';
 import QueueStatus from './QueueStatus.jsx';
 import RenderDashboard from './RenderDashboard.jsx';
+import { useWizardStore, INITIAL_WIZARD_STATE } from '../stores/wizardStore';
+import { storageKey } from '../stores/storageKey';
 
 // Global styles (tokens.css / app.css / tailwind.css) now load from
 // src/main.jsx so every route gets them on a cold open — previously they
@@ -26,112 +29,20 @@ const STEPS = [
   { key: 3, name: '목소리·영상', short: '3', full: '목소리와 영상 뽑기' },
 ];
 
-// State fields intentionally cut vs the prototype designer's original shape:
-//   - voice.pitch: no ElevenLabs pitch param; ffmpeg rubberband post-processing not built.
-//   - voice.bgm / voice.bgmVolume: no BGM mix pipeline in backend.
-//   - subtitles / productTag: no captioning / overlay pipeline in backend.
-// The prototype's sliders for those widgets were cargo-culted from mockups that
-// didn't consider the actual Gemini / ElevenLabs / FlashTalk model capabilities.
-const INITIAL_STATE = {
-  // `variants` holds the 4 generated candidates for each image stage so a
-  // reload doesn't wipe them. Entries have { seed, id, url, path } once
-  // complete; placeholder/error entries are scrubbed before persist.
-  host: { mode: 'text', prompt: '', negativePrompt: '', builder: {}, generated: false, selectedSeed: null, _gradient: null, faceRef: null, outfitRef: null, outfitText: '', faceStrength: 0.7, outfitStrength: 0.5, temperature: 0.7, variants: [] },
-  products: [],
-  background: { source: 'preset', preset: null, url: '', prompt: '', imageUrl: null, _gradient: null, _file: null },
-  composition: { direction: '', shot: 'medium', angle: 'eye', generated: false, selectedSeed: null, temperature: 0.7, variants: [] },
-  voice: { source: 'tts', voiceId: null, voiceName: null, paragraphs: [''], script: '', stability: 0.5, style: 0.3, similarity: 0.75, speed: 1, generated: false, uploadedAudio: null, cloneSample: null },
-  script: '',
-  resolution: { key: '448p', label: '448p', width: 448, height: 768, size: '~8MB', speed: '빠름', default: true },
-  // Shared Gemini image_size ("1K" | "2K") — applied to both Step 1 host
-  // and Step 2 composite so reference + output resolutions match. Users
-  // set it once in Step 1; Step 2 just follows. 2K is ~2-4× slower.
-  imageQuality: '1K',
-};
-
-// Drop File handles and blob: URLs before localStorage. Server-side path
-// strings (host.selectedPath, products[].path, background.uploadPath) and
-// everything else stays so step navigation + validation still work after
-// refresh — users just need to re-attach files if they want to re-upload.
-function sanitizeForPersist(s) {
-  // Strip any URL that can't survive a refresh (blob: dies with the tab,
-  // data: is fine but can blow past localStorage quota with multi-MB uploads).
-  const isTransientUrl = (u) => typeof u === 'string' && (u.startsWith('blob:') || u.startsWith('data:'));
-  // Keep a reference-image entry only if its url is a real server URL. Pre-
-  // upload entries (data:/blob:) are transient — the File handle dies on
-  // refresh, so resurrecting the preview without a File would just confuse
-  // the generate flow. Server URLs (via /api/files/...) are stable forever.
-  const cleanRef = (ref) => {
-    if (!ref || !ref.url || isTransientUrl(ref.url)) return null;
-    return { name: ref.name, size: ref.size, type: ref.type, url: ref.url, _file: undefined };
-  };
-  // Strip placeholder/error variants — those only make sense during the
-  // in-flight stream. Finished entries (with url + path) survive refresh.
-  const cleanVariants = (arr) => (arr || []).filter(v => v && !v.placeholder && !v.error && v.url);
-  const cleanHost = {
-    ...s.host,
-    faceRef: cleanRef(s.host?.faceRef),
-    outfitRef: cleanRef(s.host?.outfitRef),
-    variants: cleanVariants(s.host?.variants),
-  };
-  const cleanComposition = {
-    ...s.composition,
-    variants: cleanVariants(s.composition?.variants),
-  };
-  const cleanBg = { ...s.background, _file: null, imageUrl: isTransientUrl(s.background?.imageUrl) ? null : s.background?.imageUrl };
-  const cleanProducts = (s.products || []).map(p => ({
-    ...p,
-    _file: undefined,
-    url: isTransientUrl(p.url) ? null : p.url,
-  }));
-  const cleanVoice = {
-    ...s.voice,
-    uploadedAudio: s.voice?.uploadedAudio?.path ? { path: s.voice.uploadedAudio.path, name: s.voice.uploadedAudio.name } : null,
-    cloneSample: s.voice?.cloneSample?.voiceId ? { voiceId: s.voice.cloneSample.voiceId, name: s.voice.cloneSample.name } : null,
-  };
-  return {
-    ...s,
-    host: cleanHost,
-    composition: cleanComposition,
-    background: cleanBg,
-    products: cleanProducts,
-    voice: cleanVoice,
-  };
-}
-
-// Defensive hydrator — previous localStorage can have partial or missing sub-objects
-// (e.g., an older version of the app shipped without composition.shot). Shallow-
-// merge each top-level key with INITIAL_STATE so .host, .voice, etc. always have
-// the full shape their Step components assume.
-function hydrateState(raw) {
-  if (!raw || typeof raw !== 'object') return INITIAL_STATE;
-  const merged = { ...INITIAL_STATE };
-  for (const k of Object.keys(INITIAL_STATE)) {
-    const defaults = INITIAL_STATE[k];
-    const incoming = raw[k];
-    if (defaults && typeof defaults === 'object' && !Array.isArray(defaults)) {
-      merged[k] = { ...defaults, ...(incoming && typeof incoming === 'object' ? incoming : {}) };
-    } else if (incoming !== undefined) {
-      merged[k] = incoming;
-    }
-  }
-  return merged;
-}
-
-// Exported for tests — round-trip coverage in __tests__/state_persist.test.js
-// ensures the variants + face/outfit refs survive a reload.
-export { sanitizeForPersist, hydrateState, INITIAL_STATE };
+const STEP_STORAGE_KEY = storageKey('step');
 
 const HostStudio = () => {
-  const [state, setState] = useState(() => {
-    try {
-      const saved = localStorage.getItem('showhost_state');
-      if (saved) return hydrateState(JSON.parse(saved));
-    } catch (e) { /* ignore */ }
-    return INITIAL_STATE;
-  });
+  // Wizard content lives in the Zustand store (persist middleware owns
+  // localStorage round-trip + the one-time legacy migration; no manual
+  // save/load here). Subscribing to the whole store keeps the legacy
+  // `state` prop handed to Step components byte-compatible; Phase 4
+  // will split this into per-slice selectors as each Step decomposes.
+  const state = useWizardStore();
+  const updateState = useWizardStore((s) => s.updateState);
+  const resetState = useWizardStore((s) => s.reset);
+
   const [step, setStep] = useState(() => {
-    const raw = Number(localStorage.getItem('showhost_step'));
+    const raw = Number(localStorage.getItem(STEP_STORAGE_KEY));
     if (!Number.isFinite(raw) || raw < 1) return 1;
     return Math.min(3, Math.max(1, Math.floor(raw)));
   });
@@ -144,13 +55,13 @@ const HostStudio = () => {
   // Pick up ?attach=<task_id> from QueueStatus clicking a running/pending
   // item (it navigates to /?attach=...). One-shot: read it, flip into
   // attach mode, strip the param so refreshing doesn't re-attach forever.
+  // Phase 5 replaces this shim with a dedicated /render/:taskId route.
   const [searchParams, setSearchParams] = useSearchParams();
   useEffect(() => {
     const attachId = searchParams.get('attach');
     if (!attachId) return;
     setAttachToTaskId(attachId);
     setRendering(true);
-    // Drop the param without adding a history entry
     const next = new URLSearchParams(searchParams);
     next.delete('attach');
     setSearchParams(next, { replace: true });
@@ -161,20 +72,8 @@ const HostStudio = () => {
     setAttachToTaskId(null);
   };
 
-
   useEffect(() => {
-    // Strip transient fields that can't survive a page refresh:
-    //   - blob URLs (URL.createObjectURL is session-scoped)
-    //   - File objects (JSON.stringify drops them to {} which then looks like
-    //     "a File is still here" but all real handles are gone — causing the
-    //     upload call to FormData.append a plain {} and produce "[object Object]")
-    try {
-      const sanitized = sanitizeForPersist(state);
-      localStorage.setItem('showhost_state', JSON.stringify(sanitized));
-    } catch (e) { /* ignore */ }
-  }, [state]);
-  useEffect(() => {
-    localStorage.setItem('showhost_step', String(step));
+    localStorage.setItem(STEP_STORAGE_KEY, String(step));
   }, [step]);
 
   // Validation
@@ -201,13 +100,17 @@ const HostStudio = () => {
 
   const reset = () => {
     if (!window.confirm('처음부터 다시 시작할까요?\n지금까지 입력한 내용은 사라져요.')) return;
-    setState(INITIAL_STATE);
+    resetState();
     setStep(1);
     setRendering(false);
     setAttachToTaskId(null);
   };
 
-  const update = (updater) => setState(s => typeof updater === 'function' ? updater(s) : updater);
+  // Legacy update(fn) interface — Step 1/2/3 still call this with either
+  // a partial object or a full-state updater function. Phase 4 migrates
+  // callers to per-slice setters (setHost, setVoice, …) and this
+  // adapter goes away.
+  const update = (updater) => updateState(updater);
 
   const shellProps = {
     className: 'studio-root',

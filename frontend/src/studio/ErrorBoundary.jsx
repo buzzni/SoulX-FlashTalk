@@ -3,6 +3,7 @@
 // mode is a stale/incompatible saved state carried over from an earlier
 // HostStudio schema.
 import { Component } from 'react';
+import { allOwnedStorageKeys } from '../stores/storageKey';
 
 export default class ErrorBoundary extends Component {
   constructor(props) {
@@ -19,8 +20,13 @@ export default class ErrorBoundary extends Component {
   }
   clearLocalState = () => {
     try {
-      localStorage.removeItem('showhost_state');
-      localStorage.removeItem('showhost_step');
+      // New-world keys (wizardStore, queueStore, …) come from the
+      // central registry so this stays in sync as new stores land.
+      // `showhost_density` was retired but we still blow it away in
+      // case a user has a crashy pre-cleanup payload.
+      for (const key of allOwnedStorageKeys()) {
+        localStorage.removeItem(key);
+      }
       localStorage.removeItem('showhost_density');
     } catch (_) { /* ignore */ }
     window.location.reload();
