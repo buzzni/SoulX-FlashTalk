@@ -76,11 +76,16 @@ describe('useRenderJob', () => {
     expect(result.current.isError).toBe(false);
   });
 
-  it('pollFailed surfaces on subscription error', async () => {
+  it('pollFailed surfaces on subscription error AND promotes to isError', async () => {
+    // Regression guard: pollFailed must flip isError too, otherwise
+    // RenderDashboard's status aggregator treats a dying progress
+    // endpoint as "still rendering" and the user stares at an
+    // eternal spinner with no reconnect prompt.
     const { result } = renderHook(() => useRenderJob('task-live'));
     await waitFor(() => expect(progressCb).toBeTruthy());
     act(() => progressCb({ error: true }));
     expect(result.current.pollFailed).toBe(true);
+    expect(result.current.isError).toBe(true);
   });
 
   it('unmount unsubscribes the progress listener', async () => {

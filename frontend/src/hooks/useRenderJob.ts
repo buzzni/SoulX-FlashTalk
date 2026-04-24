@@ -152,10 +152,17 @@ export function useRenderJob(taskId: string | null | undefined): UseRenderJobRet
   }, [startedAt, isTerminal, entry?.completed_at]);
 
   const isDone = isTerminalStage ? stage === 'complete' : entry?.status === 'completed';
+  // `pollFailed` flips when subscribeProgress gives up after ~12s of
+  // backend errors. Before this was folded in, pollFailed set a flag
+  // nobody read — RenderDashboard's status aggregator only looks at
+  // `isError`, so a dying progress endpoint surfaced as an eternal
+  // spinner instead of a "뭔가 잘못됐어요" shell with the reconnect
+  // message already staged in `errorMessage`.
   const isError =
     stage === 'error' ||
     entry?.status === 'error' ||
-    entry?.status === 'cancelled';
+    entry?.status === 'cancelled' ||
+    pollFailed;
 
   const isLive = useMemo(() => {
     if (!taskId) return false;

@@ -49,7 +49,13 @@ export default function RenderDashboard({
   onReset,
 }: RenderDashboardProps) {
   const navigate = useNavigate();
-  const [taskId, setTaskId] = useState<string | null>(attachToTaskId);
+  // `taskId` never changes over a component's lifetime here —
+  // RenderLayout uses `key={attachToTaskId || 'fresh'}` to force a
+  // remount whenever the id changes, and dispatch-mode navigates to
+  // `/render/:taskId` (which swaps to the attach page) rather than
+  // mutating local state. Leaving it as a const flags the "immutable
+  // for this mount" invariant and drops the unused setter.
+  const taskId: string | null = attachToTaskId;
   const [dispatchError, setDispatchError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const dispatchedRef = useRef(false);
@@ -58,12 +64,26 @@ export default function RenderDashboard({
   const job = useRenderJob(taskId);
   const queuePos = useQueuePosition(taskId);
 
-  // ── Dispatch: POST /api/generate once, then let useRenderJob handle the
-  //    rest. Attach mode skips this entirely (taskId already set).
+  // ── Dispatch: POST /api/generate once, then let useRenderJob handle
+  //    the rest. Attach mode skips this entirely (taskId already set).
+  //
+  //    Cleanup cancels the in-flight POST and guards the async
+  //    continuation from firing after unmount. Without this, a user who
+  //    hit back/close during the 1-3s dispatch window could get yanked
+  //    back to /render/:taskId after the response landed because
+  //    react-router's `navigate()` still mutates the URL from an
+  //    unmounted component.
+  //
+  //    `state` is intentionally omitted from deps — we read it once at
+  //    dispatch time. A wizard field update mid-dispatch shouldn't tear
+  //    down the in-flight POST.
   useEffect(() => {
     if (attachToTaskId) return;
     if (dispatchedRef.current) return;
     dispatchedRef.current = true;
+
+    const controller = new AbortController();
+    let alive = true;
 
     (async () => {
       try {
@@ -72,12 +92,16 @@ export default function RenderDashboard({
         if (!audio_path) {
           throw new Error('음성 파일 경로를 찾을 수 없어요 (3단계에서 다시 만들기)');
         }
-        const res = await generateVideo({ state, audio: { audio_path } });
+        const res = await generateVideo(
+          { state, audio: { audio_path } },
+          { signal: controller.signal },
+        );
+        if (!alive) return;
         const id = (res.task_id as string) || null;
         if (!id) {
-          // Rare synchronous-complete path — backend returned a URL without
-          // queueing. Just flip to a "done with no taskId" shell and let the
-          // user click through.
+          // Rare synchronous-complete path — backend returned a URL
+          // without queueing. Just flip to a "done with no taskId"
+          // shell and let the user click through.
           setDispatchError('작업이 즉시 완료됐어요');
           return;
         }
@@ -86,17 +110,25 @@ export default function RenderDashboard({
         // the back button skips the transient dispatch URL. No
         // `setTaskId(id)` here — the URL change causes RenderAttachPage
         // to own the route, and RenderLayout's `key=attachToTaskId ||
-        // 'fresh'` forces a full remount with the id as a prop. Any
-        // local setTaskId update on the outgoing dispatch instance is
-        // discarded on unmount.
+        // 'fresh'` forces a full remount with the id as a prop.
         navigate(`/render/${id}`, { replace: true });
       } catch (err) {
+        // AbortError = user navigated away mid-dispatch. Quiet exit.
+        if ((err as { name?: string })?.name === 'AbortError') return;
+        if (!alive) return;
         // eslint-disable-next-line no-console
         console.error('render dispatch failed', err);
         setDispatchError(humanizeError(err));
       }
     })();
-  }, [attachToTaskId, state, navigate]);
+
+    return () => {
+      alive = false;
+      controller.abort();
+    };
+    // `state` is deliberately excluded — see the comment block above.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [attachToTaskId, navigate]);
 
   // ── Attach mode: if the task already finished before we attached,
   //    redirect to /result. Terminal errors surface as dispatchError so
