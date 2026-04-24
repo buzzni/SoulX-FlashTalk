@@ -1,24 +1,25 @@
 /**
  * RenderDashboard attach mode — status-aware initial state.
  *
- * Regression: clicking a completed task from QueueStatus used to show
- * "대기열 등록 중" forever (default stage = 'queued', no SSE progress
- * because the task had already finished). Fix: branch on queueEntry.status
- * the moment the queue snapshot is available — completed tasks jump
- * straight to the finished video without replaying SSE stages.
+ * Post-router refactor: RenderDashboard only handles live-progress
+ * (pending/running). Completed/error tasks redirect to /result/:taskId,
+ * which we assert here by reading the MemoryRouter's current location.
+ *
+ * The old "provenance card reads meta/params" tests moved to
+ * result_page.test.jsx — ProvenanceCard now lives on ResultPage, fed by
+ * /api/results/{task_id}.
  *
  * @vitest-environment jsdom
  */
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, cleanup, act, waitFor } from '@testing-library/react';
+import { describe, it, expect, vi, afterEach } from 'vitest';
+import { render, screen, cleanup, waitFor } from '@testing-library/react';
+import { MemoryRouter, useLocation } from 'react-router-dom';
 
 vi.mock('../api.js', () => ({
   fetchQueue: vi.fn(),
   generateVideo: vi.fn(),
   subscribeProgress: vi.fn(() => () => {}),
   humanizeError: (e) => (e && e.message) || String(e),
-  // RenderHistory mounts inside RenderDashboard during non-done states and
-  // imports fetchHistory — stub it out so the test doesn't blow up.
   fetchHistory: vi.fn().mockResolvedValue({ total: 0, videos: [] }),
 }));
 
@@ -37,12 +38,24 @@ const baseState = {
   composition: {},
 };
 
-function withProvider(ui) {
-  return <QueueProvider>{ui}</QueueProvider>;
+function LocationSpy() {
+  const loc = useLocation();
+  return <div data-testid="landed">LANDED:{loc.pathname}</div>;
+}
+
+function renderInRouter(ui) {
+  return render(
+    <MemoryRouter initialEntries={["/"]}>
+      <QueueProvider>
+        {ui}
+        <LocationSpy />
+      </QueueProvider>
+    </MemoryRouter>
+  );
 }
 
 describe('RenderDashboard attach mode — branching on queue status', () => {
-  it('completed task: skips SSE, shows "완성된 영상" immediately', async () => {
+  it('completed task: redirects to /result/:taskId without subscribing SSE', async () => {
     fetchQueue.mockResolvedValue({
       running: [],
       pending: [],
@@ -58,18 +71,18 @@ describe('RenderDashboard attach mode — branching on queue status', () => {
       total_pending: 0,
     });
 
-    render(withProvider(
+    renderInRouter(
       <RenderDashboard state={baseState} attachToTaskId="done-1" onBack={() => {}} onReset={() => {}} />
-    ));
+    );
 
     await waitFor(() => {
-      expect(screen.getByText('영상이 완성됐어요!')).toBeTruthy();
+      expect(screen.getByTestId('landed').textContent).toBe('LANDED:/result/done-1');
     });
-    // Must NOT subscribe SSE for already-completed work (no stage replay).
+    // Must NOT subscribe SSE for already-completed work.
     expect(subscribeProgress).not.toHaveBeenCalled();
   });
 
-  it('error task: shows failure header, no SSE', async () => {
+  it('error task: shows failure header, no SSE, stays on dashboard', async () => {
     fetchQueue.mockResolvedValue({
       running: [],
       pending: [],
@@ -85,14 +98,15 @@ describe('RenderDashboard attach mode — branching on queue status', () => {
       total_pending: 0,
     });
 
-    render(withProvider(
+    renderInRouter(
       <RenderDashboard state={baseState} attachToTaskId="err-1" onBack={() => {}} onReset={() => {}} />
-    ));
+    );
 
     await waitFor(() => {
       expect(screen.getByText('만들기에 실패했어요')).toBeTruthy();
     });
     expect(subscribeProgress).not.toHaveBeenCalled();
+    expect(screen.getByTestId('landed').textContent).toBe('LANDED:/');
   });
 
   it('running task: subscribes SSE for live updates', async () => {
@@ -110,93 +124,13 @@ describe('RenderDashboard attach mode — branching on queue status', () => {
       total_pending: 0,
     });
 
-    render(withProvider(
+    renderInRouter(
       <RenderDashboard state={baseState} attachToTaskId="run-1" onBack={() => {}} onReset={() => {}} />
-    ));
+    );
 
     await waitFor(() => {
       expect(subscribeProgress).toHaveBeenCalledWith('run-1', expect.any(Function));
     });
-  });
-
-  it('completed task: provenance card reads voiceName/products/script from meta (NOT state)', async () => {
-    fetchQueue.mockResolvedValue({
-      running: [],
-      pending: [],
-      recent: [{
-        task_id: 'done-meta',
-        type: 'generate',
-        status: 'completed',
-        params: {
-          resolution: '720x1280',
-          meta: {
-            host: { mode: 'image', selectedSeed: 42, temperature: 0.4 },
-            composition: { shot: 'medium', temperature: 1.0 },
-            products: [{ name: '쿠션' }, { name: '소파' }],
-            background: { source: 'preset', presetLabel: '아늑한 거실' },
-            voice: { source: 'tts', voiceName: '민지', script: '안녕하세요' },
-            imageQuality: '2K',
-          },
-        },
-        started_at: '2026-04-23T10:00:00',
-        completed_at: '2026-04-23T10:03:00',
-        created_at: '2026-04-23T09:59:00',
-      }],
-      total_running: 0,
-      total_pending: 0,
-    });
-    global.fetch = vi.fn().mockResolvedValue({ ok: true, headers: { get: () => '0' } });
-
-    render(withProvider(
-      <RenderDashboard state={baseState} attachToTaskId="done-meta" onBack={() => {}} onReset={() => {}} />
-    ));
-
-    await waitFor(() => {
-      // Voice name from meta, NOT baseState (which has voiceName: null)
-      expect(screen.getByText('민지')).toBeTruthy();
-      expect(screen.getByText('아늑한 거실')).toBeTruthy();
-      expect(screen.getByText('안녕하세요')).toBeTruthy();
-      expect(screen.getByText('고화질 (2K)')).toBeTruthy();
-      // Two products
-      expect(screen.getByText('쿠션, 소파')).toBeTruthy();
-    });
-  });
-
-  it('completed task: summary card reads resolution from queueEntry.params (NOT state.resolution)', async () => {
-    // state.resolution is 448×768 (Step 3 default). The task on the server
-    // was actually run at 1280×720 per its queue params. The summary must
-    // show the TASK's resolution, not the UI state's.
-    fetchQueue.mockResolvedValue({
-      running: [],
-      pending: [],
-      recent: [{
-        task_id: 'done-hd',
-        type: 'generate',
-        status: 'completed',
-        params: { resolution: '720x1280' },  // hxw — matches stringifyResolution
-        started_at: '2026-04-23T10:00:00',
-        completed_at: '2026-04-23T10:03:00',
-        created_at: '2026-04-23T09:59:00',
-      }],
-      total_running: 0,
-      total_pending: 0,
-    });
-
-    // Stub HEAD request for file-size probe so the real-fetch effect doesn't
-    // dangle a promise during teardown.
-    const origFetch = global.fetch;
-    global.fetch = vi.fn().mockResolvedValue({ ok: true, headers: { get: () => '0' } });
-
-    render(withProvider(
-      <RenderDashboard state={baseState} attachToTaskId="done-hd" onBack={() => {}} onReset={() => {}} />
-    ));
-
-    await waitFor(() => {
-      // Actual task resolution (1280×720), NOT state.resolution (448×768)
-      expect(screen.getByText('1280×720 · 세로형')).toBeTruthy();
-    });
-
-    global.fetch = origFetch;
   });
 
   it('pending task: header reads "영상 만드는 중", SSE still subscribed', async () => {
@@ -213,9 +147,9 @@ describe('RenderDashboard attach mode — branching on queue status', () => {
       total_pending: 1,
     });
 
-    render(withProvider(
+    renderInRouter(
       <RenderDashboard state={baseState} attachToTaskId="pend-1" onBack={() => {}} onReset={() => {}} />
-    ));
+    );
 
     await waitFor(() => {
       expect(subscribeProgress).toHaveBeenCalledWith('pend-1', expect.any(Function));

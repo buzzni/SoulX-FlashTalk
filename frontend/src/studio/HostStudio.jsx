@@ -5,6 +5,7 @@
 // density key were removed (2026-04-23) because nobody used the "compact"
 // option and the panel cluttered the header.
 import { Fragment, useEffect, useMemo, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import Icon from './Icon.jsx';
 import { Button } from './primitives.jsx';
 import Step1Host from './Step1Host.jsx';
@@ -13,7 +14,6 @@ import Step3Audio from './Step3Audio.jsx';
 import PreviewPanel from './PreviewPanel.jsx';
 import QueueStatus from './QueueStatus.jsx';
 import RenderDashboard from './RenderDashboard.jsx';
-import { QueueProvider } from './QueueContext.jsx';
 
 import './styles/tokens.css';
 import './styles/app.css';
@@ -135,17 +135,24 @@ const HostStudio = () => {
   });
   const [rendering, setRendering] = useState(false);
   // When set, RenderDashboard attaches to an existing in-flight task instead
-  // of dispatching a new /api/generate. Click-from-queue jumps here.
+  // of dispatching a new /api/generate. Click-from-queue (running/pending
+  // items) lands here via the ?attach=<task_id> URL param.
   const [attachToTaskId, setAttachToTaskId] = useState(null);
 
-  // Open RenderDashboard for an already-running/pending task (clicked in
-  // QueueStatus). Different entry from the wizard's "영상 만들기 시작" path
-  // because we don't want to redispatch — just monitor the existing job.
-  const openTaskInRenderView = (taskId) => {
-    if (!taskId) return;
-    setAttachToTaskId(taskId);
+  // Pick up ?attach=<task_id> from QueueStatus clicking a running/pending
+  // item (it navigates to /?attach=...). One-shot: read it, flip into
+  // attach mode, strip the param so refreshing doesn't re-attach forever.
+  const [searchParams, setSearchParams] = useSearchParams();
+  useEffect(() => {
+    const attachId = searchParams.get('attach');
+    if (!attachId) return;
+    setAttachToTaskId(attachId);
     setRendering(true);
-  };
+    // Drop the param without adding a history entry
+    const next = new URLSearchParams(searchParams);
+    next.delete('attach');
+    setSearchParams(next, { replace: true });
+  }, [searchParams, setSearchParams]);
 
   const exitRenderView = () => {
     setRendering(false);
@@ -209,12 +216,13 @@ const HostStudio = () => {
 
   // QueueStatus is rendered inside the TopBar's right group now (via the
   // `queueSlot` prop) so it lives in the header instead of floating at the
-  // bottom-left. Same instance across wizard and render views — passes the
-  // click-to-attach handler through so finished tasks can open too.
-  const queueSlot = <QueueStatus onTaskClick={openTaskInRenderView} />;
+  // bottom-left. Same instance across wizard and render views; navigation
+  // is self-contained (live → /?attach=, completed → /result/:taskId).
+  const queueSlot = <QueueStatus />;
 
-  // QueueProvider hoisted to the SINGLE outermost wrapper so its 4s polling
-  // interval survives wizard ↔ render view switches.
+  // QueueProvider now lives in App.jsx (one step above the BrowserRouter's
+  // <Routes>) so the 4s polling interval survives navigation between
+  // wizard (/), render view, AND /result/:taskId.
   const renderShell = rendering ? (
     <div {...shellProps}>
       <div className="app-shell" data-screen-label="05 Render">
@@ -276,7 +284,7 @@ const HostStudio = () => {
     </div>
   );
 
-  return <QueueProvider>{renderShell}</QueueProvider>;
+  return renderShell;
 };
 
 const TopBar = ({ step, valid, onStepClick, onReset, queueSlot }) => (

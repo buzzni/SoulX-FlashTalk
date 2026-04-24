@@ -1,22 +1,48 @@
-// Render dashboard — final step after going through wizard.
+// Render dashboard — live progress view for a video-generation job.
 // Dispatches /api/generate, subscribes to /api/progress/{task_id} SSE, polls
-// /api/queue for queue position, and shows per-stage progress + completion CTA.
+// /api/queue for queue position, and shows per-stage progress. On completion
+// it redirects to /result/:taskId — the completion UI and "이렇게 만들었어요"
+// panel both live on ResultPage.jsx now, reading from the backend manifest.
 import { useState, useEffect, useRef } from 'react';
+import { useNavigate } from 'react-router-dom';
 import Icon from './Icon.jsx';
 import { Badge, Button } from './primitives.jsx';
 import { generateVideo, humanizeError, subscribeProgress } from './api.js';
 import { useQueueEntry, useQueuePosition } from './QueueContext.jsx';
 import RenderHistory from './RenderHistory.jsx';
+import { formatTaskTitle } from './taskFormat.js';
 
+// The worker (app.py::update_task) emits more granular stage keys than we
+// show in the UI. We group them into 5 user-visible buckets so the checklist
+// advances cleanly. Backend keys → UI bucket:
+//   queued → queued
+//   compositing_bg → composite
+//   loading, preparing → voice (model + data setup before animation)
+//   generating → render (the bulk of inference)
+//   saving, compositing → encode
+// Anything we don't recognize (older worker builds, future additions) falls
+// back to a progress-% heuristic below.
 const STAGES = [
-  { key: 'queued', label: '대기열 등록 중' },
-  { key: 'composite', label: '제품·배경 합치는 중' },
-  { key: 'voice', label: '목소리와 입 모양 맞추는 중' },
-  { key: 'render', label: '쇼호스트 움직임 만드는 중' },
-  { key: 'encode', label: '영상 파일로 만드는 중' },
+  { key: 'queued',    label: '대기열 등록 중',          backendKeys: ['queued'] },
+  { key: 'composite', label: '제품·배경 합치는 중',      backendKeys: ['compositing_bg'] },
+  { key: 'voice',     label: '목소리와 입 모양 맞추는 중', backendKeys: ['loading', 'preparing'] },
+  { key: 'render',    label: '쇼호스트 움직임 만드는 중',  backendKeys: ['generating'] },
+  { key: 'encode',    label: '영상 파일로 만드는 중',    backendKeys: ['saving', 'compositing'] },
 ];
 
-const STAGE_ORDER = STAGES.map(s => s.key);
+const resolveStageIdx = (backendStage, progressPct) => {
+  if (backendStage) {
+    const idx = STAGES.findIndex(s => s.backendKeys.includes(backendStage));
+    if (idx >= 0) return idx;
+  }
+  // Progress-based fallback (matches the progress thresholds the worker emits)
+  const p = Number.isFinite(progressPct) ? progressPct : 0;
+  if (p >= 90) return 4;
+  if (p >= 28) return 3;
+  if (p >= 10) return 2;
+  if (p >= 2) return 1;
+  return 0;
+};
 
 function formatElapsed(ms) {
   const total = Math.max(0, Math.floor(ms / 1000));
@@ -77,6 +103,7 @@ const Confetti = () => {
 };
 
 const RenderDashboard = ({ state, attachToTaskId = null, onBack, onReset }) => {
+  const navigate = useNavigate();
   // Two entry modes:
   //   - dispatch: attachToTaskId is null → POST /api/generate then subscribe
   //   - attach:   attachToTaskId is a string → read queue entry → branch on
@@ -187,14 +214,9 @@ const RenderDashboard = ({ state, attachToTaskId = null, onBack, onReset }) => {
     const qstatus = queueEntry.status;
 
     if (qstatus === 'completed') {
-      // Terminal: show the finished video immediately, don't replay SSE.
-      setJob(j => ({
-        ...j,
-        status: 'done',
-        stage: 'complete',
-        progress: 100,
-        message: '완성된 영상이에요',
-      }));
+      // Already finished before we attached — kick straight to the
+      // dedicated result page (no point flashing a live-progress shell).
+      navigate(`/result/${attachToTaskId}`, { replace: true });
       return;
     }
     if (qstatus === 'error') {
@@ -217,6 +239,9 @@ const RenderDashboard = ({ state, attachToTaskId = null, onBack, onReset }) => {
     }
     // pending / running → subscribe for live updates. Seed message/stage
     // from the queue snapshot so we're not stuck on "작업 정보 불러오는 중".
+    // SSE replays the full update history on connect, so progress/stage/
+    // message converge to the current state within ~1s. The seeded values
+    // are just a placeholder for that <1s window.
     setJob(j => ({
       ...j,
       status: 'rendering',
@@ -231,6 +256,16 @@ const RenderDashboard = ({ state, attachToTaskId = null, onBack, onReset }) => {
   useEffect(() => () => {
     if (unsubRef.current) unsubRef.current();
   }, []);
+
+  // When the live job flips to done, hand off to the dedicated result page.
+  // The completion UI still exists in this component for the brief window
+  // between SSE "complete" and the navigate — and as a safety net if the
+  // manifest fetch fails. Normally users never see it long enough to notice.
+  useEffect(() => {
+    if (job.status === 'done' && job.taskId) {
+      navigate(`/result/${job.taskId}`, { replace: true });
+    }
+  }, [job.status, job.taskId, navigate]);
 
   // Real resolution for the summary card — reads from the queue entry's
   // params (what was actually sent to the worker) when available. Falls
@@ -309,7 +344,7 @@ const RenderDashboard = ({ state, attachToTaskId = null, onBack, onReset }) => {
     return elapsed;  // dispatch path before queue catches up
   })();
 
-  const currentStageIdx = Math.max(0, STAGE_ORDER.indexOf(job.stage));
+  const currentStageIdx = resolveStageIdx(job.stage, job.progress);
 
   const handleCopyShare = async () => {
     const url = job.videoUrl || (job.taskId ? `/api/videos/${job.taskId}` : null);
@@ -367,8 +402,7 @@ const RenderDashboard = ({ state, attachToTaskId = null, onBack, onReset }) => {
                 <video
                   src={playableVideoUrl}
                   controls
-                  autoPlay
-                  loop
+                  preload="metadata"
                   style={{ width: '100%', height: '100%', objectFit: 'cover' }}
                 />
               ) : job.status === 'error' ? (
@@ -396,7 +430,7 @@ const RenderDashboard = ({ state, attachToTaskId = null, onBack, onReset }) => {
             <div className="flex-col gap-3" style={{ minWidth: 0 }}>
               <div className="flex justify-between items-center">
                 <div>
-                  <div style={{ fontSize: 16, fontWeight: 600 }}>내 쇼호스트 영상 #{job.id.slice(-4).toUpperCase()}</div>
+                  <div style={{ fontSize: 16, fontWeight: 600 }}>{formatTaskTitle(job.id, queueEntry?.type || 'generate')}</div>
                   <div className="text-xs text-tertiary">
                     {actualResolution
                       ? `${actualResolution.width}×${actualResolution.height} · 세로형`
@@ -530,137 +564,7 @@ const RenderDashboard = ({ state, attachToTaskId = null, onBack, onReset }) => {
         {job.status !== 'done' && job.status !== 'error' && (
           <RenderHistory excludeTaskId={job.taskId} />
         )}
-
-        <ProvenanceCard taskMeta={queueEntry?.params?.meta || null} state={state} />
       </div>
-    </div>
-  );
-};
-
-// ProvenanceCard — reads the meta snapshot stored in task_queue params when
-// available (attach mode or after the queue catches up in dispatch mode)
-// and falls back to live wizard `state` only when the task was enqueued
-// before the meta field existed. Lets users see the ACTUAL provenance of
-// an old/completed task instead of whatever the current wizard state is.
-const ProvenanceCard = ({ taskMeta, state }) => {
-  const h = taskMeta?.host || state.host || {};
-  const c = taskMeta?.composition || state.composition || {};
-  const bg = taskMeta?.background || state.background || {};
-  const products = taskMeta?.products ?? (state.products || []);
-  const voice = taskMeta?.voice || state.voice || {};
-  const imageQuality = taskMeta?.imageQuality || state.imageQuality || '1K';
-
-  const bgLabel = (
-    bg.source === 'preset' ? (bg.presetLabel || bg.preset?.label || '추천 장소')
-    : bg.source === 'prompt' ? '직접 만들기'
-    : bg.source === 'upload' ? '내 사진'
-    : bg.source === 'url' ? '링크'
-    : '—'
-  );
-  const voiceSource = voice.source === 'tts' ? '목소리 고르기'
-    : voice.source === 'clone' ? '내 목소리 복제'
-    : voice.source === 'upload' ? '녹음 파일 업로드'
-    : '—';
-
-  const tempLabel = (t) => t == null ? '—' : (t <= 0.4 ? '안정적' : t >= 1.0 ? '창의적' : '보통');
-
-  return (
-    <div className="card mt-4">
-      <div className="card-eyebrow">이렇게 만들었어요</div>
-
-      {/* Thumbnails — host (Step 1) + composite (Step 2). Show what actually
-          fed into FlashTalk, not whatever's currently staged in the wizard. */}
-      {(h.imageUrl || c.selectedUrl) && (
-        <div style={{ display: 'flex', gap: 12, marginTop: 12, marginBottom: 4 }}>
-          {h.imageUrl && (
-            <figure style={{ margin: 0, flex: 1 }}>
-              <div style={{ aspectRatio: '9/16', borderRadius: 8, overflow: 'hidden', background: '#0b0d12', border: '1px solid var(--border)' }}>
-                <img src={h.imageUrl} alt="쇼호스트" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-              </div>
-              <figcaption className="text-xs text-tertiary" style={{ marginTop: 6 }}>1단계 · 쇼호스트</figcaption>
-            </figure>
-          )}
-          {c.selectedUrl && (
-            <figure style={{ margin: 0, flex: 1 }}>
-              <div style={{ aspectRatio: '9/16', borderRadius: 8, overflow: 'hidden', background: '#0b0d12', border: '1px solid var(--border)' }}>
-                <img src={c.selectedUrl} alt="합성" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-              </div>
-              <figcaption className="text-xs text-tertiary" style={{ marginTop: 6 }}>2단계 · 합성 스틸</figcaption>
-            </figure>
-          )}
-        </div>
-      )}
-
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 20, marginTop: 16 }}>
-        <div>
-          <div className="text-xs text-tertiary">쇼호스트</div>
-          <div style={{ fontWeight: 500, marginTop: 2 }}>
-            {h.mode === 'text' ? '설명으로 만들기' : h.mode === 'image' ? '사진으로 만들기' : '—'}
-          </div>
-          <div className="text-xs text-tertiary">후보 {h.selectedSeed ?? '—'}번 선택</div>
-        </div>
-        <div>
-          <div className="text-xs text-tertiary">소개할 제품</div>
-          <div style={{ fontWeight: 500, marginTop: 2 }} className="num">{products.length}개</div>
-          <div className="text-xs text-tertiary truncate">
-            {products.map(p => p.name).filter(Boolean).join(', ') || '—'}
-          </div>
-        </div>
-        <div>
-          <div className="text-xs text-tertiary">배경</div>
-          <div style={{ fontWeight: 500, marginTop: 2 }}>{bgLabel}</div>
-          <div className="text-xs text-tertiary truncate">
-            {bg.source === 'prompt' ? (bg.prompt || '—')
-              : bg.source === 'preset' ? (bg.presetId || '')
-              : bg.source === 'upload' ? '업로드 이미지' : ''}
-          </div>
-        </div>
-        <div>
-          <div className="text-xs text-tertiary">목소리</div>
-          <div style={{ fontWeight: 500, marginTop: 2 }}>
-            {voice.voiceName || (voice.source === 'upload' ? '녹음 파일' : '—')}
-          </div>
-          <div className="text-xs text-tertiary">{voiceSource}</div>
-        </div>
-      </div>
-
-      {/* Params row — smaller, shows the knobs users tweaked. */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 20, marginTop: 16, paddingTop: 14, borderTop: '1px solid var(--border)' }}>
-        <div>
-          <div className="text-xs text-tertiary">이미지 품질</div>
-          <div style={{ fontWeight: 500, marginTop: 2 }}>
-            {imageQuality === '4K' ? '초고화질 (4K)' : imageQuality === '2K' ? '고화질 (2K)' : '표준 (1K)'}
-          </div>
-        </div>
-        <div>
-          <div className="text-xs text-tertiary">쇼호스트 변동성</div>
-          <div style={{ fontWeight: 500, marginTop: 2 }}>{tempLabel(h.temperature)}</div>
-        </div>
-        <div>
-          <div className="text-xs text-tertiary">합성 변동성</div>
-          <div style={{ fontWeight: 500, marginTop: 2 }}>{tempLabel(c.temperature)}</div>
-        </div>
-        <div>
-          <div className="text-xs text-tertiary">샷</div>
-          <div style={{ fontWeight: 500, marginTop: 2 }}>
-            {c.shot === 'closeup' ? '클로즈업'
-              : c.shot === 'bust' ? '상반신'
-              : c.shot === 'medium' ? '미디엄'
-              : c.shot === 'full' ? '풀샷'
-              : '—'}
-          </div>
-        </div>
-      </div>
-
-      {/* Script preview (if present) — what was actually read. */}
-      {voice.script && (
-        <div style={{ marginTop: 16, paddingTop: 14, borderTop: '1px solid var(--border)' }}>
-          <div className="text-xs text-tertiary">대본</div>
-          <div style={{ fontSize: 13, marginTop: 4, whiteSpace: 'pre-wrap', maxHeight: 120, overflowY: 'auto' }}>
-            {voice.script.replace(/\[breath\]/g, ' · ')}
-          </div>
-        </div>
-      )}
     </div>
   );
 };
