@@ -10,8 +10,7 @@
  */
 
 import Icon from '../Icon.jsx';
-import { Button } from '../primitives.jsx';
-
+import { WizardButton as Button } from '@/components/wizard-button';
 export interface RenderActionsProps {
   status: 'pending' | 'rendering' | 'done' | 'error';
   playableVideoUrl: string | null;

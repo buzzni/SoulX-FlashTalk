@@ -17,7 +17,8 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Badge, Button } from '../primitives.jsx';
+import { WizardBadge as Badge } from '@/components/wizard-badge';
+import { WizardButton as Button } from '@/components/wizard-button';
 import { generateVideo } from '../../api/video';
 import { getVideoMeta } from '../../api/file';
 import { humanizeError } from '../../api/http';

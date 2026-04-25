@@ -11,8 +11,10 @@
  */
 
 import Icon from '../Icon.jsx';
-import { Button, Field, Segmented, UploadTile } from '../primitives.jsx';
-
+import { WizardButton as Button } from '@/components/wizard-button';
+import { Field } from '@/components/field';
+import { Segmented } from '@/components/segmented';
+import { UploadTile } from '@/components/upload-tile';
 export interface Background {
   source?: 'preset' | 'upload' | 'url' | 'prompt' | null;
   preset?: string | { id: string; label?: string; gradient?: string } | null;

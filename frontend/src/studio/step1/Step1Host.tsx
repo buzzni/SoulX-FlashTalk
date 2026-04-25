@@ -14,7 +14,10 @@
  */
 
 import { useEffect, useRef } from 'react';
-import { Badge, Button, Card, Segmented } from '../primitives.jsx';
+import { WizardBadge as Badge } from '@/components/wizard-badge';
+import { WizardButton as Button } from '@/components/wizard-button';
+import { WizardCard as Card } from '@/components/wizard-card';
+import { Segmented } from '@/components/segmented';
 import { useHostGeneration, type HostVariant } from '../../hooks/useHostGeneration';
 import { imageIdFromPath, makeRandomSeeds } from '../../api/mapping';
 import { selectHost, type HostGenerateInput } from '../../api/host';

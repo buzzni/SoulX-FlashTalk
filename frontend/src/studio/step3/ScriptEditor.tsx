@@ -15,8 +15,7 @@
 
 import { Fragment } from 'react';
 import Icon from '../Icon.jsx';
-import { Field } from '../primitives.jsx';
-
+import { Field } from '@/components/field';
 const BREATH_TAG = ' [breath] ';
 export const SCRIPT_LIMIT = 5000;
 

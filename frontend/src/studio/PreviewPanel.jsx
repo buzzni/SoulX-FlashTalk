@@ -7,8 +7,7 @@
 //         previewed as you click grid candidates).
 // Step 3: shows the final composite + ready badges.
 import Icon from './Icon.jsx';
-import { Badge } from './primitives.jsx';
-
+import { WizardBadge as Badge } from '@/components/wizard-badge';
 const PreviewPanel = ({ state, step = 1 }) => {
   // Step 1: render nothing. Caller collapses the .main grid to a single column
   // so the left form gets the full width.

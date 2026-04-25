@@ -13,8 +13,9 @@
 
 import { useState } from 'react';
 import Icon from '../Icon.jsx';
-import { Field, Segmented, UploadTile } from '../primitives.jsx';
-
+import { Field } from '@/components/field';
+import { Segmented } from '@/components/segmented';
+import { UploadTile } from '@/components/upload-tile';
 export interface Product {
   id: string;
   source?: 'upload' | 'url';

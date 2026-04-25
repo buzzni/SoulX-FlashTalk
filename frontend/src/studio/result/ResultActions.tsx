@@ -8,8 +8,7 @@
  * the race window between dispatch and manifest write).
  */
 import Icon from '../Icon.jsx';
-import { Button } from '../primitives.jsx';
-
+import { WizardButton as Button } from '@/components/wizard-button';
 export interface ResultActionsProps {
   isDone: boolean;
   taskId: string;

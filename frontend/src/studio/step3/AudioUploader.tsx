@@ -7,8 +7,8 @@
  */
 
 import Icon from '../Icon.jsx';
-import { Field, UploadTile } from '../primitives.jsx';
-
+import { Field } from '@/components/field';
+import { UploadTile } from '@/components/upload-tile';
 export interface UploadedAudio {
   name?: string;
   size?: number;

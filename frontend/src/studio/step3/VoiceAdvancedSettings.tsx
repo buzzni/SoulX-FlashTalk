@@ -9,7 +9,8 @@
  */
 
 import Icon from '../Icon.jsx';
-import { Field, Slider } from '../primitives.jsx';
+import { Field } from '@/components/field';
+import { WizardSlider as Slider } from '@/components/wizard-slider';
 
 export interface VoiceAdvancedSettingsProps {
   speed: number;

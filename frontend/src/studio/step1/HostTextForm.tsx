@@ -6,8 +6,8 @@
  * generation button (container owns that).
  */
 
-import { Chip, Field } from '../primitives.jsx';
-
+import { Chip } from '@/components/chip';
+import { Field } from '@/components/field';
 const HOST_PRESETS: Record<string, { value: string; label: string }[]> = {
   성별: [
     { value: 'female', label: '여성' },

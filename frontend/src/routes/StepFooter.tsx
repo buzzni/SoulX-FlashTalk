@@ -5,7 +5,7 @@
  * identical button geometry and validation-message styling.
  */
 import Icon from '../studio/Icon.jsx';
-import { Button } from '../studio/primitives.jsx';
+import { WizardButton as Button } from '@/components/wizard-button';
 import type { WizardValidity } from './wizardValidation';
 
 export interface StepFooterProps {

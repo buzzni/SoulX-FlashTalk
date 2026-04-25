@@ -10,7 +10,10 @@
 
 import { useRef } from 'react';
 import Icon from '../Icon.jsx';
-import { Button, Chip, Field, Segmented } from '../primitives.jsx';
+import { WizardButton as Button } from '@/components/wizard-button';
+import { Chip } from '@/components/chip';
+import { Field } from '@/components/field';
+import { Segmented } from '@/components/segmented';
 import type { Product } from './ProductList';
 
 export interface Composition {

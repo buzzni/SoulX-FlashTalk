@@ -10,8 +10,9 @@
  */
 
 import Icon from '../Icon.jsx';
-import { Button, Field, Segmented } from '../primitives.jsx';
-
+import { WizardButton as Button } from '@/components/wizard-button';
+import { Field } from '@/components/field';
+import { Segmented } from '@/components/segmented';
 export interface HostControlsProps {
   temperature: number;
   imageQuality: '1K' | '2K' | '4K';

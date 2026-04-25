@@ -13,8 +13,7 @@
 
 import { useRef, useState } from 'react';
 import Icon from '../Icon.jsx';
-import { Field } from '../primitives.jsx';
-
+import { Field } from '@/components/field';
 const VOICE_PRESETS: VoiceItem[] = [
   { id: 'v_minji', name: '민지', desc: '밝고 경쾌한 느낌의 20대 여성' },
   { id: 'v_sora', name: '소라', desc: '차분하고 부드러운 30대 여성' },

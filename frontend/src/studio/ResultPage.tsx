@@ -14,7 +14,8 @@
  */
 import { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { Badge, Button } from './primitives.jsx';
+import { WizardBadge as Badge } from '@/components/wizard-badge';
+import { WizardButton as Button } from '@/components/wizard-button';
 import ProvenanceCard from './ProvenanceCard.jsx';
 import QueueStatus from './QueueStatus';
 import { fetchResult } from '../api/result';
