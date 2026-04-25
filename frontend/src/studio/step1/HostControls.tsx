@@ -71,7 +71,6 @@ export function HostControls({
         <div
           style={{
             padding: '10px 12px',
-            marginBottom: 10,
             background: 'var(--danger-soft)',
             border: '1px solid var(--danger)',
             borderRadius: 'var(--r-sm)',

@@ -231,7 +231,6 @@ export default function Step3Audio({ state, update }: Step3AudioProps) {
             {errorMsg && (
               <div
                 style={{
-                  marginTop: 10,
                   padding: '10px 12px',
                   background: 'var(--danger-soft)',
                   border: '1px solid var(--danger)',
@@ -245,7 +244,7 @@ export default function Step3Audio({ state, update }: Step3AudioProps) {
               </div>
             )}
 
-            <div className="flex justify-between items-center mt-3">
+            <div className="flex justify-between items-center">
               <div className="text-xs text-tertiary">
                 {voice.generated ? (
                   <Badge variant="success" icon="check_circle">
