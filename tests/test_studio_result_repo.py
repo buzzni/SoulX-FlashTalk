@@ -235,6 +235,84 @@ async def test_set_playlist_missing_result_returns_none(repo_db):
     assert out is None
 
 
+# ── upsert silent-coerce on stale playlist_id (Lane C, plan §9) ──
+
+
+async def test_upsert_keeps_valid_playlist_id(repo_db):
+    from modules.repositories import studio_playlist_repo
+    p = await studio_playlist_repo.create("u1", name="A")
+    m = _manifest("t1")
+    m["playlist_id"] = p["playlist_id"]
+    await repo.upsert("u1", m)
+    fresh = await repo.get("u1", "t1")
+    assert fresh["playlist_id"] == p["playlist_id"]
+
+
+async def test_upsert_coerces_unknown_playlist_id_to_null(repo_db):
+    """Worker race recovery: user deletes playlist mid-render → coerce, not raise."""
+    m = _manifest("t1")
+    m["playlist_id"] = "f" * 32
+    await repo.upsert("u1", m)
+    fresh = await repo.get("u1", "t1")
+    assert fresh["playlist_id"] is None
+
+
+async def test_upsert_coerces_cross_user_playlist_id_to_null(repo_db):
+    from modules.repositories import studio_playlist_repo
+    alice_p = await studio_playlist_repo.create("alice", name="A")
+    m = _manifest("bob_task")
+    m["playlist_id"] = alice_p["playlist_id"]
+    await repo.upsert("bob", m)
+    fresh = await repo.get("bob", "bob_task")
+    assert fresh["playlist_id"] is None
+
+
+async def test_upsert_null_playlist_id_passthrough(repo_db):
+    m = _manifest("t1")
+    m["playlist_id"] = None
+    await repo.upsert("u1", m)
+    fresh = await repo.get("u1", "t1")
+    assert fresh.get("playlist_id") is None
+
+
+# ── Queue handler forwards playlist_id (Lane D) ──
+
+
+async def test_queue_generate_handler_forwards_playlist_id(monkeypatch, repo_db):
+    """The queue handler unpacks params and calls generate_video_task by name.
+    We monkeypatch the task fn and assert playlist_id makes the round trip."""
+    import app as app_module
+    captured: dict = {}
+
+    async def _fake(**kwargs):
+        captured.update(kwargs)
+
+    monkeypatch.setattr(app_module, "generate_video_task", _fake)
+    await app_module._queue_generate_handler(
+        task_id="t1", user_id="u1",
+        host_image="h.png", audio_path="a.wav",
+        audio_source_label="upload", prompt="p", seed=1,
+        cpu_offload=False, playlist_id="abc" + "0" * 29,
+    )
+    assert captured["playlist_id"] == "abc" + "0" * 29
+
+
+async def test_queue_conversation_handler_forwards_playlist_id(monkeypatch, repo_db):
+    import app as app_module
+    captured: dict = {}
+
+    async def _fake(**kwargs):
+        captured.update(kwargs)
+
+    monkeypatch.setattr(app_module, "generate_conversation_task", _fake)
+    await app_module._queue_conversation_handler(
+        task_id="t1", user_id="u1",
+        dialog_data={}, layout="split", prompt="p", seed=1,
+        cpu_offload=False, playlist_id="def" + "0" * 29,
+    )
+    assert captured["playlist_id"] == "def" + "0" * 29
+
+
 # ── delete ──
 
 async def test_delete_owner_only(repo_db):

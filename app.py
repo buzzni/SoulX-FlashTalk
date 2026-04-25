@@ -327,6 +327,7 @@ async def generate_video_task(
     scene_prompt: str = "",
     reference_image_paths: list = None,
     meta: Optional[dict] = None,
+    playlist_id: Optional[str] = None,
 ):
     """Run SoulX-FlashTalk video generation in background"""
     global pipeline, pipeline_lock
@@ -572,6 +573,7 @@ async def generate_video_task(
                     "reference_image_paths": reference_image_paths or [],
                 },
                 "meta": meta,
+                "playlist_id": playlist_id,
             }
             if user_id:
                 try:
@@ -674,6 +676,7 @@ async def _queue_generate_handler(task_id: str, user_id: str, **params):
         scene_prompt=params.get("scene_prompt", ""),
         reference_image_paths=params.get("reference_image_paths"),
         meta=params.get("meta"),
+        playlist_id=params.get("playlist_id"),
     )
 
 
@@ -688,6 +691,7 @@ async def _queue_conversation_handler(task_id: str, user_id: str, **params):
         seed=params["seed"],
         cpu_offload=params["cpu_offload"],
         resolution=params.get("resolution", "1280x720"),
+        playlist_id=params.get("playlist_id"),
     )
 
 
@@ -1522,6 +1526,7 @@ async def generate_conversation_task(
     cpu_offload: bool,
     user_id: Optional[str] = None,
     resolution: str = "1280x720",
+    playlist_id: Optional[str] = None,
 ):
     """Run multi-agent conversation video generation in background."""
     global pipeline, pipeline_lock
@@ -1751,6 +1756,7 @@ async def generate_conversation_task(
                     "audio_source_label": f"conversation:{layout}",
                 },
                 "meta": None,
+                "playlist_id": playlist_id,
             }
             if user_id:
                 try:

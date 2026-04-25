@@ -52,6 +52,11 @@ async def upsert(user_id: str, manifest: dict) -> None:
     `manifest` is the full payload — task_id/type/status/params/meta/...
     Caller is responsible for normalizing absolute paths to storage_keys
     before passing it in (the repo does no path scrubbing).
+
+    Plan decision #9: if `manifest.playlist_id` references a missing or
+    cross-user playlist, silently coerce it to null. This is the worker
+    race-recovery path (user deletes playlist mid-render). The PATCH
+    endpoint takes a stricter path (404 on miss).
     """
     if not user_id:
         raise ValueError("upsert requires user_id")
@@ -60,6 +65,18 @@ async def upsert(user_id: str, manifest: dict) -> None:
         raise ValueError("upsert requires manifest.task_id")
     set_doc = dict(manifest)
     set_doc["user_id"] = user_id
+
+    raw_playlist_id = set_doc.get("playlist_id")
+    if raw_playlist_id is not None:
+        # Late import to avoid circular dependency.
+        from modules.repositories import studio_playlist_repo
+        if not await studio_playlist_repo.exists(user_id, raw_playlist_id):
+            logger.warning(
+                "upsert: playlist_id %s not found for user %s — coercing to null",
+                raw_playlist_id, user_id,
+            )
+            set_doc["playlist_id"] = None
+
     await _coll().update_one(
         {"user_id": user_id, "task_id": task_id},
         {"$set": set_doc, "$setOnInsert": {"_imported_at": _now()}},
