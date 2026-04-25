@@ -148,6 +148,29 @@ class LocalDiskMediaStore:
         except FileNotFoundError:
             return False
 
+    def key_from_path(self, abs_path) -> str:
+        """Convert an absolute filesystem path to a bucket-prefixed storage_key.
+
+        Used by callers that already wrote a file via the legacy code path
+        (image_compositor, host_generator) and need to record it in the
+        DB as a key rather than a path. Raises ValueError if the path is
+        not inside any known bucket dir.
+        """
+        target = Path(abs_path).resolve()
+        for bucket, root in _bucket_dirs().items():
+            try:
+                bucket_root = Path(root).resolve()
+            except FileNotFoundError:
+                continue
+            try:
+                rel = target.relative_to(bucket_root)
+            except ValueError:
+                continue
+            if str(rel) in (".", ""):
+                continue
+            return f"{bucket}/{rel}"
+        raise ValueError(f"path {abs_path!r} is not inside any known bucket")
+
 
 # Module-level singleton. Tests can monkeypatch this attribute to swap impls.
 media_store: MediaStore = LocalDiskMediaStore()
