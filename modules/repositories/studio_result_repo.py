@@ -18,10 +18,10 @@ Indexes (created in modules/db.py:init_indexes):
 - {user_id:1, task_id:1} unique
 - {user_id:1, status:1, completed_at:-1}
 
-Public surface mirrors how lifecycle.py exposed result data: scope-by-user
-for the SPA's `/result/:taskId` and `/history` pages, plus a
-non-scoped `find_by_task_id` helper used by the public /api/videos/{task_id}
-GET endpoint (plan §6: that endpoint is public so <video> tags work).
+Public surface: scope-by-user for the SPA's `/result/:taskId` and `/history`
+pages, plus a non-scoped `find_by_task_id` helper used by the public
+/api/videos/{task_id} GET endpoint (plan §6: that endpoint is public so
+<video> tags work).
 """
 from __future__ import annotations
 

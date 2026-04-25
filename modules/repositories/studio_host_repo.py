@@ -1,7 +1,6 @@
-"""studio_hosts collection — candidate avatars under the lifecycle state machine.
+"""studio_hosts collection — candidate avatars under the wizard state machine.
 
-State machine (mirrors modules/lifecycle.py:6-38 — keep this docstring in
-sync with that comment so a reader of either file sees the same model):
+State machine:
 
     generate
       └─→ status='draft', batch_id set
@@ -53,7 +52,8 @@ def _now() -> datetime:
 
 
 def _serialize(doc: dict) -> dict:
-    """Reduce a studio_hosts row to the lifecycle.serialize_record() shape."""
+    """Reduce a studio_hosts row to the minimal wizard-frontend shape
+    (image_id, path, url, batch_id, is_prev_selected, seed)."""
     if doc is None:
         return None
     storage_key = doc.get("storage_key", "")
@@ -74,14 +74,13 @@ def _serialize(doc: dict) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Public API — keep the names lifecycle.py callers already use so app.py
-# only needs to add `await` (and pass user_id).
+# Public API
 # ---------------------------------------------------------------------------
 
 async def get_state(user_id: str, step: str) -> dict:
-    """Return current lifecycle state for a step.
+    """Return current wizard state for a step.
 
-    Shape (matches lifecycle.get_state()):
+    Shape:
       {
         "selected":      <serialized row | None>,
         "prev_selected": <serialized row | None>,
