@@ -167,15 +167,22 @@
 }
 
 /* ── Surfaces ───────────────────────────────────── */
+/* Match the wizard's .card primitive (modules/styles/app.css):
+ * --r-lg radius (12px), --pad-card padding (20px equivalent), --shadow-xs.
+ * Non-wizard pages use these utilities so the whole product reads as one
+ * shape language, not two (compact workspace cards everywhere). */
 @utility surface-base {
   background: var(--card);
   border: 1px solid var(--border);
+  border-radius: 0.75rem; /* 12px = wizard --r-lg */
+  box-shadow: 0 1px 0 rgba(20, 24, 32, 0.04); /* wizard --shadow-xs */
 }
 
 @utility surface-raised {
   background: var(--secondary);
   border: 1px solid var(--border);
-  box-shadow: 0 1px 3px rgba(0,0,0,0.06);
+  border-radius: 0.75rem;
+  box-shadow: 0 1px 2px rgba(20, 24, 32, 0.06), 0 1px 3px rgba(20, 24, 32, 0.04);
 }
 
 @utility panel-glass {

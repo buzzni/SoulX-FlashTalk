@@ -44,17 +44,17 @@ export default function LoginPage() {
       <form
         onSubmit={onSubmit}
         aria-labelledby="login-heading"
-        className="w-full max-w-sm flex flex-col gap-4 p-8 rounded-lg surface-base shadow-[0_4px_24px_rgba(0,0,0,0.06)] animate-fade-in"
+        className="w-full max-w-sm flex flex-col gap-3 p-6 surface-base animate-fade-in"
       >
-        <div className="flex flex-col gap-1">
-          <h1 id="login-heading" className="text-xl font-bold tracking-tight">
+        <div className="flex flex-col gap-0.5 mb-1">
+          <h1 id="login-heading" className="text-lg font-semibold tracking-tight">
             SoulX-FlashTalk Studio
           </h1>
-          <p className="text-sm text-muted-foreground">로그인이 필요합니다</p>
+          <p className="text-[13px] text-muted-foreground">로그인이 필요합니다</p>
         </div>
 
-        <label className="flex flex-col gap-1.5 text-[13px]">
-          <span className="font-medium">아이디</span>
+        <label className="flex flex-col gap-1.5 text-[12px] font-medium text-[hsl(214_8%_35%)]">
+          <span>아이디</span>
           <input
             type="text"
             autoComplete="username"
@@ -62,26 +62,26 @@ export default function LoginPage() {
             value={userId}
             onChange={(e) => setUserId(e.target.value)}
             disabled={busy}
-            className="px-3 py-2.5 text-sm rounded-md border border-input bg-card disabled:opacity-60 transition-colors focus:border-primary"
+            className="h-9 px-3 text-[13px] rounded-md border border-input bg-card disabled:opacity-60 transition-colors focus:border-primary"
           />
         </label>
 
-        <label className="flex flex-col gap-1.5 text-[13px]">
-          <span className="font-medium">비밀번호</span>
+        <label className="flex flex-col gap-1.5 text-[12px] font-medium text-[hsl(214_8%_35%)]">
+          <span>비밀번호</span>
           <input
             type="password"
             autoComplete="current-password"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             disabled={busy}
-            className="px-3 py-2.5 text-sm rounded-md border border-input bg-card disabled:opacity-60 transition-colors focus:border-primary"
+            className="h-9 px-3 text-[13px] rounded-md border border-input bg-card disabled:opacity-60 transition-colors focus:border-primary"
           />
         </label>
 
         {error && (
           <div
             role="alert"
-            className="px-3 py-2 text-[13px] rounded-md border bg-[hsl(0_90%_96%)] text-destructive border-destructive/30"
+            className="px-3 py-2 text-[12px] rounded-md border bg-[hsl(0_90%_96%)] text-destructive border-destructive/30"
           >
             {error}
           </div>
@@ -90,7 +90,7 @@ export default function LoginPage() {
         <button
           type="submit"
           disabled={busy}
-          className="px-4 py-3 text-sm font-semibold rounded-md bg-primary text-primary-foreground transition-colors hover:bg-[var(--color-brand-primary-hover)] disabled:opacity-60 disabled:cursor-not-allowed"
+          className="h-10 px-4 text-[13px] font-semibold rounded-md bg-primary text-primary-foreground transition-colors hover:bg-[var(--color-brand-primary-hover)] disabled:opacity-60 disabled:cursor-not-allowed mt-1"
         >
           {busy ? '확인 중…' : '로그인'}
         </button>

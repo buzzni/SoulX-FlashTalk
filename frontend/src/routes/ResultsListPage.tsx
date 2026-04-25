@@ -129,25 +129,25 @@ export function ResultsListPage() {
             }}
           />
           <section className="min-w-0">
-            <div className="flex items-baseline gap-3 mb-4">
-              <h1 className="m-0 text-[22px] font-bold tracking-tight">{filterTitle}</h1>
+            <div className="flex items-baseline gap-2.5 mb-3">
+              <h1 className="m-0 text-xl font-semibold tracking-tight">{filterTitle}</h1>
               {items !== null && (
-                <span className="text-sm text-muted-foreground tabular-nums">
+                <span className="text-[13px] text-muted-foreground tabular-nums">
                   {items.length}개
                 </span>
               )}
             </div>
             {historyError && (
-              <div className="px-4 py-3 rounded-md bg-[hsl(0_90%_96%)] text-destructive border border-destructive/30">
+              <div className="px-3 py-2 text-[13px] rounded-md bg-[hsl(0_90%_96%)] text-destructive border border-destructive/30">
                 {historyError}
               </div>
             )}
             {!historyError && items === null && (
-              <div className="px-4 py-3 text-muted-foreground">불러오는 중…</div>
+              <div className="px-3 py-2 text-[13px] text-muted-foreground">불러오는 중…</div>
             )}
             {!historyError && items !== null && items.length === 0 && (
-              <div className="flex flex-col items-center gap-3 py-12 px-4 surface-base rounded-xl text-center animate-fade-in">
-                <p className="m-0 text-sm text-muted-foreground">
+              <div className="flex flex-col items-center gap-2.5 py-10 px-4 surface-base text-center animate-fade-in">
+                <p className="m-0 text-[13px] text-muted-foreground">
                   {filter === 'all'
                     ? '아직 만든 영상이 없어요.'
                     : '이 플레이리스트는 비어있어요.'}
@@ -155,7 +155,7 @@ export function ResultsListPage() {
                 {filter === 'all' && (
                   <Link
                     to="/step/1"
-                    className="text-sm font-semibold text-primary no-underline hover:underline"
+                    className="text-[13px] font-semibold text-primary no-underline hover:underline"
                   >
                     첫 영상 만들러 가기 →
                   </Link>
@@ -163,7 +163,7 @@ export function ResultsListPage() {
               </div>
             )}
             {!historyError && items !== null && items.length > 0 && (
-              <div className="grid gap-4 grid-cols-[repeat(auto-fill,minmax(220px,1fr))]">
+              <div className="grid gap-3 grid-cols-[repeat(auto-fill,minmax(220px,1fr))]">
                 {items.map((it) => (
                   <ResultCard
                     key={it.task_id}
@@ -232,7 +232,7 @@ function PlaylistSidebar({
   };
 
   return (
-    <aside className="flex flex-col gap-1 p-3 rounded-lg bg-sidebar-background border border-sidebar-border md:sticky md:top-4">
+    <aside className="flex flex-col gap-0.5 p-2 rounded-xl bg-sidebar-background border border-sidebar-border md:sticky md:top-4">
       {error && (
         <div className="px-2 py-1.5 text-xs text-destructive">{error}</div>
       )}
@@ -263,12 +263,12 @@ function PlaylistSidebar({
         <button
           type="button"
           onClick={() => setCreating(true)}
-          className="flex items-center justify-between w-full text-left px-2.5 py-2 rounded text-sm font-semibold text-primary transition-colors hover:bg-accent/40 cursor-pointer"
+          className="flex items-center w-full text-left px-2.5 h-8 rounded-md text-[13px] font-medium text-primary transition-colors hover:bg-accent/40 cursor-pointer"
         >
           + 새 플레이리스트
         </button>
       ) : (
-        <div className="flex flex-col gap-1.5 px-1.5 py-1.5">
+        <div className="flex flex-col gap-1.5 px-1 py-1">
           <input
             type="text"
             value={newName}
@@ -276,7 +276,7 @@ function PlaylistSidebar({
             placeholder="이름 (예: 신상품)"
             autoFocus
             disabled={busy}
-            className="px-2 py-1.5 text-[13px] rounded border border-input bg-card disabled:opacity-60 transition-colors focus:border-primary"
+            className="h-8 px-2 text-[13px] rounded-md border border-input bg-card disabled:opacity-60 transition-colors focus:border-primary"
             onKeyDown={(e) => {
               if (e.key === 'Enter') {
                 e.preventDefault();
@@ -292,7 +292,7 @@ function PlaylistSidebar({
               type="button"
               onClick={submitCreate}
               disabled={busy || !newName.trim()}
-              className="flex-1 px-2 py-1.5 text-xs font-semibold rounded bg-primary text-primary-foreground transition-colors hover:bg-[var(--color-brand-primary-hover)] disabled:opacity-60 disabled:cursor-not-allowed cursor-pointer"
+              className="flex-1 h-7 px-2 text-[12px] font-medium rounded-md bg-primary text-primary-foreground transition-colors hover:bg-[var(--color-brand-primary-hover)] disabled:opacity-60 disabled:cursor-not-allowed cursor-pointer"
             >
               만들기
             </button>
@@ -300,13 +300,13 @@ function PlaylistSidebar({
               type="button"
               onClick={closeCreate}
               disabled={busy}
-              className="flex-1 px-2 py-1.5 text-xs rounded border border-input bg-card text-muted-foreground transition-colors hover:bg-secondary disabled:opacity-60 cursor-pointer"
+              className="flex-1 h-7 px-2 text-[12px] rounded-md border border-input bg-card text-muted-foreground transition-colors hover:bg-secondary disabled:opacity-60 cursor-pointer"
             >
               취소
             </button>
           </div>
           {createError && (
-            <div className="text-[11px] text-destructive">{createError}</div>
+            <div className="text-[11px] text-destructive px-1">{createError}</div>
           )}
         </div>
       )}
@@ -323,9 +323,9 @@ interface SidebarRowProps {
 
 function SidebarRow({ label, count, active, onClick }: SidebarRowProps) {
   const base =
-    'flex items-center justify-between w-full text-left px-2.5 py-2 rounded text-sm transition-colors cursor-pointer';
+    'flex items-center justify-between w-full text-left px-2.5 h-8 rounded-md text-[13px] transition-colors cursor-pointer';
   const variant = active
-    ? 'bg-sidebar-accent text-sidebar-accent-foreground font-semibold'
+    ? 'bg-sidebar-accent text-sidebar-accent-foreground font-medium'
     : 'text-sidebar-foreground hover:bg-accent/40';
   return (
     <button type="button" onClick={onClick} className={`${base} ${variant}`}>
@@ -434,9 +434,9 @@ function SidebarPlaylistRow({
   }
 
   const rowBase =
-    'flex items-center justify-between w-full text-left pl-2.5 pr-9 py-2 rounded text-sm transition-colors cursor-pointer';
+    'flex items-center justify-between w-full text-left pl-2.5 pr-9 h-8 rounded-md text-[13px] transition-colors cursor-pointer';
   const rowVariant = active
-    ? 'bg-sidebar-accent text-sidebar-accent-foreground font-semibold'
+    ? 'bg-sidebar-accent text-sidebar-accent-foreground font-medium'
     : 'text-sidebar-foreground hover:bg-accent/40';
 
   return (
@@ -544,14 +544,14 @@ function ResultCard({ item, playlists, onMoved }: ResultCardProps) {
     <div className="relative group">
       <Link
         to={`/result/${item.task_id}`}
-        className="flex flex-col rounded-lg surface-base overflow-hidden no-underline text-foreground shadow-[0_2px_8px_rgba(0,0,0,0.04)] transition-shadow hover:shadow-[0_6px_18px_rgba(0,0,0,0.08)]"
+        className="flex flex-col surface-base overflow-hidden no-underline text-foreground transition-colors hover:border-input"
       >
         <div className="w-full aspect-video bg-foreground overflow-hidden">
           <video src={videoUrl} preload="metadata" muted className="block w-full h-full object-cover" />
         </div>
-        <div className="p-3">
-          <div className="text-sm font-semibold mb-1 truncate" title={blurb}>{blurb}</div>
-          <div className="text-xs text-muted-foreground">
+        <div className="p-2.5">
+          <div className="text-[13px] font-medium mb-0.5 truncate" title={blurb}>{blurb}</div>
+          <div className="text-[11px] text-muted-foreground">
             {ts}
             {dur && ` · ${dur}`}
           </div>

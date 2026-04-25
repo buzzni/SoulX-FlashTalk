@@ -1,6 +1,8 @@
 /**
- * / — minimal home with two big actions: make a new video, or browse
- * past results. Future: hero / landing copy on top of the same shell.
+ * / — minimal home with two actions: make a new video, or browse past
+ * results. Card density and shape match the wizard's .card primitive
+ * (--r-lg radius, --pad-card padding, --shadow-xs) so the whole product
+ * reads as one space.
  */
 import { useNavigate } from 'react-router-dom';
 import { useSyncExternalStore } from 'react';
@@ -16,15 +18,15 @@ export function HomePage() {
   return (
     <div className="min-h-screen flex flex-col bg-secondary">
       <AppHeader />
-      <main className="flex-1 flex justify-center items-start px-4 md:px-6 pt-12 md:pt-20 pb-10">
-        <div className="w-full max-w-3xl rounded-2xl surface-base p-6 md:p-10 shadow-[0_4px_24px_rgba(0,0,0,0.04)] animate-fade-in">
-          <h1 className="text-2xl md:text-[28px] font-bold tracking-tight leading-tight">
+      <main className="flex-1 flex justify-center items-start px-4 md:px-6 pt-10 md:pt-16 pb-10">
+        <div className="w-full max-w-2xl surface-base p-5 md:p-6 animate-fade-in">
+          <h1 className="text-xl font-semibold tracking-tight leading-tight">
             {greeting ? `${greeting}님, ` : ''}무엇을 만들어볼까요?
           </h1>
-          <p className="mt-1.5 mb-7 text-sm text-muted-foreground">
+          <p className="mt-1 mb-5 text-[13px] text-muted-foreground">
             호스트 영상부터 결과 관리까지 한 곳에서.
           </p>
-          <div className="grid gap-4 sm:grid-cols-2">
+          <div className="grid gap-3 sm:grid-cols-2">
             <ActionButton
               variant="primary"
               iconName="plus"
@@ -55,25 +57,27 @@ interface ActionButtonProps {
 }
 
 function ActionButton({ variant, iconName, title, subtitle, onClick }: ActionButtonProps) {
+  // Action tiles, not form buttons — bigger than a wizard .btn but still
+  // restrained. 16px corner radius, 16px padding, no decorative drop shadow.
   const base =
-    'flex items-center gap-4 px-7 py-6 rounded-xl text-left cursor-pointer transition-all duration-100 hover:-translate-y-0.5 active:translate-y-0';
+    'flex items-center gap-3 px-4 py-4 rounded-md text-left cursor-pointer transition-colors';
   const variantClass =
     variant === 'primary'
-      ? 'bg-primary text-primary-foreground shadow-[0_4px_16px_rgba(0,93,255,0.25)] hover:shadow-[0_6px_20px_rgba(0,93,255,0.32)]'
-      : 'bg-muted text-foreground shadow-[0_2px_8px_rgba(0,0,0,0.04)] hover:bg-accent/40';
+      ? 'bg-primary text-primary-foreground hover:bg-[var(--color-brand-primary-hover)]'
+      : 'bg-secondary text-foreground border border-border hover:bg-accent/40';
   const iconBg =
     variant === 'primary'
       ? 'bg-white/15 text-primary-foreground'
-      : 'bg-card text-primary';
+      : 'bg-card text-primary border border-border';
 
   return (
     <button type="button" onClick={onClick} className={`${base} ${variantClass}`}>
-      <div className={`grid place-items-center w-11 h-11 rounded-lg shrink-0 ${iconBg}`}>
-        <Icon name={iconName} size={20} />
+      <div className={`grid place-items-center w-10 h-10 rounded-md shrink-0 ${iconBg}`}>
+        <Icon name={iconName} size={18} />
       </div>
-      <div>
-        <div className="text-lg font-bold mb-0.5">{title}</div>
-        <div className={`text-[13px] ${variant === 'primary' ? 'opacity-90' : 'text-muted-foreground'}`}>
+      <div className="min-w-0">
+        <div className="text-[14px] font-semibold mb-0.5 truncate">{title}</div>
+        <div className={`text-[12px] truncate ${variant === 'primary' ? 'opacity-85' : 'text-muted-foreground'}`}>
           {subtitle}
         </div>
       </div>

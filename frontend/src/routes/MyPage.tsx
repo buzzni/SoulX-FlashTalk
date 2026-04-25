@@ -44,9 +44,9 @@ export function MyPage() {
   return (
     <div className="min-h-screen flex flex-col bg-secondary">
       <AppHeader />
-      <main className="flex-1 flex justify-center px-6 py-8">
-        <div className="w-full max-w-lg mt-8 self-start rounded-xl surface-base p-8 animate-fade-in">
-          <h1 className="m-0 mb-6 text-xl font-bold tracking-tight">마이페이지</h1>
+      <main className="flex-1 flex justify-center px-4 md:px-6 py-8">
+        <div className="w-full max-w-md mt-6 self-start surface-base p-5 animate-fade-in">
+          <h1 className="m-0 mb-4 text-base font-semibold tracking-tight">마이페이지</h1>
 
           <Row label="아이디" value={user?.user_id || '—'} />
           <Row label="이름" value={user?.display_name || user?.user_id || '—'} />
@@ -64,7 +64,7 @@ export function MyPage() {
             type="button"
             onClick={onLogout}
             disabled={busy}
-            className="mt-6 w-full px-4 py-3 text-sm font-semibold rounded-md border border-destructive bg-card text-destructive transition-colors hover:bg-destructive hover:text-destructive-foreground disabled:opacity-60 cursor-pointer"
+            className="mt-5 w-full h-9 px-4 text-[13px] font-medium rounded-md border border-destructive/40 bg-card text-destructive transition-colors hover:bg-destructive hover:text-destructive-foreground hover:border-destructive disabled:opacity-60 cursor-pointer"
           >
             {busy ? '로그아웃 중…' : '로그아웃'}
           </button>
@@ -76,7 +76,7 @@ export function MyPage() {
 
 function Row({ label, value }: { label: string; value: string }) {
   return (
-    <div className="flex justify-between py-3 text-sm border-b border-border last:border-b-0">
+    <div className="flex justify-between py-2 text-[13px] border-b border-border last:border-b-0">
       <span className="text-muted-foreground">{label}</span>
       <span className="font-medium">{value}</span>
     </div>
