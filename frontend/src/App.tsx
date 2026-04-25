@@ -19,9 +19,11 @@ import ResultPage from './studio/ResultPage';
 import WizardLayout from './routes/WizardLayout';
 import { Step1Page, Step2Page, Step3Page } from './routes/StepPages';
 import { RenderDispatchPage, RenderAttachPage } from './routes/RenderPage';
-import { RootRedirect } from './routes/RootRedirect';
 import LoginPage from './routes/LoginPage';
 import { RequireAuth } from './routes/RequireAuth';
+import { HomePage } from './routes/HomePage';
+import { MyPage } from './routes/MyPage';
+import { ResultsListPage } from './routes/ResultsListPage';
 
 export default function App() {
   return (
@@ -29,7 +31,9 @@ export default function App() {
       <BrowserRouter>
         <Routes>
           <Route path="/login" element={<LoginPage />} />
-          <Route path="/" element={<RequireAuth><RootRedirect /></RequireAuth>} />
+          <Route path="/" element={<RequireAuth><HomePage /></RequireAuth>} />
+          <Route path="/mypage" element={<RequireAuth><MyPage /></RequireAuth>} />
+          <Route path="/results" element={<RequireAuth><ResultsListPage /></RequireAuth>} />
           <Route
             path="/step/1"
             element={

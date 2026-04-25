@@ -9,6 +9,7 @@
 import { Fragment, type ReactNode } from 'react';
 import Icon from '../studio/Icon.jsx';
 import { Button } from '../studio/primitives.jsx';
+import { ProfileMenu } from './ProfileMenu';
 import type { WizardValidity } from './wizardValidation';
 
 export const STEPS = [
@@ -71,6 +72,7 @@ export function TopBar({ step, valid, onStepClick, onReset, queueSlot }: TopBarP
         <Button size="sm" icon="refresh" onClick={onReset}>
           처음부터 다시
         </Button>
+        <ProfileMenu />
       </div>
     </header>
   );
