@@ -157,7 +157,35 @@ export default function Step1Host({ state, update }: Step1HostProps) {
         <div className="flex justify-between items-center" style={{ marginBottom: 14 }}>
           <Segmented
             value={host.mode}
-            onChange={(v: 'text' | 'image') => setField('mode', v)}
+            onChange={(v: 'text' | 'image') => {
+              // Mode switch must clear the OTHER mode's inputs so the
+              // backend doesn't get a stale faceRef/outfitRef/etc when the
+              // user picked "설명으로 만들기" — see backend defense in
+              // modules/host_generator.py _sanitize_refs_by_mode.
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              update((s: any) => ({
+                ...s,
+                host:
+                  v === 'text'
+                    ? {
+                        ...s.host,
+                        mode: 'text',
+                        faceRef: null,
+                        faceRefPath: null,
+                        outfitRef: null,
+                        outfitRefPath: null,
+                        outfitText: '',
+                        extraPrompt: '',
+                      }
+                    : {
+                        ...s.host,
+                        mode: 'image',
+                        prompt: '',
+                        negativePrompt: '',
+                        builder: {},
+                      },
+              }));
+            }}
             options={[
               { value: 'text', label: '설명으로 만들기', icon: 'wand' },
               { value: 'image', label: '사진으로 만들기', icon: 'image' },
