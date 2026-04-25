@@ -1,7 +1,14 @@
 """Shared pytest fixtures for HostStudio migration tests."""
 from __future__ import annotations
 
+import os
+
 import pytest
+
+
+def _test_db_name() -> str:
+    worker = os.environ.get("PYTEST_XDIST_WORKER", "main")
+    return f"ai_showhost_test_{worker}_apitests"
 
 
 _FAKE_USER = {
@@ -35,6 +42,26 @@ def _bypass_studio_auth(monkeypatch, request):
     mod_name = request.module.__name__.rsplit(".", 1)[-1]
     if mod_name in ("test_auth_login", "test_auth_current_user"):
         return
+    # Repo tests do their own DB setup against per-worker test DBs.
+    if mod_name in ("test_studio_host_repo", "test_studio_saved_host_repo",
+                    "test_db_connection", "test_user_repo",
+                    "test_studio_006_add_subscriptions", "test_storage_local"):
+        return
+
+    # Redirect DB so api-level tests don't pollute the dev `ai_showhost`.
+    # The TestClient's startup hook reads config.DB_NAME at fire time, so
+    # patching here (before the client is constructed) takes effect.
+    monkeypatch.setattr("config.MONGO_URL", "mongodb://localhost:27017")
+    monkeypatch.setattr("config.DB_NAME", _test_db_name())
+
+    # Drop all owned collections from a previous run/test so each test starts clean.
+    from pymongo import MongoClient
+    pre = MongoClient("mongodb://localhost:27017", serverSelectionTimeoutMS=2000)
+    test_db = pre[_test_db_name()]
+    for coll in test_db.list_collection_names():
+        if coll.startswith("studio_") or coll == "users":
+            test_db[coll].drop()
+    pre.close()
 
     async def _bypass(req, call_next):
         req.state.user = dict(_FAKE_USER)

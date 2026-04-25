@@ -38,10 +38,10 @@ def client(monkeypatch, tmp_path):
     from fastapi.testclient import TestClient
     import app as app_module
 
-    client = TestClient(app_module.app)
-    client._host = str(host)
-    client._products = [str(prod1), str(prod2)]
-    return client
+    with TestClient(app_module.app) as client:
+        client._host = str(host)
+        client._products = [str(prod1), str(prod2)]
+        yield client
 
 
 def _fake_result(n=4):

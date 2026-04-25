@@ -2337,46 +2337,33 @@ async def composite_generate_stream(
 
 
 # ========================================
-# HostStudio Phase 1 — Saved Hosts CRUD
+# HostStudio Phase 1 — Saved Hosts CRUD (PR4: DB-backed)
 # ========================================
 
 
-def _host_meta_path(host_id: str) -> str:
-    return os.path.join(config.HOSTS_DIR, f"{host_id}.json")
-
-
-def _host_image_path(host_id: str) -> str:
-    return os.path.join(config.HOSTS_DIR, f"{host_id}.png")
-
-
 @app.get("/api/hosts")
-async def list_saved_hosts():
-    """List saved hosts (server-persisted). localStorage holds index on client."""
-    if not os.path.isdir(config.HOSTS_DIR):
-        return {"hosts": []}
-    items = []
-    for fname in sorted(os.listdir(config.HOSTS_DIR)):
-        if not fname.endswith(".json"):
-            continue
-        host_id = fname[:-5]
-        meta_path = _host_meta_path(host_id)
-        try:
-            with open(meta_path, "r", encoding="utf-8") as f:
-                meta = json.load(f)
-        except (OSError, json.JSONDecodeError):
-            continue
-        items.append(meta)
+async def list_saved_hosts(request: Request):
+    """List saved hosts owned by the authenticated user."""
+    from modules.repositories import studio_saved_host_repo
+    user = auth_module.get_request_user(request)
+    items = await studio_saved_host_repo.list_for_user(user["user_id"])
     return {"hosts": items}
 
 
 @app.post("/api/hosts/save")
 async def save_host(
+    request: Request,
     source_path: str = Form(...),
     name: str = Form(...),
     meta: Optional[str] = Form(None),  # JSON dict
 ):
-    """Persist a candidate image under HOSTS_DIR (V1 — no auth; protect via REQUIRE_API_KEY)."""
+    """Persist a candidate image as a long-lived saved host (PR4: DB-backed)."""
+    from pathlib import Path as _Path
+    from modules import storage as storage_module
+    from modules.repositories import studio_saved_host_repo
     from utils.security import safe_upload_path
+
+    user = auth_module.get_request_user(request)
 
     # Guard source_path (must be in UPLOADS/OUTPUTS)
     source = safe_upload_path(source_path)
@@ -2384,47 +2371,47 @@ async def save_host(
         raise HTTPException(status_code=404, detail="Source image not found")
 
     host_id = uuid.uuid4().hex
-    dst = _host_image_path(host_id)
-    import shutil
-    shutil.copyfile(source, dst)
+    storage_key = storage_module.media_store.save_path(
+        "hosts", _Path(source), basename=f"{host_id}.png"
+    )
 
-    meta_dict = {"id": host_id, "name": name, "path": dst, "url": f"/api/files/outputs/hosts/saved/{host_id}.png"}
+    meta_dict = None
     if meta:
         try:
             extra = json.loads(meta)
             if isinstance(extra, dict):
-                meta_dict["meta"] = extra
+                meta_dict = extra
         except json.JSONDecodeError:
             pass
+
     try:
-        with open(_host_meta_path(host_id), "w", encoding="utf-8") as f:
-            json.dump(meta_dict, f, ensure_ascii=False, indent=2)
-    except OSError as e:
-        # Cleanup image if metadata write fails
+        return await studio_saved_host_repo.create(
+            user["user_id"],
+            host_id=host_id,
+            name=name,
+            storage_key=storage_key,
+            meta=meta_dict,
+        )
+    except Exception as e:
+        # If DB insert fails, clean up the file we just wrote.
         try:
-            os.unlink(dst)
-        except OSError:
+            storage_module.media_store.delete(storage_key)
+        except Exception:
             pass
         raise HTTPException(status_code=500, detail=f"Failed to save host: {e}")
-    return meta_dict
 
 
 @app.delete("/api/hosts/{host_id}")
-async def delete_host(host_id: str):
-    """Remove a saved host and its metadata."""
-    # Defensive: host_id must be alphanumeric (UUID hex) to avoid path traversal
+async def delete_host(host_id: str, request: Request):
+    """Remove a saved host (DB row + backing file). Owner-scoped."""
+    from modules.repositories import studio_saved_host_repo
+    user = auth_module.get_request_user(request)
+    # Defensive: host_id must be alphanumeric (UUID hex) to avoid traversal-shaped values.
     if not host_id.isalnum():
         raise HTTPException(status_code=400, detail="Invalid host_id")
-    meta = _host_meta_path(host_id)
-    img = _host_image_path(host_id)
-    if not os.path.exists(meta):
+    ok = await studio_saved_host_repo.delete(user["user_id"], host_id)
+    if not ok:
         raise HTTPException(status_code=404, detail="Host not found")
-    try:
-        os.unlink(meta)
-        if os.path.exists(img):
-            os.unlink(img)
-    except OSError as e:
-        raise HTTPException(status_code=500, detail=f"Delete failed: {e}")
     return {"message": "deleted", "id": host_id}
 
 

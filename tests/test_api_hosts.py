@@ -30,7 +30,9 @@ def client(monkeypatch, tmp_path):
     from fastapi.testclient import TestClient
     import app as app_module
 
-    return TestClient(app_module.app), uploads, hosts
+    # Context-managed so FastAPI startup hooks (db.init in particular) fire.
+    with TestClient(app_module.app) as tc:
+        yield tc, uploads, hosts
 
 
 def test_list_empty_hosts(client):
