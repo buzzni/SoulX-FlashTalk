@@ -23,7 +23,8 @@ import {
 import { useCompositeGeneration, type CompositionVariant } from '../../hooks/useCompositeGeneration';
 import { useUploadReferenceImage } from '../../hooks/useUploadReferenceImage';
 import { uploadBackgroundImage, uploadReferenceImage } from '../../api/upload';
-import { makeRandomSeeds } from '../../api/mapping';
+import { selectComposite as selectCompositeApi } from '../../api/composite';
+import { imageIdFromPath, makeRandomSeeds } from '../../api/mapping';
 import { ProductList, type Product } from './ProductList';
 import { BackgroundPicker, type Background } from './BackgroundPicker';
 import { CompositionControls, type Composition } from './CompositionControls';
@@ -153,8 +154,15 @@ export default function Step2Composite({ state, update }: Step2CompositeProps) {
         selectedSeed: v.seed,
         selectedPath: v.path ?? null,
         selectedUrl: v.url ?? null,
+        selectedImageId: v.imageId ?? null,
       },
     }));
+    if (v.imageId) {
+      selectCompositeApi(v.imageId).catch((e) => {
+        // eslint-disable-next-line no-console
+        console.warn('composite select sync failed (non-fatal):', e);
+      });
+    }
   };
 
   const handlePickedServerFile = (f: unknown) => {
@@ -244,7 +252,11 @@ export default function Step2Composite({ state, update }: Step2CompositeProps) {
           >
             <CompositionVariants
               variants={gen.variants}
-              selectedSeed={composition.selectedSeed ?? null}
+              prevSelected={gen.prevSelected}
+              selectedImageId={
+                (composition as { selectedImageId?: string | null }).selectedImageId ??
+                imageIdFromPath((composition as { selectedPath?: string | null }).selectedPath)
+              }
               onSelect={selectComposite}
             />
             {composition.generated && (

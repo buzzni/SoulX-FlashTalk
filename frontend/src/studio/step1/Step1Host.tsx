@@ -16,8 +16,8 @@
 import { useEffect, useRef } from 'react';
 import { Badge, Button, Card, Segmented } from '../primitives.jsx';
 import { useHostGeneration, type HostVariant } from '../../hooks/useHostGeneration';
-import { makeRandomSeeds } from '../../api/mapping';
-import type { HostGenerateInput } from '../../api/host';
+import { imageIdFromPath, makeRandomSeeds } from '../../api/mapping';
+import { selectHost, type HostGenerateInput } from '../../api/host';
 import type { UploadResult } from '../../api/upload';
 import { HostTextForm } from './HostTextForm';
 import { HostReferenceUploader, type RefFile } from './HostReferenceUploader';
@@ -114,9 +114,20 @@ export default function Step1Host({ state, update }: Step1HostProps) {
         imageUrl: v.url ?? null,
         selectedPath: v.path ?? null,
         selectedSeed: v.seed,
+        selectedImageId: v.imageId ?? null,
         _gradient: v._gradient ?? null,
       },
     }));
+    // Sync the server-side lifecycle slot. Fire-and-forget — the local
+    // store is already updated; a transient network blip just means
+    // the cleanup sweep at the next generate misses one previously-
+    // selected image (worst case: a few extra files on disk).
+    if (v.imageId) {
+      selectHost(v.imageId).catch((e) => {
+        // eslint-disable-next-line no-console
+        console.warn('host select sync failed (non-fatal):', e);
+      });
+    }
   };
 
   const handleFaceSelected = (ref: RefFile | null, uploaded?: UploadResult) => {
@@ -249,7 +260,11 @@ export default function Step1Host({ state, update }: Step1HostProps) {
           >
             <HostVariantGrid
               variants={variants}
-              selectedSeed={host.selectedSeed ?? null}
+              prevSelected={gen.prevSelected}
+              selectedImageId={
+                (host as { selectedImageId?: string | null }).selectedImageId ??
+                imageIdFromPath((host as { selectedPath?: string | null }).selectedPath)
+              }
               onSelect={handleSelectVariant}
             />
             {host.generated && (

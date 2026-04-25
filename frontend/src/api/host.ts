@@ -106,6 +106,27 @@ export async function generateHost(
   return parseResponse(res, '호스트 생성');
 }
 
+/**
+ * Mark a Step1 candidate as the user's current selection. Server uses
+ * this to schedule cleanup at the next generate / video-render event.
+ * Fire-and-forget from the UI's perspective — local state already
+ * reflects the click; this only syncs the backend's lifecycle slot.
+ */
+export async function selectHost(
+  imageId: string,
+  { signal }: CallOptions = {},
+): Promise<unknown> {
+  const body = new FormData();
+  body.append('image_id', imageId);
+  const res = await fetch(`${API_BASE}/api/host/select`, {
+    method: 'POST',
+    body,
+    headers: getAuthHeaders(),
+    signal,
+  });
+  return parseResponse(res, '호스트 선택');
+}
+
 // Stream events — untyped union (backend emits several flavors that
 // change quickly during development). Consumers typically narrow by
 // `.type` at the callsite.

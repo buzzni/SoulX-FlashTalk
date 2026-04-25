@@ -91,6 +91,26 @@ export async function generateComposite(
   return parseResponse(res, '합성 이미지 생성');
 }
 
+/**
+ * Mark a Step2 candidate as the user's current selection. See
+ * `selectHost` for rationale — this only syncs the backend's
+ * lifecycle slot; the local store already reflects the click.
+ */
+export async function selectComposite(
+  imageId: string,
+  { signal }: CallOptions = {},
+): Promise<unknown> {
+  const body = new FormData();
+  body.append('image_id', imageId);
+  const res = await fetch(`${API_BASE}/api/composite/select`, {
+    method: 'POST',
+    body,
+    headers: getAuthHeaders(),
+    signal,
+  });
+  return parseResponse(res, '합성 선택');
+}
+
 export async function* streamComposite(
   input: CompositeInput,
   { signal, rembg = true }: CompositeCallOptions = {},

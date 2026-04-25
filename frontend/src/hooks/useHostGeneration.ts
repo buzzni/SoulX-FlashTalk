@@ -30,15 +30,28 @@ import { useAbortableRequest } from './useAbortableRequest';
 export interface HostVariant {
   seed: number;
   id: string;
+  /** Stable server-side identifier (filename stem, e.g.
+   * `host_abc12345_s10`). Derived from `path` on first arrival;
+   * undefined while the slot is still a placeholder. */
+  imageId?: string;
   url?: string;
   path?: string;
   placeholder: boolean;
   error?: string;
+  /** True for the 5th "이전 선택" tile carried over from a prior
+   * batch — distinct from the current 4 candidates. */
+  isPrev?: boolean;
   _gradient?: string | null;
 }
 
 export interface UseHostGenerationReturn {
   variants: HostVariant[];
+  /** The optional 5th tile — the previous batch's selected image,
+   * still pickable until the next selection commits. */
+  prevSelected: HostVariant | null;
+  /** Lifecycle batch id for the current 4 candidates. Useful only
+   * for diagnostics; selection uses `imageId`. */
+  batchId: string | null;
   isLoading: boolean;
   error: string | null;
   /** Start a fresh stream. `seeds` overrides the backend default —
@@ -52,14 +65,27 @@ export interface UseHostGenerationReturn {
   abort: () => void;
 }
 
+/** Derive the lifecycle image_id from a server path. The backend stores
+ * candidates as `<step>_<...>.png`; the id is the basename without
+ * extension. Returns undefined for empty/odd paths. */
+function imageIdFromPath(path?: string): string | undefined {
+  if (!path) return undefined;
+  const name = path.split('/').pop() || '';
+  return name.endsWith('.png') ? name.slice(0, -4) : name || undefined;
+}
+
 export function useHostGeneration(): UseHostGenerationReturn {
   // Seed initial state from the store so a reload shows the last
   // run's grid instantly. We don't subscribe — store only matters
   // at mount; during an active stream we're authoritative.
-  const initialVariants =
-    (useWizardStore.getState().host?.variants as HostVariant[] | undefined) ?? [];
+  const initialHost = (useWizardStore.getState().host ?? {}) as Record<string, unknown>;
+  const initialVariants = (initialHost.variants as HostVariant[] | undefined) ?? [];
+  const initialPrev = (initialHost.prevSelected as HostVariant | null | undefined) ?? null;
+  const initialBatchId = (initialHost.batchId as string | null | undefined) ?? null;
 
   const [variants, setVariants] = useState<HostVariant[]>(initialVariants);
+  const [prevSelected, setPrevSelected] = useState<HostVariant | null>(initialPrev);
+  const [batchId, setBatchId] = useState<string | null>(initialBatchId);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const { run, abort } = useAbortableRequest();
@@ -79,6 +105,8 @@ export function useHostGeneration(): UseHostGenerationReturn {
       setVariants([]);
 
       let currentVariants: HostVariant[] = [];
+      let currentPrev: HostVariant | null = null;
+      let currentBatchId: string | null = null;
       const errs: string[] = [];
       let errorCount = 0;
 
@@ -98,9 +126,16 @@ export function useHostGeneration(): UseHostGenerationReturn {
             }));
             setVariants(currentVariants);
           } else if (evt.type === 'candidate') {
+            const path = evt.path as string;
             currentVariants = currentVariants.map((v) =>
               v.seed === evt.seed
-                ? { ...v, url: evt.url as string, path: evt.path as string, placeholder: false }
+                ? {
+                    ...v,
+                    url: evt.url as string,
+                    path,
+                    imageId: imageIdFromPath(path),
+                    placeholder: false,
+                  }
                 : v,
             );
             setVariants(currentVariants);
@@ -132,6 +167,32 @@ export function useHostGeneration(): UseHostGenerationReturn {
               // eslint-disable-next-line no-console
               console.warn('host generate had partial errors:', errs);
             }
+            // Pick up the lifecycle bookkeeping the backend appended:
+            // batch_id (for diagnostics) and prev_selected (the 5th
+            // "이전 선택" tile, surfaced as a separate slot so the UI
+            // can render it distinctly from the 4 fresh candidates).
+            if (typeof evt.batch_id === 'string') {
+              currentBatchId = evt.batch_id;
+              setBatchId(currentBatchId);
+            }
+            const prevRaw = evt.prev_selected as
+              | { image_id?: string; path?: string; url?: string; seed?: number; batch_id?: string }
+              | null
+              | undefined;
+            if (prevRaw && prevRaw.image_id && prevRaw.url) {
+              currentPrev = {
+                seed: typeof prevRaw.seed === 'number' ? prevRaw.seed : -1,
+                id: `prev-${prevRaw.image_id}`,
+                imageId: prevRaw.image_id,
+                url: prevRaw.url,
+                path: prevRaw.path,
+                placeholder: false,
+                isPrev: true,
+              };
+            } else {
+              currentPrev = null;
+            }
+            setPrevSelected(currentPrev);
           }
         }
 
@@ -139,7 +200,11 @@ export function useHostGeneration(): UseHostGenerationReturn {
         setIsLoading(false);
         // Persist the finished set so reload restores the grid and
         // Step 2 picks up the selected host for composition.
-        useWizardStore.getState().setHost({ variants: currentVariants });
+        useWizardStore.getState().setHost({
+          variants: currentVariants,
+          prevSelected: currentPrev,
+          batchId: currentBatchId,
+        });
       } catch (err) {
         if (!isCurrent()) return;
         const name = (err as { name?: string } | null)?.name;
@@ -154,5 +219,5 @@ export function useHostGeneration(): UseHostGenerationReturn {
     [run],
   );
 
-  return { variants, isLoading, error, regenerate, abort };
+  return { variants, prevSelected, batchId, isLoading, error, regenerate, abort };
 }

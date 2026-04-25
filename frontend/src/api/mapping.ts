@@ -128,3 +128,17 @@ export function paragraphsToScript(
 export function makeRandomSeeds(n = 4): number[] {
   return Array.from({ length: n }, () => Math.floor(Math.random() * 2_147_483_647));
 }
+
+// ────────────────────────────────────────────────────────────────────
+// Lifecycle image_id derivation — server stores candidates as
+// `<step>_<...>.png`; the lifecycle id is the basename stem. Used by
+// the variant grids' selection-highlight logic and by select-API
+// callsites that need to send `image_id` without a separate fetch.
+// ────────────────────────────────────────────────────────────────────
+
+export function imageIdFromPath(path?: string | null): string | null {
+  if (!path) return null;
+  const name = path.split('/').pop() || '';
+  if (!name) return null;
+  return name.endsWith('.png') ? name.slice(0, -4) : name;
+}

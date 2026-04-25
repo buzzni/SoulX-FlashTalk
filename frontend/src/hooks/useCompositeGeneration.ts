@@ -19,10 +19,15 @@ import { useAbortableRequest } from './useAbortableRequest';
 export interface CompositionVariant {
   seed: number;
   id: string;
+  /** Stable server-side identifier (filename stem). Derived from path
+   * on first arrival; undefined while the slot is still a placeholder. */
+  imageId?: string;
   url?: string;
   path?: string;
   placeholder: boolean;
   error?: string;
+  /** True for the 5th "이전 선택" tile carried over from a prior batch. */
+  isPrev?: boolean;
 }
 
 export interface UseCompositeGenerationOptions {
@@ -33,6 +38,8 @@ export interface UseCompositeGenerationOptions {
 
 export interface UseCompositeGenerationReturn {
   variants: CompositionVariant[];
+  prevSelected: CompositionVariant | null;
+  batchId: string | null;
   isLoading: boolean;
   error: string | null;
   regenerate: (
@@ -43,11 +50,21 @@ export interface UseCompositeGenerationReturn {
   abort: () => void;
 }
 
+function imageIdFromPath(path?: string): string | undefined {
+  if (!path) return undefined;
+  const name = path.split('/').pop() || '';
+  return name.endsWith('.png') ? name.slice(0, -4) : name || undefined;
+}
+
 export function useCompositeGeneration(): UseCompositeGenerationReturn {
-  const initialVariants =
-    (useWizardStore.getState().composition?.variants as CompositionVariant[] | undefined) ?? [];
+  const initialComp = (useWizardStore.getState().composition ?? {}) as Record<string, unknown>;
+  const initialVariants = (initialComp.variants as CompositionVariant[] | undefined) ?? [];
+  const initialPrev = (initialComp.prevSelected as CompositionVariant | null | undefined) ?? null;
+  const initialBatchId = (initialComp.batchId as string | null | undefined) ?? null;
 
   const [variants, setVariants] = useState<CompositionVariant[]>(initialVariants);
+  const [prevSelected, setPrevSelected] = useState<CompositionVariant | null>(initialPrev);
+  const [batchId, setBatchId] = useState<string | null>(initialBatchId);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const { run, abort } = useAbortableRequest();
@@ -74,6 +91,8 @@ export function useCompositeGeneration(): UseCompositeGenerationReturn {
       setVariants([]);
 
       let currentVariants: CompositionVariant[] = [];
+      let currentPrev: CompositionVariant | null = null;
+      let currentBatchId: string | null = null;
       let errorCount = 0;
       const errs: string[] = [];
 
@@ -102,9 +121,16 @@ export function useCompositeGeneration(): UseCompositeGenerationReturn {
                 .setComposition({ direction_en: evt.direction_en });
             }
           } else if (evt.type === 'candidate') {
+            const path = evt.path as string;
             currentVariants = currentVariants.map((v) =>
               v.seed === evt.seed
-                ? { ...v, url: evt.url as string, path: evt.path as string, placeholder: false }
+                ? {
+                    ...v,
+                    url: evt.url as string,
+                    path,
+                    imageId: imageIdFromPath(path),
+                    placeholder: false,
+                  }
                 : v,
             );
             setVariants(currentVariants);
@@ -136,12 +162,40 @@ export function useCompositeGeneration(): UseCompositeGenerationReturn {
               // eslint-disable-next-line no-console
               console.warn('composite had partial errors:', errs);
             }
+            // Lifecycle bookkeeping (batch_id + prev_selected) — see
+            // useHostGeneration for rationale.
+            if (typeof evt.batch_id === 'string') {
+              currentBatchId = evt.batch_id;
+              setBatchId(currentBatchId);
+            }
+            const prevRaw = evt.prev_selected as
+              | { image_id?: string; path?: string; url?: string; seed?: number; batch_id?: string }
+              | null
+              | undefined;
+            if (prevRaw && prevRaw.image_id && prevRaw.url) {
+              currentPrev = {
+                seed: typeof prevRaw.seed === 'number' ? prevRaw.seed : -1,
+                id: `prev-${prevRaw.image_id}`,
+                imageId: prevRaw.image_id,
+                url: prevRaw.url,
+                path: prevRaw.path,
+                placeholder: false,
+                isPrev: true,
+              };
+            } else {
+              currentPrev = null;
+            }
+            setPrevSelected(currentPrev);
           }
         }
 
         if (!isCurrent()) return;
         setIsLoading(false);
-        useWizardStore.getState().setComposition({ variants: currentVariants });
+        useWizardStore.getState().setComposition({
+          variants: currentVariants,
+          prevSelected: currentPrev,
+          batchId: currentBatchId,
+        });
       } catch (err) {
         if (!isCurrent()) return;
         const name = (err as { name?: string } | null)?.name;
@@ -156,5 +210,5 @@ export function useCompositeGeneration(): UseCompositeGenerationReturn {
     [run],
   );
 
-  return { variants, isLoading, error, regenerate, abort };
+  return { variants, prevSelected, batchId, isLoading, error, regenerate, abort };
 }
