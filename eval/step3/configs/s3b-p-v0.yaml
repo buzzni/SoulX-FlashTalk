@@ -1,0 +1,6 @@
+config_id: s3b-p-v0
+# Empty prompt → /api/generate falls back to FLASHTALK_OPTIONS["default_prompt"]
+# (config.py:42-47). This is the baseline control; do not commit a frozen prompt
+# here, otherwise baseline diverges from production whenever the config default
+# changes.
+prompt: ""

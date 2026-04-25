@@ -23,7 +23,7 @@ jobs:
           # deps (torch, transformers, flash-attn, etc.) stay out —
           # individual tests that need them use pytest.importorskip or
           # are marked with phase markers skipped in CI.
-          python -m pip install fastapi httpx python-multipart Pillow python-dotenv uvicorn google-genai
+          python -m pip install fastapi httpx python-multipart Pillow python-dotenv uvicorn google-genai pyyaml
       - name: Run pytest (skipped tests count as green)
         run: pytest -v
 

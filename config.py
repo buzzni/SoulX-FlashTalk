@@ -48,10 +48,6 @@ FLASHTALK_OPTIONS = {
     "audio_encode_mode": "stream",  # "stream" or "once"
     "base_seed": 9999,
     "cpu_offload": True,  # Enable CPU offload for lower VRAM usage (40GB instead of 64GB)
-    # Audio loudness target (default: -23 LUFS). Lower = subtler mouth movement
-    # because FlashTalk maps audio envelope to lip openness. -33 ≈ half the
-    # amplitude of -28 in linear, producing noticeably calmer lip motion.
-    "audio_lufs": -33,
 }
 
 # ========================================

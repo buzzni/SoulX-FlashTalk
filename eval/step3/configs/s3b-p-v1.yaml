@@ -1,0 +1,6 @@
+config_id: s3b-p-v1
+# Closed-mouth emphasis — spec v3 §4.2
+prompt: >
+  A person speaks with small natural lip movements. The mouth closes
+  completely between syllables. Hands rest at the sides with no gesturing.
+  Body remains relaxed and still. Background is completely stationary.
