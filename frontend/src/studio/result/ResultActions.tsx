@@ -38,8 +38,7 @@ export function ResultActions({
           <a
             href={`/api/videos/${taskId}?download=true`}
             download
-            className="btn btn-primary"
-            style={{ textDecoration: 'none', justifyContent: 'center' }}
+            className="inline-flex h-9 items-center justify-center gap-2 px-4 rounded-md bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-colors no-underline"
           >
             <Icon name="download" size={14} /> 내 컴퓨터에 저장
           </a>

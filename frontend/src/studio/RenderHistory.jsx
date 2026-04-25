@@ -57,8 +57,8 @@ export default function RenderHistory({ excludeTaskId, limit = 8 }) {
   if (visible.length === 0) return null;
 
   return (
-    <div className="card mt-4">
-      <div className="card-eyebrow">기다리는 동안 — 이전에 만든 영상 ({visible.length})</div>
+    <div className="surface-base p-5 mt-4">
+      <div className="text-[11px] uppercase tracking-widest font-semibold text-muted-foreground">기다리는 동안 — 이전에 만든 영상 ({visible.length})</div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 12 }}>
         {visible.map(v => {
           const isOpen = playing === v.task_id;

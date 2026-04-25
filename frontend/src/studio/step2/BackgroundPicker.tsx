@@ -188,10 +188,9 @@ export function BackgroundPicker({
               />
             )}
             <button
-              className="btn btn-ghost btn-sm"
-              onClick={onPickServerFile}
-              style={{ alignSelf: 'flex-start' }}
               type="button"
+              onClick={onPickServerFile}
+              className="self-start inline-flex items-center gap-1.5 h-8 px-3 rounded-md text-[12px] font-medium text-muted-foreground hover:bg-secondary hover:text-foreground transition-colors"
             >
               <Icon name="file" size={12} /> 서버에 있는 파일에서 선택
             </button>

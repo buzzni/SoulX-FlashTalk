@@ -89,16 +89,6 @@
 .step-arrow { width: 16px; height: 1px; background: var(--border); margin: 0 2px; }
 
 /* Card / section */
-.card {
-  background: var(--bg-elev); border: 1px solid var(--border); border-radius: var(--r-lg);
-  padding: var(--pad-card); box-shadow: var(--shadow-xs);
-  display: flex; flex-direction: column; gap: var(--gap-row);
-}
-.card-header { display: flex; align-items: center; justify-content: space-between; }
-.card-title { font-size: 15px; font-weight: 600; letter-spacing: -0.01em; }
-.card-subtitle { font-size: 12px; color: var(--text-tertiary); margin-top: 2px; }
-.card-eyebrow { font-size: 11px; color: var(--text-tertiary); text-transform: uppercase; letter-spacing: 0.08em; font-weight: 600; margin-bottom: 4px; }
-
 /* Step pages */
 .step-page { display: flex; flex-direction: column; gap: 16px; }
 .step-heading { display: flex; flex-direction: column; gap: 4px; margin-bottom: 4px; }
@@ -106,17 +96,6 @@
 .step-heading p { color: var(--text-secondary); margin: 0; font-size: 13px; }
 
 /* Segmented */
-.seg {
-  display: inline-flex; padding: 3px; background: var(--bg-sunken);
-  border: 1px solid var(--border); border-radius: var(--r-md);
-}
-.seg button {
-  border: 0; background: transparent; padding: 6px 14px; border-radius: 5px;
-  color: var(--text-secondary); font-size: 13px; font-weight: 500; cursor: pointer;
-  display: flex; align-items: center; gap: 6px;
-}
-.seg button.on { background: var(--bg-elev); color: var(--text); box-shadow: var(--shadow-sm); }
-
 /* Field */
 .field { display: flex; flex-direction: column; gap: 6px; }
 .field-row { display: grid; grid-template-columns: 1fr 1fr; gap: var(--gap-row); }
@@ -182,26 +161,6 @@
 .input-group .input.has-suffix { padding-right: 40px; }
 
 /* Buttons */
-.btn {
-  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
-  padding: 0 14px; height: var(--row-h); border-radius: var(--r-sm);
-  font-size: 13px; font-weight: 500; cursor: pointer;
-  border: 1px solid transparent; transition: all .12s;
-  white-space: nowrap; user-select: none;
-}
-.btn:disabled { opacity: 0.4; cursor: not-allowed; }
-.btn-primary { background: var(--accent); color: #fff; }
-.btn-primary:not(:disabled):hover { background: var(--accent-hover); }
-.btn-secondary { background: var(--bg-elev); color: var(--text); border-color: var(--border-strong); }
-.btn-secondary:not(:disabled):hover { background: var(--bg-subtle); }
-.btn-ghost { background: transparent; color: var(--text-secondary); }
-.btn-ghost:not(:disabled):hover { background: var(--bg-subtle); color: var(--text); }
-.btn-danger { background: var(--bg-elev); color: var(--danger); border-color: var(--border-strong); }
-.btn-danger:not(:disabled):hover { background: var(--danger-soft); border-color: var(--danger); }
-.btn-sm { height: 28px; padding: 0 10px; font-size: 12px; }
-.btn-lg { height: 42px; padding: 0 20px; font-size: 14px; }
-.btn-icon { width: var(--row-h); padding: 0; }
-
 /* Upload tile */
 .upload-tile {
   border: 1.5px dashed var(--border-strong); border-radius: var(--r-md);
@@ -273,29 +232,7 @@
 .file-btn-danger:hover { background: oklch(0.95 0.04 25); color: oklch(0.5 0.22 25); }
 
 /* Slider */
-.slider-row { display: flex; align-items: center; gap: 10px; }
-.slider-track {
-  flex: 1; position: relative; height: 4px; background: var(--border); border-radius: 99px; cursor: pointer;
-}
-.slider-fill { position: absolute; height: 100%; background: var(--accent); border-radius: 99px; top: 0; left: 0; }
-.slider-thumb {
-  position: absolute; top: 50%; width: 14px; height: 14px; background: var(--bg-elev);
-  border: 1.5px solid var(--accent); border-radius: 99px; transform: translate(-50%, -50%);
-  box-shadow: var(--shadow-sm); transition: transform .08s;
-}
-.slider-thumb:hover { transform: translate(-50%, -50%) scale(1.15); }
-.slider-value { min-width: 40px; text-align: right; font-size: 12px; color: var(--text-secondary); }
-
 /* Chips / tag / preset */
-.chip {
-  display: inline-flex; align-items: center; gap: 6px; padding: 5px 10px;
-  border: 1px solid var(--border); background: var(--bg-elev);
-  border-radius: 99px; font-size: 12px; color: var(--text-secondary); cursor: pointer;
-  transition: all .12s;
-}
-.chip:hover { border-color: var(--border-strong); color: var(--text); }
-.chip.on { background: var(--accent); color: #fff; border-color: var(--accent); }
-
 .preset-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
 .preset-tile {
   border: 1px solid var(--border); border-radius: var(--r-sm); padding: 0; cursor: pointer;
@@ -308,30 +245,10 @@
 .preset-tile.on .name { color: var(--text); font-weight: 500; }
 
 /* Badge */
-.badge {
-  display: inline-flex; align-items: center; gap: 4px;
-  padding: 2px 8px; border-radius: 99px; font-size: 11px; font-weight: 500;
-}
-.badge-neutral { background: var(--bg-sunken); color: var(--text-secondary); border: 1px solid var(--border); }
-.badge-accent { background: var(--accent-soft); color: var(--accent-text); border: 1px solid var(--accent-soft-border); }
-.badge-success { background: var(--success-soft); color: var(--success); }
-.badge-warn { background: var(--warn-soft); color: var(--warn); }
-
 /* Divider */
 .hr { height: 1px; background: var(--border); border: 0; margin: 8px 0; }
 
 /* Tabs (for voice source, etc) */
-.tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--border); }
-.tab {
-  display: inline-flex; align-items: center; gap: 6px;
-  padding: 8px 12px; font-size: 13px; color: var(--text-tertiary); font-weight: 500;
-  border: 0; background: transparent; cursor: pointer; position: relative;
-  border-bottom: 2px solid transparent; margin-bottom: -1px;
-  white-space: nowrap;
-}
-.tab:hover { color: var(--text-secondary); }
-.tab.on { color: var(--text); border-bottom-color: var(--accent); }
-
 /* Sticky footer in left-col */
 .step-footer {
   position: sticky; bottom: 0; background: linear-gradient(to bottom, oklch(0.985 0.003 95 / 0), var(--bg) 30%);
@@ -640,17 +557,6 @@
 }
 
 /* Modal */
-.modal-backdrop {
-  position: fixed; inset: 0; background: oklch(0.22 0.01 260 / 0.4);
-  backdrop-filter: blur(4px); display: grid; place-items: center; z-index: 50; padding: 24px;
-  animation: fadein .15s ease;
-}
-.modal {
-  background: var(--bg-elev); border-radius: var(--r-xl); max-width: 680px; width: 100%;
-  max-height: 85vh; overflow: auto; box-shadow: var(--shadow-lg); border: 1px solid var(--border);
-}
-.modal-header { padding: 20px 24px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; }
-.modal-body { padding: 24px; }
 @keyframes fadein { from { opacity: 0 } to { opacity: 1 } }
 
 /* Tweaks panel */

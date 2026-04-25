@@ -165,7 +165,7 @@ export default function ResultPage() {
           <div style={{ maxWidth: 960, margin: '0 auto', position: 'relative', zIndex: 1 }}>
             <div className="flex justify-between items-center" style={{ marginBottom: 24 }}>
               <div>
-                <div className="card-eyebrow">결과</div>
+                <div className="text-[11px] uppercase tracking-widest font-semibold text-muted-foreground">결과</div>
                 <h1
                   style={{
                     fontSize: 24,
@@ -193,7 +193,7 @@ export default function ResultPage() {
             </div>
 
             {error && !result && (
-              <div className="card" style={{ padding: 20, borderColor: 'var(--danger)' }}>
+              <div className="surface-base p-5" style={{ padding: 20, borderColor: 'var(--danger)' }}>
                 <div style={{ color: 'var(--danger)', fontSize: 14 }}>{error}</div>
                 <div style={{ marginTop: 10 }}>
                   <Button icon="arrow_left" onClick={() => navigate('/')}>
@@ -204,7 +204,7 @@ export default function ResultPage() {
             )}
 
             {!error && result && taskId && (
-              <div className="card" style={{ padding: 24 }}>
+              <div className="surface-base p-5" style={{ padding: 24 }}>
                 <div
                   style={{
                     display: 'grid',

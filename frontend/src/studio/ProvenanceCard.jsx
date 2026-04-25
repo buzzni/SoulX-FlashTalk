@@ -98,8 +98,8 @@ export default function ProvenanceCard({ result, fallbackMeta = null }) {
   const qualityLabel = QUALITY_LABELS[imageQuality] || '—';
 
   return (
-    <div className="card mt-4">
-      <div className="card-eyebrow">이렇게 만들었어요</div>
+    <div className="surface-base p-5 mt-4">
+      <div className="text-[11px] uppercase tracking-widest font-semibold text-muted-foreground">이렇게 만들었어요</div>
 
       {/* Thumbnails — host (Step 1) + composite (Step 2). What actually
           fed into FlashTalk. Host image comes from meta; composite from

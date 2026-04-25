@@ -142,7 +142,8 @@ export function VoicePicker({
                   <div className="voice-meta">{v.desc || v.lang || ''}</div>
                 </div>
                 <button
-                  className="btn btn-ghost btn-icon btn-sm voice-play"
+                  type="button"
+                  className="voice-play inline-flex items-center justify-center size-8 rounded-md text-muted-foreground hover:bg-secondary hover:text-foreground disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
                   title={v.preview_url ? '미리 듣기' : '미리듣기 샘플이 없어요'}
                   disabled={!v.preview_url}
                   onClick={(e) => {

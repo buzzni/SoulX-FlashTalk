@@ -140,16 +140,13 @@ export function ProductList({
                   </div>
                 )}
                 {p.source === 'upload' && (
-                  <label
-                    className="btn btn-secondary btn-sm"
-                    style={{ alignSelf: 'flex-start' }}
-                  >
+                  <label className="self-start inline-flex items-center gap-1.5 h-8 px-3 rounded-md text-[12px] font-medium border border-input bg-card text-foreground hover:bg-secondary cursor-pointer transition-colors">
                     <Icon name={p.url ? 'swap' : 'upload'} size={12} />
                     {p.url ? '사진 교체' : '사진 올리기'}
                     <input
                       type="file"
                       accept="image/*"
-                      style={{ display: 'none' }}
+                      className="hidden"
                       onChange={(e) => {
                         const f = e.target.files?.[0];
                         if (!f) return;
@@ -170,7 +167,8 @@ export function ProductList({
                 )}
               </div>
               <button
-                className="btn btn-ghost btn-icon btn-sm"
+                type="button"
+                className="inline-flex items-center justify-center size-8 rounded-md text-muted-foreground hover:bg-secondary hover:text-destructive transition-colors"
                 onClick={() => removeProduct(p.id)}
                 title="제품 삭제"
               >

@@ -94,10 +94,10 @@ export function ScriptEditor({ paragraphs, onParagraphsChange }: ScriptEditorPro
                 {idx !== 0 && (
                   <button
                     type="button"
-                    className="btn btn-ghost btn-sm paragraph-delete-btn"
+                    className="paragraph-delete-btn inline-flex items-center gap-1 h-7 px-2.5 rounded-md text-[12px] font-medium text-muted-foreground hover:bg-secondary hover:text-foreground transition-colors"
                     onClick={() => removeParagraph(idx)}
                   >
-                    <Icon name="trash" size={11} style={{ marginRight: 4 }} />
+                    <Icon name="trash" size={11} />
                     삭제
                   </button>
                 )}
@@ -117,15 +117,15 @@ export function ScriptEditor({ paragraphs, onParagraphsChange }: ScriptEditorPro
           </Fragment>
         ))}
       </div>
-      <div style={{ marginTop: 10, display: 'flex', justifyContent: 'center' }}>
+      <div className="mt-2.5 flex justify-center">
         <button
           type="button"
-          className="btn btn-secondary btn-sm add-paragraph-btn"
+          className="add-paragraph-btn inline-flex items-center gap-1.5 h-8 px-3 rounded-md text-[12px] font-medium border border-input bg-card text-foreground hover:bg-secondary disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
           onClick={addParagraph}
           disabled={!canAddParagraph}
           title={canAddParagraph ? '문단 추가' : '5000자 한도에 도달했어요'}
         >
-          <Icon name="plus" size={12} style={{ marginRight: 5 }} />
+          <Icon name="plus" size={12} />
           문단 추가
         </button>
       </div>
