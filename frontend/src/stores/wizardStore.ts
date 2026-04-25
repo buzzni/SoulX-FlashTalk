@@ -51,6 +51,10 @@ export interface WizardState {
   script: string;
   resolution: unknown;
   imageQuality: string;
+  /** Bumped on every `reset()`. Step pages use this as a React key so
+   * "처음부터 다시" forces a remount, clearing hook-local state (variants,
+   * prevSelected, etc.) without requiring a page refresh. */
+  wizardEpoch: number;
   [k: string]: unknown;
 }
 
@@ -121,6 +125,7 @@ export const INITIAL_WIZARD_STATE: WizardState = {
     default: true,
   },
   imageQuality: '1K',
+  wizardEpoch: 0,
 };
 
 // The store holds WizardState + the action verbs. Keeping actions on
@@ -390,7 +395,11 @@ export const useWizardStore = create<WizardStore>()(
           return { ...s, ...next };
         }),
 
-      reset: () => set({ ...INITIAL_WIZARD_STATE }),
+      reset: () =>
+        set((s) => ({
+          ...INITIAL_WIZARD_STATE,
+          wizardEpoch: ((s.wizardEpoch as number | undefined) ?? 0) + 1,
+        })),
     }),
     {
       name: storageKey('wizard'),
