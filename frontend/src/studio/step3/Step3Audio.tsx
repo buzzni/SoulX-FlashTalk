@@ -181,7 +181,7 @@ export default function Step3Audio({ state, update }: Step3AudioProps) {
               className={`tab ${voice.source === t.id ? 'on' : ''}`}
               onClick={() => setV({ source: t.id })}
             >
-              <Icon name={t.icon} size={12} style={{ marginRight: 5, verticalAlign: '-2px' }} />
+              <Icon name={t.icon} size={13} />
               {t.label}
             </button>
           ))}

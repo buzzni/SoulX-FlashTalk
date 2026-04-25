@@ -323,9 +323,11 @@
 /* Tabs (for voice source, etc) */
 .tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--border); }
 .tab {
+  display: inline-flex; align-items: center; gap: 6px;
   padding: 8px 12px; font-size: 13px; color: var(--text-tertiary); font-weight: 500;
   border: 0; background: transparent; cursor: pointer; position: relative;
   border-bottom: 2px solid transparent; margin-bottom: -1px;
+  white-space: nowrap;
 }
 .tab:hover { color: var(--text-secondary); }
 .tab.on { color: var(--text); border-bottom-color: var(--accent); }
