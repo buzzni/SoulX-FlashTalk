@@ -36,6 +36,7 @@ const Icon = ({ name, size = 16, style = {} }) => {
     bg: <><rect x="2" y="2" width="16" height="16" rx="1.5"/><path d="M2 14l5-5 5 5 3-3 3 3"/><circle cx="14" cy="6" r="1.5"/></>,
     chevron_down: <path d="M5 8l5 5 5-5"/>,
     chevron_up: <path d="M15 12l-5-5-5 5"/>,
+    folder: <path d="M3 6a2 2 0 012-2h3l2 2h7a2 2 0 012 2v7a2 2 0 01-2 2H5a2 2 0 01-2-2z"/>,
   };
   return (
     <svg width={size} height={size} viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" style={style}>
