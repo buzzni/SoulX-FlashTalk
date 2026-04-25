@@ -105,9 +105,8 @@ export default function Step1Host({ state, update }: Step1HostProps) {
   };
 
   const handleSelectVariant = (v: HostVariant) => {
-    // imageId is the canonical lifecycle identifier; fall back to
-    // deriving it from `path` so variants rehydrated from old
-    // localStorage state (pre-imageId field) still register on click.
+    // Fall back to deriving imageId from path for variants rehydrated
+    // before the imageId field existed.
     const imageId = v.imageId ?? imageIdFromPath(v.path);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     update((s: any) => ({
@@ -122,10 +121,7 @@ export default function Step1Host({ state, update }: Step1HostProps) {
         _gradient: v._gradient ?? null,
       },
     }));
-    // Sync the server-side lifecycle slot. Fire-and-forget — the local
-    // store is already updated; a transient network blip just means
-    // the cleanup sweep at the next generate misses one previously-
-    // selected image (worst case: a few extra files on disk).
+    // Best-effort sync; backend cleanup tolerates a missed select call.
     if (imageId) {
       selectHost(imageId).catch((e) => {
         // eslint-disable-next-line no-console

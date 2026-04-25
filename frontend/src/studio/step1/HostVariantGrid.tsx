@@ -37,11 +37,10 @@ export function HostVariantGrid({
   onSelect,
 }: HostVariantGridProps) {
   const cols = prevSelected ? 5 : 4;
-  // imageId is the canonical selection key; fall back to deriving it
-  // from `path` so variants persisted before the imageId field existed
-  // (or rehydrated without it) still highlight correctly on click.
+  // Fall back to path-derived id for variants persisted before the imageId field existed.
   const idOf = (v: HostVariant): string | null =>
     v.imageId ?? imageIdFromPath(v.path);
+  const prevId = prevSelected ? idOf(prevSelected) : null;
   return (
     <div style={{ display: 'grid', gridTemplateColumns: `repeat(${cols}, 1fr)`, gap: 10 }}>
       {variants.map((v, i) => {
@@ -63,10 +62,7 @@ export function HostVariantGrid({
           key={prevSelected.id}
           variant={prevSelected}
           label="이전 선택"
-          selected={(() => {
-            const id = idOf(prevSelected);
-            return !!id && selectedImageId === id;
-          })()}
+          selected={!!prevId && selectedImageId === prevId}
           onSelect={onSelect}
           isPrev
         />

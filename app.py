@@ -2071,10 +2071,6 @@ async def host_generate_stream(
                 if evt.get("type") == "candidate" and evt.get("path"):
                     saved_paths.append(evt["path"])
                 if evt.get("type") == "done" and saved_paths:
-                    # Tag the fresh batch + reconcile previous-state slots.
-                    # Bonus payload — the frontend reads `batch_id` and the
-                    # `prev_selected` tile spec off the done event so it can
-                    # render the 5-tile picker without an extra GET.
                     try:
                         lifecycle.record_batch("host", saved_paths, batch_id)
                         lifecycle.cleanup_after_generate("host", batch_id)
@@ -2412,22 +2408,18 @@ async def composite_select(image_id: str = Form(...)):
 
 @app.delete("/api/composites/{image_id}")
 async def delete_composite(image_id: str):
-    """Remove a single composite image (PNG + sidecar). Mirrors
-    /api/hosts/{id} but for Step2 candidates. Refuses committed images —
-    those should be removed via the parent video's DELETE so video_ids
-    bookkeeping stays consistent."""
+    """Remove a single composite candidate. Refuses `committed` images —
+    delete the parent video instead so video_ids bookkeeping stays consistent."""
     from modules import lifecycle
     _validate_image_id(image_id)
-    path = lifecycle._resolve_image_path("composite", image_id)
-    if path is None:
+    result = lifecycle.delete_candidate("composite", image_id)
+    if result == "not_found":
         raise HTTPException(status_code=404, detail="Composite not found")
-    meta = lifecycle._read_meta(path)
-    if meta.get("status") == "committed":
+    if result == "committed":
         raise HTTPException(
             status_code=409,
             detail="Composite is committed to a video; delete the video instead",
         )
-    lifecycle._delete_image(path)
     return {"message": "deleted", "id": image_id}
 
 

@@ -24,33 +24,29 @@
 import { useCallback, useState } from 'react';
 import { streamHost, type HostGenerateInput } from '../api/host';
 import { humanizeError } from '../api/http';
+import { imageIdFromPath } from '../api/mapping';
 import { useWizardStore } from '../stores/wizardStore';
 import { useAbortableRequest } from './useAbortableRequest';
 
 export interface HostVariant {
   seed: number;
   id: string;
-  /** Stable server-side identifier (filename stem, e.g.
-   * `host_abc12345_s10`). Derived from `path` on first arrival;
-   * undefined while the slot is still a placeholder. */
-  imageId?: string;
+  /** Stable server-side identifier (filename stem, e.g. `host_abc12345_s10`). */
+  imageId?: string | null;
   url?: string;
   path?: string;
   placeholder: boolean;
   error?: string;
-  /** True for the 5th "이전 선택" tile carried over from a prior
-   * batch — distinct from the current 4 candidates. */
+  /** True for the 5th "이전 선택" tile carried over from a prior batch. */
   isPrev?: boolean;
   _gradient?: string | null;
 }
 
 export interface UseHostGenerationReturn {
   variants: HostVariant[];
-  /** The optional 5th tile — the previous batch's selected image,
-   * still pickable until the next selection commits. */
+  /** Optional 5th tile — the previous batch's selected image, still
+   * pickable until the next selection commits. */
   prevSelected: HostVariant | null;
-  /** Lifecycle batch id for the current 4 candidates. Useful only
-   * for diagnostics; selection uses `imageId`. */
   batchId: string | null;
   isLoading: boolean;
   error: string | null;
@@ -63,15 +59,6 @@ export interface UseHostGenerationReturn {
     seeds?: number[],
   ) => Promise<void>;
   abort: () => void;
-}
-
-/** Derive the lifecycle image_id from a server path. The backend stores
- * candidates as `<step>_<...>.png`; the id is the basename without
- * extension. Returns undefined for empty/odd paths. */
-function imageIdFromPath(path?: string): string | undefined {
-  if (!path) return undefined;
-  const name = path.split('/').pop() || '';
-  return name.endsWith('.png') ? name.slice(0, -4) : name || undefined;
 }
 
 export function useHostGeneration(): UseHostGenerationReturn {
@@ -104,11 +91,9 @@ export function useHostGeneration(): UseHostGenerationReturn {
       // the backend accepted the request.
       setVariants([]);
 
-      // Synthesize prev_selected from the about-to-be-replaced selection
-      // BEFORE the stream starts. Persisting eagerly means a mid-stream
-      // navigation (user hops to Step2 before `done` lands) still leaves
-      // the prev tile visible on return. The backend's authoritative
-      // prev_selected on `done` overrides this if it differs.
+      // Eager-persist prev_selected before the stream opens so a
+      // mid-stream navigation preserves the prev tile. Backend's
+      // authoritative prev_selected on `done` overrides this if it differs.
       const storeHostBefore = (useWizardStore.getState().host ?? {}) as Record<string, unknown>;
       const oldSelectedPath = storeHostBefore.selectedPath as string | null | undefined;
       const oldSelectedUrl = storeHostBefore.imageUrl as string | null | undefined;
@@ -171,11 +156,8 @@ export function useHostGeneration(): UseHostGenerationReturn {
                 : v,
             );
             setVariants(currentVariants);
-            // Persist incrementally — if the user navigates away mid-
-            // stream, the partial new batch (rather than the previous
-            // batch) is what they come back to. Only the slots that
-            // already arrived go to the store; placeholder/error tiles
-            // stay local so a remount doesn't render dead spinners.
+            // Persist arrived slots only — strip placeholders so a
+            // remount won't render dead spinners.
             useWizardStore.getState().setHost({
               variants: currentVariants.filter((v) => !v.placeholder && !v.error),
             });
@@ -207,10 +189,6 @@ export function useHostGeneration(): UseHostGenerationReturn {
               // eslint-disable-next-line no-console
               console.warn('host generate had partial errors:', errs);
             }
-            // Pick up the lifecycle bookkeeping the backend appended:
-            // batch_id (for diagnostics) and prev_selected (the 5th
-            // "이전 선택" tile, surfaced as a separate slot so the UI
-            // can render it distinctly from the 4 fresh candidates).
             if (typeof evt.batch_id === 'string') {
               currentBatchId = evt.batch_id;
               setBatchId(currentBatchId);
@@ -233,9 +211,6 @@ export function useHostGeneration(): UseHostGenerationReturn {
               currentPrev = null;
             }
             setPrevSelected(currentPrev);
-            // Final persist with the backend's authoritative
-            // prev_selected + batch_id. Variants were already persisted
-            // incrementally on each `candidate` event.
             useWizardStore.getState().setHost({
               variants: currentVariants,
               prevSelected: currentPrev,

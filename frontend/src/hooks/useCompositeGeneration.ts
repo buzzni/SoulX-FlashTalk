@@ -13,15 +13,14 @@
 import { useCallback, useState } from 'react';
 import { streamComposite, type CompositeInput } from '../api/composite';
 import { humanizeError } from '../api/http';
+import { imageIdFromPath } from '../api/mapping';
 import { useWizardStore } from '../stores/wizardStore';
 import { useAbortableRequest } from './useAbortableRequest';
 
 export interface CompositionVariant {
   seed: number;
   id: string;
-  /** Stable server-side identifier (filename stem). Derived from path
-   * on first arrival; undefined while the slot is still a placeholder. */
-  imageId?: string;
+  imageId?: string | null;
   url?: string;
   path?: string;
   placeholder: boolean;
@@ -48,12 +47,6 @@ export interface UseCompositeGenerationReturn {
     opts?: UseCompositeGenerationOptions,
   ) => Promise<void>;
   abort: () => void;
-}
-
-function imageIdFromPath(path?: string): string | undefined {
-  if (!path) return undefined;
-  const name = path.split('/').pop() || '';
-  return name.endsWith('.png') ? name.slice(0, -4) : name || undefined;
 }
 
 export function useCompositeGeneration(): UseCompositeGenerationReturn {
@@ -90,9 +83,8 @@ export function useCompositeGeneration(): UseCompositeGenerationReturn {
       setError(null);
       setVariants([]);
 
-      // Synthesize prev_selected from the about-to-be-replaced
-      // composite selection so a mid-stream navigation preserves the
-      // prev tile. See useHostGeneration for the rationale.
+      // Eager-persist a prev_selected from the about-to-be-replaced
+      // selection so a mid-stream navigation preserves the prev tile.
       const storeCompBefore = (useWizardStore.getState().composition ?? {}) as Record<string, unknown>;
       const oldSelectedPath = storeCompBefore.selectedPath as string | null | undefined;
       const oldSelectedUrl = storeCompBefore.selectedUrl as string | null | undefined;
@@ -163,8 +155,7 @@ export function useCompositeGeneration(): UseCompositeGenerationReturn {
                 : v,
             );
             setVariants(currentVariants);
-            // Persist only the slots that already arrived — see
-            // useHostGeneration for the placeholder-stripping rationale.
+            // Strip placeholders so a remount won't render dead spinners.
             useWizardStore.getState().setComposition({
               variants: currentVariants.filter((v) => !v.placeholder && !v.error),
             });
@@ -196,8 +187,6 @@ export function useCompositeGeneration(): UseCompositeGenerationReturn {
               // eslint-disable-next-line no-console
               console.warn('composite had partial errors:', errs);
             }
-            // Lifecycle bookkeeping (batch_id + prev_selected) — see
-            // useHostGeneration for rationale.
             if (typeof evt.batch_id === 'string') {
               currentBatchId = evt.batch_id;
               setBatchId(currentBatchId);
@@ -220,8 +209,6 @@ export function useCompositeGeneration(): UseCompositeGenerationReturn {
               currentPrev = null;
             }
             setPrevSelected(currentPrev);
-            // Final persist with backend's authoritative prev_selected
-            // + batch_id; variants were persisted incrementally above.
             useWizardStore.getState().setComposition({
               variants: currentVariants,
               prevSelected: currentPrev,

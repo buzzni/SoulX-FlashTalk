@@ -88,11 +88,11 @@ def _meta_path(image_path: str) -> str:
 
 def _read_meta(image_path: str) -> dict:
     p = _meta_path(image_path)
-    if not os.path.exists(p):
-        return {}
     try:
         with open(p, "r", encoding="utf-8") as f:
             return json.load(f)
+    except FileNotFoundError:
+        return {}
     except (OSError, json.JSONDecodeError) as e:
         logger.warning("Failed to read sidecar %s: %s", p, e)
         return {}
@@ -131,8 +131,9 @@ def _delete_image(image_path: str) -> None:
     """Remove the PNG and its sidecar; log but do not raise on failure."""
     for p in (image_path, _meta_path(image_path)):
         try:
-            if os.path.exists(p):
-                os.unlink(p)
+            os.unlink(p)
+        except FileNotFoundError:
+            pass
         except OSError as e:
             logger.warning("Failed to delete %s: %s", p, e)
 
@@ -368,6 +369,21 @@ def commit(step: Step, video_id: str) -> Optional[str]:
         _delete_image(p)
 
     return selected_path
+
+
+def delete_candidate(step: Step, image_id: str) -> str:
+    """Remove a non-committed candidate. Returns one of:
+      "deleted"   — image+sidecar removed
+      "not_found" — no file matched image_id
+      "committed" — refused; caller should delete via the parent video
+    """
+    path = _resolve_image_path(step, image_id)
+    if path is None:
+        return "not_found"
+    if _read_meta(path).get("status") == "committed":
+        return "committed"
+    _delete_image(path)
+    return "deleted"
 
 
 def cascade_delete_by_video(video_id: str) -> List[str]:

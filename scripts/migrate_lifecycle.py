@@ -14,7 +14,6 @@ Run:
 import sys
 from pathlib import Path
 
-# Allow `python scripts/migrate_lifecycle.py` from project root without PYTHONPATH.
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from modules import lifecycle  # noqa: E402

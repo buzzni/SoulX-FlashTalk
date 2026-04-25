@@ -26,6 +26,7 @@ export function CompositionVariants({
   const cols = prevSelected ? 5 : 4;
   const idOf = (v: CompositionVariant): string | null =>
     v.imageId ?? imageIdFromPath(v.path);
+  const prevId = prevSelected ? idOf(prevSelected) : null;
   return (
     <div style={{ display: 'grid', gridTemplateColumns: `repeat(${cols}, 1fr)`, gap: 10 }}>
       {variants.map((v, i) => {
@@ -47,10 +48,7 @@ export function CompositionVariants({
           key={prevSelected.id}
           variant={prevSelected}
           label="이전 선택"
-          selected={(() => {
-            const id = idOf(prevSelected);
-            return !!id && selectedImageId === id;
-          })()}
+          selected={!!prevId && selectedImageId === prevId}
           onSelect={onSelect}
           isPrev
         />
