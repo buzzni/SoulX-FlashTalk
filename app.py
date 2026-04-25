@@ -21,6 +21,7 @@ from fastapi.staticfiles import StaticFiles
 import uvicorn
 
 import config
+from modules import db as db_module
 from modules.task_queue import task_queue
 from modules.schemas import (
     HistoryResponse,
@@ -675,12 +676,22 @@ async def startup_event():
     global pipeline_lock
     pipeline_lock = asyncio.Lock()
 
+    # Connect to MongoDB and ensure indexes exist before serving traffic.
+    # Fail-fast: if mongod is unreachable, this raises and uvicorn won't bind
+    # (per docs/db-integration-plan.md decision #15).
+    await db_module.init()
+
     # Register queue handlers and start worker
     task_queue.register_handler("generate", _queue_generate_handler)
     task_queue.register_handler("conversation", _queue_conversation_handler)
     await task_queue.start()
 
     logger.info("SoulX-FlashTalk API server started (queue worker active)")
+
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    await db_module.close()
 
 
 async def _queue_generate_handler(task_id: str, **params):

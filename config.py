@@ -94,6 +94,14 @@ FEATURE_HOSTSTUDIO = os.environ.get("FEATURE_HOSTSTUDIO", "1") == "1"
 REQUIRE_API_KEY = os.environ.get("REQUIRE_API_KEY", "0") == "1"
 API_KEY = os.environ.get("API_KEY", "")
 
+# ========================================
+# DB integration (PR1+) — see docs/db-integration-plan.md
+# ========================================
+MONGO_URL = os.environ.get("MONGO_URL", "mongodb://localhost:27017")
+DB_NAME = os.environ.get("DB_NAME", "ai_showhost")
+STUDIO_JWT_SECRET = os.environ.get("STUDIO_JWT_SECRET", "")
+STUDIO_JWT_TTL_DAYS = int(os.environ.get("STUDIO_JWT_TTL_DAYS", "7"))
+
 # CORS (Phase 0 D12, §4.0.5)
 CORS_ORIGINS = [
     o.strip() for o in os.environ.get(
