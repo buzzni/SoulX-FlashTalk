@@ -90,8 +90,37 @@ export function useCompositeGeneration(): UseCompositeGenerationReturn {
       setError(null);
       setVariants([]);
 
+      // Synthesize prev_selected from the about-to-be-replaced
+      // composite selection so a mid-stream navigation preserves the
+      // prev tile. See useHostGeneration for the rationale.
+      const storeCompBefore = (useWizardStore.getState().composition ?? {}) as Record<string, unknown>;
+      const oldSelectedPath = storeCompBefore.selectedPath as string | null | undefined;
+      const oldSelectedUrl = storeCompBefore.selectedUrl as string | null | undefined;
+      const oldSelectedSeed = storeCompBefore.selectedSeed as number | null | undefined;
+      const oldSelectedImageId =
+        (storeCompBefore.selectedImageId as string | null | undefined) ??
+        (oldSelectedPath ? imageIdFromPath(oldSelectedPath) : undefined);
+      const seedPrev: CompositionVariant | null =
+        oldSelectedPath && oldSelectedUrl && oldSelectedImageId
+          ? {
+              seed: typeof oldSelectedSeed === 'number' ? oldSelectedSeed : -1,
+              id: `prev-${oldSelectedImageId}`,
+              imageId: oldSelectedImageId,
+              url: oldSelectedUrl,
+              path: oldSelectedPath,
+              placeholder: false,
+              isPrev: true,
+            }
+          : null;
+      setPrevSelected(seedPrev);
+      useWizardStore.getState().setComposition({
+        variants: [],
+        prevSelected: seedPrev,
+        batchId: null,
+      });
+
       let currentVariants: CompositionVariant[] = [];
-      let currentPrev: CompositionVariant | null = null;
+      let currentPrev: CompositionVariant | null = seedPrev;
       let currentBatchId: string | null = null;
       let errorCount = 0;
       const errs: string[] = [];
@@ -134,6 +163,11 @@ export function useCompositeGeneration(): UseCompositeGenerationReturn {
                 : v,
             );
             setVariants(currentVariants);
+            // Persist only the slots that already arrived — see
+            // useHostGeneration for the placeholder-stripping rationale.
+            useWizardStore.getState().setComposition({
+              variants: currentVariants.filter((v) => !v.placeholder && !v.error),
+            });
           } else if (evt.type === 'error') {
             errorCount += 1;
             const detail = typeof evt.error === 'string' ? evt.error : 'unknown';
@@ -186,16 +220,18 @@ export function useCompositeGeneration(): UseCompositeGenerationReturn {
               currentPrev = null;
             }
             setPrevSelected(currentPrev);
+            // Final persist with backend's authoritative prev_selected
+            // + batch_id; variants were persisted incrementally above.
+            useWizardStore.getState().setComposition({
+              variants: currentVariants,
+              prevSelected: currentPrev,
+              batchId: currentBatchId,
+            });
           }
         }
 
         if (!isCurrent()) return;
         setIsLoading(false);
-        useWizardStore.getState().setComposition({
-          variants: currentVariants,
-          prevSelected: currentPrev,
-          batchId: currentBatchId,
-        });
       } catch (err) {
         if (!isCurrent()) return;
         const name = (err as { name?: string } | null)?.name;

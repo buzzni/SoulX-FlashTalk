@@ -104,8 +104,40 @@ export function useHostGeneration(): UseHostGenerationReturn {
       // the backend accepted the request.
       setVariants([]);
 
+      // Synthesize prev_selected from the about-to-be-replaced selection
+      // BEFORE the stream starts. Persisting eagerly means a mid-stream
+      // navigation (user hops to Step2 before `done` lands) still leaves
+      // the prev tile visible on return. The backend's authoritative
+      // prev_selected on `done` overrides this if it differs.
+      const storeHostBefore = (useWizardStore.getState().host ?? {}) as Record<string, unknown>;
+      const oldSelectedPath = storeHostBefore.selectedPath as string | null | undefined;
+      const oldSelectedUrl = storeHostBefore.imageUrl as string | null | undefined;
+      const oldSelectedSeed = storeHostBefore.selectedSeed as number | null | undefined;
+      const oldSelectedImageId =
+        (storeHostBefore.selectedImageId as string | null | undefined) ??
+        (oldSelectedPath ? imageIdFromPath(oldSelectedPath) : undefined);
+      const seedPrev: HostVariant | null =
+        oldSelectedPath && oldSelectedUrl && oldSelectedImageId
+          ? {
+              seed: typeof oldSelectedSeed === 'number' ? oldSelectedSeed : -1,
+              id: `prev-${oldSelectedImageId}`,
+              imageId: oldSelectedImageId,
+              url: oldSelectedUrl,
+              path: oldSelectedPath,
+              placeholder: false,
+              isPrev: true,
+            }
+          : null;
+      setPrevSelected(seedPrev);
+      // Persist immediately so navigation away preserves prev info.
+      useWizardStore.getState().setHost({
+        variants: [],
+        prevSelected: seedPrev,
+        batchId: null,
+      });
+
       let currentVariants: HostVariant[] = [];
-      let currentPrev: HostVariant | null = null;
+      let currentPrev: HostVariant | null = seedPrev;
       let currentBatchId: string | null = null;
       const errs: string[] = [];
       let errorCount = 0;
@@ -139,6 +171,14 @@ export function useHostGeneration(): UseHostGenerationReturn {
                 : v,
             );
             setVariants(currentVariants);
+            // Persist incrementally — if the user navigates away mid-
+            // stream, the partial new batch (rather than the previous
+            // batch) is what they come back to. Only the slots that
+            // already arrived go to the store; placeholder/error tiles
+            // stay local so a remount doesn't render dead spinners.
+            useWizardStore.getState().setHost({
+              variants: currentVariants.filter((v) => !v.placeholder && !v.error),
+            });
           } else if (evt.type === 'error') {
             errorCount += 1;
             const detail = typeof evt.error === 'string' ? evt.error : 'unknown';
@@ -193,18 +233,19 @@ export function useHostGeneration(): UseHostGenerationReturn {
               currentPrev = null;
             }
             setPrevSelected(currentPrev);
+            // Final persist with the backend's authoritative
+            // prev_selected + batch_id. Variants were already persisted
+            // incrementally on each `candidate` event.
+            useWizardStore.getState().setHost({
+              variants: currentVariants,
+              prevSelected: currentPrev,
+              batchId: currentBatchId,
+            });
           }
         }
 
         if (!isCurrent()) return;
         setIsLoading(false);
-        // Persist the finished set so reload restores the grid and
-        // Step 2 picks up the selected host for composition.
-        useWizardStore.getState().setHost({
-          variants: currentVariants,
-          prevSelected: currentPrev,
-          batchId: currentBatchId,
-        });
       } catch (err) {
         if (!isCurrent()) return;
         const name = (err as { name?: string } | null)?.name;
