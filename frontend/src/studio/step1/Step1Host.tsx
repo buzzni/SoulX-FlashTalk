@@ -260,7 +260,10 @@ export default function Step1Host({ state, update }: Step1HostProps) {
           >
             <HostVariantGrid
               variants={variants}
-              prevSelected={gen.prevSelected}
+              // Step 1 has /api/hosts/save as the durable "keep this one"
+              // mechanism, so the lifecycle prev tile is redundant here.
+              // Step 2 still shows it (no save equivalent for composites).
+              prevSelected={null}
               selectedImageId={
                 (host as { selectedImageId?: string | null }).selectedImageId ??
                 imageIdFromPath((host as { selectedPath?: string | null }).selectedPath)
