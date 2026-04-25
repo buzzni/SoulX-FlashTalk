@@ -132,6 +132,20 @@
     outline: none !important;
     box-shadow: none !important;
   }
+  html, body {
+    /* Pretendard is loaded via CDN at the top of this file. Apply it as the
+     * default font for every element that doesn't override it. Tailwind v4's
+     * @theme inline registers --font-sans as a utility class but does not
+     * always emit a :root --font-sans CSS variable for `var(--font-sans)`
+     * lookups, so we declare the font stack directly here for the global
+     * cascade. Korean typography is product identity — without this, the
+     * body falls back to ui-sans-serif and hangul renders with the wrong
+     * letterforms. */
+    font-family: "Pretendard Variable", "Pretendard", "-apple-system",
+      "BlinkMacSystemFont", "system-ui", "Roboto", "Helvetica Neue", "Segoe UI",
+      "Apple SD Gothic Neo", "Noto Sans KR", "Malgun Gothic",
+      "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "sans-serif";
+  }
   body {
     @apply bg-background text-foreground antialiased;
     font-feature-settings: "ss01", "ss02";
