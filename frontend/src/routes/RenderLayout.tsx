@@ -5,9 +5,11 @@
  * Owns the reset flow so "처음부터 다시" wipes the store and drops
  * the user back to step 1.
  */
+import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import RenderDashboard from '../studio/render/RenderDashboard';
 import QueueStatus from '../studio/QueueStatus';
+import { Button, Modal } from '../studio/primitives.jsx';
 import { useWizardStore } from '../stores/wizardStore';
 import { TopBar } from './TopBar';
 import { computeValidity, deepestReachableStep } from './wizardValidation';
@@ -20,9 +22,10 @@ export default function RenderLayout({ attachToTaskId = null }: RenderLayoutProp
   const navigate = useNavigate();
   const state = useWizardStore();
   const resetState = useWizardStore((s) => s.reset);
+  const [resetOpen, setResetOpen] = useState(false);
 
-  const reset = () => {
-    if (!window.confirm('처음부터 다시 시작할까요?\n지금까지 입력한 내용은 사라져요.')) return;
+  const confirmReset = () => {
+    setResetOpen(false);
     resetState();
     navigate('/step/1');
   };
@@ -45,9 +48,30 @@ export default function RenderLayout({ attachToTaskId = null }: RenderLayoutProp
       <div className="app-shell" data-screen-label="05 Render">
         <TopBar
           step={null}
-          onReset={reset}
+          onReset={() => setResetOpen(true)}
           queueSlot={<QueueStatus />}
         />
+        <Modal
+          open={resetOpen}
+          onClose={() => setResetOpen(false)}
+          title="처음부터 다시 시작할까요?"
+          footer={
+            <>
+              <Button variant="secondary" onClick={() => setResetOpen(false)}>
+                취소
+              </Button>
+              <Button variant="danger" icon="refresh" onClick={confirmReset}>
+                다시 시작
+              </Button>
+            </>
+          }
+        >
+          <p style={{ margin: 0, lineHeight: 1.6 }}>
+            지금까지 입력한 쇼호스트, 제품, 배경, 음성 설정이 모두 사라져요.
+            <br />
+            진행 중인 영상 작업이 있다면 그건 영향을 받지 않아요.
+          </p>
+        </Modal>
         <RenderDashboard
           // Re-mount when attachToTaskId changes — tears down the old SSE
           // subscription and starts a fresh one for the newly-clicked task.
@@ -55,7 +79,7 @@ export default function RenderLayout({ attachToTaskId = null }: RenderLayoutProp
           state={state}
           attachToTaskId={attachToTaskId}
           onBack={handleBack}
-          onReset={reset}
+          onReset={() => setResetOpen(true)}
         />
       </div>
     </div>

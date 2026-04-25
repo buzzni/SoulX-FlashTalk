@@ -14,23 +14,29 @@ import { useWizardStore } from '../stores/wizardStore';
 export function Step1Page() {
   const state = useWizardStore();
   const updateState = useWizardStore((s) => s.updateState);
+  const epoch = useWizardStore((s) => s.wizardEpoch);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const update = (u: any) => updateState(u);
-  return <Step1Host state={state} update={update} />;
+  // Keying on wizardEpoch forces a remount after `reset()`, which
+  // clears hook-local state (variants, prevSelected, batchId) that
+  // wouldn't otherwise sync from the now-empty store.
+  return <Step1Host key={epoch} state={state} update={update} />;
 }
 
 export function Step2Page() {
   const state = useWizardStore();
   const updateState = useWizardStore((s) => s.updateState);
+  const epoch = useWizardStore((s) => s.wizardEpoch);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const update = (u: any) => updateState(u);
-  return <Step2Composite state={state} update={update} />;
+  return <Step2Composite key={epoch} state={state} update={update} />;
 }
 
 export function Step3Page() {
   const state = useWizardStore();
   const updateState = useWizardStore((s) => s.updateState);
+  const epoch = useWizardStore((s) => s.wizardEpoch);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const update = (u: any) => updateState(u);
-  return <Step3Audio state={state} update={update} />;
+  return <Step3Audio key={epoch} state={state} update={update} />;
 }

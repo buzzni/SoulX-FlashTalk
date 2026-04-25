@@ -13,16 +13,20 @@
 import { useCallback, useState } from 'react';
 import { streamComposite, type CompositeInput } from '../api/composite';
 import { humanizeError } from '../api/http';
+import { imageIdFromPath } from '../api/mapping';
 import { useWizardStore } from '../stores/wizardStore';
 import { useAbortableRequest } from './useAbortableRequest';
 
 export interface CompositionVariant {
   seed: number;
   id: string;
+  imageId?: string | null;
   url?: string;
   path?: string;
   placeholder: boolean;
   error?: string;
+  /** True for the 5th "이전 선택" tile carried over from a prior batch. */
+  isPrev?: boolean;
 }
 
 export interface UseCompositeGenerationOptions {
@@ -33,6 +37,8 @@ export interface UseCompositeGenerationOptions {
 
 export interface UseCompositeGenerationReturn {
   variants: CompositionVariant[];
+  prevSelected: CompositionVariant | null;
+  batchId: string | null;
   isLoading: boolean;
   error: string | null;
   regenerate: (
@@ -44,10 +50,14 @@ export interface UseCompositeGenerationReturn {
 }
 
 export function useCompositeGeneration(): UseCompositeGenerationReturn {
-  const initialVariants =
-    (useWizardStore.getState().composition?.variants as CompositionVariant[] | undefined) ?? [];
+  const initialComp = (useWizardStore.getState().composition ?? {}) as Record<string, unknown>;
+  const initialVariants = (initialComp.variants as CompositionVariant[] | undefined) ?? [];
+  const initialPrev = (initialComp.prevSelected as CompositionVariant | null | undefined) ?? null;
+  const initialBatchId = (initialComp.batchId as string | null | undefined) ?? null;
 
   const [variants, setVariants] = useState<CompositionVariant[]>(initialVariants);
+  const [prevSelected, setPrevSelected] = useState<CompositionVariant | null>(initialPrev);
+  const [batchId, setBatchId] = useState<string | null>(initialBatchId);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const { run, abort } = useAbortableRequest();
@@ -73,7 +83,37 @@ export function useCompositeGeneration(): UseCompositeGenerationReturn {
       setError(null);
       setVariants([]);
 
+      // Eager-persist a prev_selected from the about-to-be-replaced
+      // selection so a mid-stream navigation preserves the prev tile.
+      const storeCompBefore = (useWizardStore.getState().composition ?? {}) as Record<string, unknown>;
+      const oldSelectedPath = storeCompBefore.selectedPath as string | null | undefined;
+      const oldSelectedUrl = storeCompBefore.selectedUrl as string | null | undefined;
+      const oldSelectedSeed = storeCompBefore.selectedSeed as number | null | undefined;
+      const oldSelectedImageId =
+        (storeCompBefore.selectedImageId as string | null | undefined) ??
+        (oldSelectedPath ? imageIdFromPath(oldSelectedPath) : undefined);
+      const seedPrev: CompositionVariant | null =
+        oldSelectedPath && oldSelectedUrl && oldSelectedImageId
+          ? {
+              seed: typeof oldSelectedSeed === 'number' ? oldSelectedSeed : -1,
+              id: `prev-${oldSelectedImageId}`,
+              imageId: oldSelectedImageId,
+              url: oldSelectedUrl,
+              path: oldSelectedPath,
+              placeholder: false,
+              isPrev: true,
+            }
+          : null;
+      setPrevSelected(seedPrev);
+      useWizardStore.getState().setComposition({
+        variants: [],
+        prevSelected: seedPrev,
+        batchId: null,
+      });
+
       let currentVariants: CompositionVariant[] = [];
+      let currentPrev: CompositionVariant | null = seedPrev;
+      let currentBatchId: string | null = null;
       let errorCount = 0;
       const errs: string[] = [];
 
@@ -102,12 +142,23 @@ export function useCompositeGeneration(): UseCompositeGenerationReturn {
                 .setComposition({ direction_en: evt.direction_en });
             }
           } else if (evt.type === 'candidate') {
+            const path = evt.path as string;
             currentVariants = currentVariants.map((v) =>
               v.seed === evt.seed
-                ? { ...v, url: evt.url as string, path: evt.path as string, placeholder: false }
+                ? {
+                    ...v,
+                    url: evt.url as string,
+                    path,
+                    imageId: imageIdFromPath(path),
+                    placeholder: false,
+                  }
                 : v,
             );
             setVariants(currentVariants);
+            // Strip placeholders so a remount won't render dead spinners.
+            useWizardStore.getState().setComposition({
+              variants: currentVariants.filter((v) => !v.placeholder && !v.error),
+            });
           } else if (evt.type === 'error') {
             errorCount += 1;
             const detail = typeof evt.error === 'string' ? evt.error : 'unknown';
@@ -136,12 +187,38 @@ export function useCompositeGeneration(): UseCompositeGenerationReturn {
               // eslint-disable-next-line no-console
               console.warn('composite had partial errors:', errs);
             }
+            if (typeof evt.batch_id === 'string') {
+              currentBatchId = evt.batch_id;
+              setBatchId(currentBatchId);
+            }
+            const prevRaw = evt.prev_selected as
+              | { image_id?: string; path?: string; url?: string; seed?: number; batch_id?: string }
+              | null
+              | undefined;
+            if (prevRaw && prevRaw.image_id && prevRaw.url) {
+              currentPrev = {
+                seed: typeof prevRaw.seed === 'number' ? prevRaw.seed : -1,
+                id: `prev-${prevRaw.image_id}`,
+                imageId: prevRaw.image_id,
+                url: prevRaw.url,
+                path: prevRaw.path,
+                placeholder: false,
+                isPrev: true,
+              };
+            } else {
+              currentPrev = null;
+            }
+            setPrevSelected(currentPrev);
+            useWizardStore.getState().setComposition({
+              variants: currentVariants,
+              prevSelected: currentPrev,
+              batchId: currentBatchId,
+            });
           }
         }
 
         if (!isCurrent()) return;
         setIsLoading(false);
-        useWizardStore.getState().setComposition({ variants: currentVariants });
       } catch (err) {
         if (!isCurrent()) return;
         const name = (err as { name?: string } | null)?.name;
@@ -156,5 +233,5 @@ export function useCompositeGeneration(): UseCompositeGenerationReturn {
     [run],
   );
 
-  return { variants, isLoading, error, regenerate, abort };
+  return { variants, prevSelected, batchId, isLoading, error, regenerate, abort };
 }

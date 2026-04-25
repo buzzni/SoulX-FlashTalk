@@ -48,10 +48,12 @@ const QUALITY_LABELS = {
 const tempLabel = (t) => t == null ? '—' : (t <= 0.4 ? '안정적' : t >= 1.0 ? '창의적' : '보통');
 
 // outputs/ absolute path → public /api/files/… URL that the frontend can load.
+// The /api/files mount serves OUTPUTS_DIR, so the URL is the path RELATIVE
+// to outputs/, NOT including the literal "/outputs/" segment.
 function outputsPathToUrl(absPath) {
   if (!absPath || typeof absPath !== 'string') return null;
   const idx = absPath.indexOf('/outputs/');
-  if (idx >= 0) return `/api/files${absPath.slice(idx)}`;
+  if (idx >= 0) return `/api/files${absPath.slice(idx + '/outputs'.length)}`;
   return null;
 }
 
@@ -99,13 +101,14 @@ export default function ProvenanceCard({ result, fallbackMeta = null }) {
     <div className="card mt-4">
       <div className="card-eyebrow">이렇게 만들었어요</div>
 
-      {/* Thumbnails — host (Step 1) + composite (Step 2). What actually fed
-          into FlashTalk. Host image comes from meta; composite from the
-          backend payload (params.host_image). */}
+      {/* Thumbnails — host (Step 1) + composite (Step 2). What actually
+          fed into FlashTalk. Host image comes from meta; composite from
+          the backend payload (params.host_image). Fixed 120px width so
+          they read as thumbnails, not centerpieces. */}
       {(h.imageUrl || compositeUrl) && (
         <div style={{ display: 'flex', gap: 12, marginTop: 12, marginBottom: 4 }}>
           {h.imageUrl && (
-            <figure style={{ margin: 0, flex: 1 }}>
+            <figure style={{ margin: 0, width: 120, flex: '0 0 auto' }}>
               <div style={{ aspectRatio: '9/16', borderRadius: 8, overflow: 'hidden', background: '#0b0d12', border: '1px solid var(--border)' }}>
                 <img src={h.imageUrl} alt="쇼호스트" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
               </div>
@@ -113,7 +116,7 @@ export default function ProvenanceCard({ result, fallbackMeta = null }) {
             </figure>
           )}
           {compositeUrl && (
-            <figure style={{ margin: 0, flex: 1 }}>
+            <figure style={{ margin: 0, width: 120, flex: '0 0 auto' }}>
               <div style={{ aspectRatio: '9/16', borderRadius: 8, overflow: 'hidden', background: '#0b0d12', border: '1px solid var(--border)' }}>
                 <img src={compositeUrl} alt="합성" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
               </div>

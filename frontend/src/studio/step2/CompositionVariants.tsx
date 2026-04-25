@@ -1,41 +1,58 @@
 /**
- * CompositionVariants — 4-tile display for composite candidates.
+ * CompositionVariants — tile picker for composite candidates (Step 2).
  *
- * Identical tile shape to HostVariantGrid (placeholder spinner /
- * error tile / pickable preview with selected check) — Phase 4g's
- * shared-primitives extraction will fold both into one
- * `VariantGrid` with a label prefix prop. For now they're twins.
+ * 4 fresh candidates plus an optional 5th "이전 선택" tile sourced
+ * from the lifecycle prev_selected slot. Mirror of HostVariantGrid;
+ * Phase 4g may fold both into one shared VariantGrid.
  */
 
 import Icon from '../Icon.jsx';
+import { imageIdFromPath } from '../../api/mapping';
 import type { CompositionVariant } from '../../hooks/useCompositeGeneration';
 
 export interface CompositionVariantsProps {
   variants: CompositionVariant[];
-  selectedSeed: number | null;
+  prevSelected: CompositionVariant | null;
+  selectedImageId: string | null;
   onSelect: (v: CompositionVariant) => void;
 }
 
 export function CompositionVariants({
   variants,
-  selectedSeed,
+  prevSelected,
+  selectedImageId,
   onSelect,
 }: CompositionVariantsProps) {
+  const cols = prevSelected ? 5 : 4;
+  const idOf = (v: CompositionVariant): string | null =>
+    v.imageId ?? imageIdFromPath(v.path);
+  const prevId = prevSelected ? idOf(prevSelected) : null;
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10 }}>
+    <div style={{ display: 'grid', gridTemplateColumns: `repeat(${cols}, 1fr)`, gap: 10 }}>
       {variants.map((v, i) => {
         if (v.placeholder) return <PlaceholderTile key={v.id} index={i} />;
         if (v.error) return <ErrorTile key={v.id} index={i} />;
+        const id = idOf(v);
         return (
           <PickableTile
             key={v.id}
             variant={v}
-            index={i}
-            selected={selectedSeed === v.seed}
+            label={`합성 ${i + 1}`}
+            selected={!!id && selectedImageId === id}
             onSelect={onSelect}
           />
         );
       })}
+      {prevSelected && (
+        <PickableTile
+          key={prevSelected.id}
+          variant={prevSelected}
+          label="이전 선택"
+          selected={!!prevId && selectedImageId === prevId}
+          onSelect={onSelect}
+          isPrev
+        />
+      )}
     </div>
   );
 }
@@ -90,20 +107,27 @@ function ErrorTile({ index }: { index: number }) {
 
 function PickableTile({
   variant,
-  index,
+  label,
   selected,
   onSelect,
+  isPrev = false,
 }: {
   variant: CompositionVariant;
-  index: number;
+  label: string;
   selected: boolean;
   onSelect: (v: CompositionVariant) => void;
+  isPrev?: boolean;
 }) {
   return (
     <button
       className={`preset-tile ${selected ? 'on' : ''}`}
       onClick={() => onSelect(variant)}
-      style={{ padding: 0 }}
+      style={{
+        padding: 0,
+        ...(isPrev && !selected
+          ? { borderStyle: 'dashed', borderColor: 'var(--border-strong, #4b5563)' }
+          : null),
+      }}
     >
       <div
         className="swatch"
@@ -117,7 +141,7 @@ function PickableTile({
         {variant.url && (
           <img
             src={variant.url}
-            alt={`합성 후보 ${index + 1}`}
+            alt={label}
             style={{ width: '100%', height: '100%', objectFit: 'cover' }}
           />
         )}
@@ -139,8 +163,25 @@ function PickableTile({
             <Icon name="check" size={12} />
           </div>
         )}
+        {isPrev && (
+          <div
+            style={{
+              position: 'absolute',
+              top: 6,
+              left: 6,
+              background: 'rgba(0,0,0,0.55)',
+              color: '#fff',
+              borderRadius: 4,
+              padding: '2px 6px',
+              fontSize: 10,
+              letterSpacing: 0.2,
+            }}
+          >
+            이전
+          </div>
+        )}
       </div>
-      <div className="name">합성 {index + 1}</div>
+      <div className="name">{label}</div>
     </button>
   );
 }

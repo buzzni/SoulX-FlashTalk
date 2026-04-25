@@ -16,8 +16,8 @@
 import { useEffect, useRef } from 'react';
 import { Badge, Button, Card, Segmented } from '../primitives.jsx';
 import { useHostGeneration, type HostVariant } from '../../hooks/useHostGeneration';
-import { makeRandomSeeds } from '../../api/mapping';
-import type { HostGenerateInput } from '../../api/host';
+import { imageIdFromPath, makeRandomSeeds } from '../../api/mapping';
+import { selectHost, type HostGenerateInput } from '../../api/host';
 import type { UploadResult } from '../../api/upload';
 import { HostTextForm } from './HostTextForm';
 import { HostReferenceUploader, type RefFile } from './HostReferenceUploader';
@@ -105,6 +105,9 @@ export default function Step1Host({ state, update }: Step1HostProps) {
   };
 
   const handleSelectVariant = (v: HostVariant) => {
+    // Fall back to deriving imageId from path for variants rehydrated
+    // before the imageId field existed.
+    const imageId = v.imageId ?? imageIdFromPath(v.path);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     update((s: any) => ({
       ...s,
@@ -114,9 +117,17 @@ export default function Step1Host({ state, update }: Step1HostProps) {
         imageUrl: v.url ?? null,
         selectedPath: v.path ?? null,
         selectedSeed: v.seed,
+        selectedImageId: imageId,
         _gradient: v._gradient ?? null,
       },
     }));
+    // Best-effort sync; backend cleanup tolerates a missed select call.
+    if (imageId) {
+      selectHost(imageId).catch((e) => {
+        // eslint-disable-next-line no-console
+        console.warn('host select sync failed (non-fatal):', e);
+      });
+    }
   };
 
   const handleFaceSelected = (ref: RefFile | null, uploaded?: UploadResult) => {
@@ -249,7 +260,14 @@ export default function Step1Host({ state, update }: Step1HostProps) {
           >
             <HostVariantGrid
               variants={variants}
-              selectedSeed={host.selectedSeed ?? null}
+              // Step 1 has /api/hosts/save as the durable "keep this one"
+              // mechanism, so the lifecycle prev tile is redundant here.
+              // Step 2 still shows it (no save equivalent for composites).
+              prevSelected={null}
+              selectedImageId={
+                (host as { selectedImageId?: string | null }).selectedImageId ??
+                imageIdFromPath((host as { selectedPath?: string | null }).selectedPath)
+              }
               onSelect={handleSelectVariant}
             />
             {host.generated && (
