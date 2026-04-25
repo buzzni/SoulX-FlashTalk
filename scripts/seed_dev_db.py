@@ -4,6 +4,12 @@ Idempotent: re-running upserts in place; existing data isn't disturbed
 beyond the listed fields. Refuses to run unless MONGO_URL points at
 localhost AND DB_NAME is an ai_showhost dev/test name.
 
+Note (PR0+): only seeds the synthetic dev users (testuser, noaccess).
+The `jack` account is intentionally NOT seeded here because the dev DB
+holds the real prod-shaped jack record (real bcrypt hash, role="admin",
+hashkey, refresh_token_hashes, etc.) so the operator can log in with the
+actual prod password. Running this script does NOT touch jack.
+
 Usage:
     .venv/bin/python scripts/seed_dev_db.py
 """
@@ -34,13 +40,6 @@ def _hash_password(plaintext: str) -> str:
 
 
 SEED_USERS = [
-    {
-        "user_id": "jack",
-        "password": "dev1234",
-        "display_name": "잭",
-        "role": "master",
-        "subscriptions": ["platform", "studio"],
-    },
     {
         "user_id": "testuser",
         "password": "test1234",
@@ -96,12 +95,13 @@ def main() -> int:
         )
 
     record_migration(db, "seed_dev_db", f"{upserted} users upserted")
-    print(f"\nDone. {upserted} users present in {DB_NAME}.users.")
+    n_total = users.count_documents({})
+    print(f"\nDone. seeded {upserted}; total users in {DB_NAME}.users = {n_total}.")
     print(
         "Login passwords (DEV ONLY — do not use these on prod):\n"
-        "  jack      : dev1234\n"
         "  testuser  : test1234   (subscriptions: platform+studio)\n"
-        "  noaccess  : test1234   (subscriptions: platform only)"
+        "  noaccess  : test1234   (subscriptions: platform only)\n"
+        "  jack      : (real prod password — record imported separately, not touched here)"
     )
     return 0
 
