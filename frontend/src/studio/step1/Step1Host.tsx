@@ -165,7 +165,7 @@ export default function Step1Host({ state, update }: Step1HostProps) {
       </div>
 
       <Card>
-        <div className="flex justify-between items-center" style={{ marginBottom: 14 }}>
+        <div className="flex justify-between items-center">
           <Segmented
             value={host.mode}
             onChange={(v: 'text' | 'image') => {
