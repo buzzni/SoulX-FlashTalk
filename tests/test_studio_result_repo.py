@@ -158,6 +158,83 @@ async def test_find_by_task_id_missing(repo_db):
     assert await repo.find_by_task_id("ghost") is None
 
 
+# ── list_completed playlist_id filter (Lane B/C) ──
+
+
+async def test_list_completed_filter_by_playlist_id(repo_db):
+    from modules.repositories import studio_playlist_repo
+    p_a = await studio_playlist_repo.create("u1", name="A")
+    p_b = await studio_playlist_repo.create("u1", name="B")
+    await repo.upsert("u1", _manifest("t1"))
+    await repo.upsert("u1", _manifest("t2"))
+    await repo.upsert("u1", _manifest("t3"))
+    await repo.set_playlist("u1", "t1", p_a["playlist_id"])
+    await repo.set_playlist("u1", "t2", p_b["playlist_id"])
+    items = await repo.list_completed("u1", playlist_id=p_a["playlist_id"])
+    assert [d["task_id"] for d in items] == ["t1"]
+
+
+async def test_list_completed_filter_unassigned(repo_db):
+    from modules.repositories import studio_playlist_repo
+    p = await studio_playlist_repo.create("u1", name="A")
+    await repo.upsert("u1", _manifest("t1"))  # missing field → unassigned
+    await repo.upsert("u1", _manifest("t2"))
+    await repo.set_playlist("u1", "t2", p["playlist_id"])
+    items = await repo.list_completed("u1", playlist_id="unassigned")
+    assert [d["task_id"] for d in items] == ["t1"]
+
+
+async def test_list_completed_filter_unknown_returns_empty(repo_db):
+    """Plan decision #12: stale id → 200 [], not 404."""
+    await repo.upsert("u1", _manifest("t1"))
+    items = await repo.list_completed("u1", playlist_id="f" * 32)
+    assert items == []
+
+
+# ── set_playlist (Lane B/C) ──
+
+
+async def test_set_playlist_happy(repo_db):
+    from modules.repositories import studio_playlist_repo
+    p = await studio_playlist_repo.create("u1", name="A")
+    await repo.upsert("u1", _manifest("t1"))
+    out = await repo.set_playlist("u1", "t1", p["playlist_id"])
+    assert out is not None
+    assert out["playlist_id"] == p["playlist_id"]
+    fresh = await repo.get("u1", "t1")
+    assert fresh["playlist_id"] == p["playlist_id"]
+
+
+async def test_set_playlist_to_none_unassigns(repo_db):
+    from modules.repositories import studio_playlist_repo
+    p = await studio_playlist_repo.create("u1", name="A")
+    await repo.upsert("u1", _manifest("t1"))
+    await repo.set_playlist("u1", "t1", p["playlist_id"])
+    out = await repo.set_playlist("u1", "t1", None)
+    assert out["playlist_id"] is None
+
+
+async def test_set_playlist_unknown_target_raises(repo_db):
+    await repo.upsert("u1", _manifest("t1"))
+    with pytest.raises(LookupError):
+        await repo.set_playlist("u1", "t1", "f" * 32)
+
+
+async def test_set_playlist_cross_user_target_raises(repo_db):
+    from modules.repositories import studio_playlist_repo
+    alice_p = await studio_playlist_repo.create("alice", name="A")
+    await repo.upsert("bob", _manifest("t1"))
+    with pytest.raises(LookupError):
+        await repo.set_playlist("bob", "t1", alice_p["playlist_id"])
+
+
+async def test_set_playlist_missing_result_returns_none(repo_db):
+    from modules.repositories import studio_playlist_repo
+    p = await studio_playlist_repo.create("u1", name="A")
+    out = await repo.set_playlist("u1", "ghost", p["playlist_id"])
+    assert out is None
+
+
 # ── delete ──
 
 async def test_delete_owner_only(repo_db):

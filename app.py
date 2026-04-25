@@ -1158,6 +1158,10 @@ async def generate_video(
     # temperatures, etc.) instead of whatever state.* the wizard happens
     # to hold at view time. None → dashboard falls back to state.
     meta: Optional[str] = Form(None),
+    # Playlist assignment at generate time (per docs/playlist-feature-plan.md
+    # decision #3). Empty string / null → 미지정. Validation lives in the
+    # manifest upsert path (decision #9: silent coerce on miss/cross-user).
+    playlist_id: Optional[str] = Form(None),
 ):
     """Generate video from host image + audio"""
     from utils.security import safe_upload_path
@@ -1248,6 +1252,9 @@ async def generate_video(
             logger.warning("Invalid meta JSON on /api/generate: %s", e)
 
     user = auth_module.get_request_user(request)
+    # Normalize empty-string playlist_id to None — frontends can't always
+    # send null in multipart/form-data.
+    pid = playlist_id if playlist_id not in ("", "null", None) else None
     await task_queue.enqueue(
         task_id=task_id,
         task_type="generate",
@@ -1263,6 +1270,7 @@ async def generate_video(
             "scene_prompt": scene_prompt,
             "reference_image_paths": ref_paths,
             "meta": meta_obj,
+            "playlist_id": pid,
         },
         user_id=user["user_id"],
         label=_build_queue_label(queue_label, script_text, resolution, host_image_path),
@@ -1460,15 +1468,28 @@ async def get_video(task_id: str, download: bool = False):
 
 
 @app.get("/api/history", response_model=HistoryResponse)
-async def get_history(request: Request, limit: int = 50):
+async def get_history(
+    request: Request,
+    limit: int = 50,
+    playlist_id: Optional[str] = None,
+):
     """Return the authenticated user's recent completed renders.
 
     PR5 cutover: was outputs/video_history.json (global), now studio_results
     scoped to the calling user (admin/master sees all).
+
+    Optional `playlist_id` query param filters results (plan decision #12):
+        omitted        → all renders
+        "unassigned"   → only renders with no playlist
+        <hex id>       → exact playlist match. Unknown / deleted id returns
+                         200 [] so cross-tab playlist deletion doesn't break
+                         filter-UI restoration.
     """
     from modules.repositories import studio_result_repo as _result_repo
     user = auth_module.get_request_user(request)
-    rows = await _result_repo.list_completed(user["user_id"], limit=limit)
+    rows = await _result_repo.list_completed(
+        user["user_id"], limit=limit, playlist_id=playlist_id
+    )
     # Project the legacy `videos` shape so the SPA's existing parser keeps working.
     videos = []
     for r in rows:
@@ -1775,6 +1796,8 @@ async def generate_conversation_endpoint(
     seed: int = Form(9999),
     cpu_offload: bool = Form(True),
     resolution: str = Form("1280x720"),
+    # Symmetry with /api/generate — see comment there.
+    playlist_id: Optional[str] = Form(None),
 ):
     """Generate multi-agent conversation video."""
     try:
@@ -1803,6 +1826,7 @@ async def generate_conversation_endpoint(
     label = dialog_turns[0]["text"][:50] if dialog_turns else "Conversation"
 
     user = auth_module.get_request_user(request)
+    pid = playlist_id if playlist_id not in ("", "null", None) else None
     await task_queue.enqueue(
         task_id=task_id,
         task_type="conversation",
@@ -1813,6 +1837,7 @@ async def generate_conversation_endpoint(
             "seed": seed,
             "cpu_offload": cpu_offload,
             "resolution": resolution,
+            "playlist_id": pid,
         },
         user_id=user["user_id"],
         label=label,
@@ -2443,6 +2468,107 @@ async def delete_host(host_id: str, request: Request):
     if not ok:
         raise HTTPException(status_code=404, detail="Host not found")
     return {"message": "deleted", "id": host_id}
+
+
+# ========================================
+# Playlists CRUD (per docs/playlist-feature-plan.md)
+# ========================================
+
+
+def _validate_playlist_id(playlist_id: str) -> None:
+    """playlist_id is a 32-char hex uuid (uuid4().hex). Defense-in-depth
+    against path-traversal-shaped values arriving via path parameter."""
+    if (
+        not playlist_id
+        or len(playlist_id) != 32
+        or not all(c in "0123456789abcdef" for c in playlist_id)
+    ):
+        raise HTTPException(status_code=400, detail="Invalid playlist_id")
+
+
+@app.get("/api/playlists")
+async def list_playlists(request: Request):
+    """List the user's playlists with video counts + the synthetic 미지정 count.
+    Sidebar applies alphabetical sort in JS (plan decision #11)."""
+    from modules.repositories import studio_playlist_repo
+    user = auth_module.get_request_user(request)
+    user_id = user["user_id"]
+    playlists = await studio_playlist_repo.list_for_user(user_id)
+    unassigned = await studio_playlist_repo.unassigned_count(user_id)
+    return {"playlists": playlists, "unassigned_count": unassigned}
+
+
+@app.post("/api/playlists")
+async def create_playlist(request: Request, name: str = Form(...)):
+    """Create a new playlist. 409 on duplicate name (per-user, NFC+casefold)."""
+    from modules.repositories import studio_playlist_repo
+    user = auth_module.get_request_user(request)
+    try:
+        return await studio_playlist_repo.create(user["user_id"], name=name)
+    except studio_playlist_repo.DuplicateNameError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    except studio_playlist_repo.ReservedNameError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.patch("/api/playlists/{playlist_id}")
+async def rename_playlist(playlist_id: str, request: Request, name: str = Form(...)):
+    """Rename. 404 if missing/cross-user, 409 on name dup."""
+    from modules.repositories import studio_playlist_repo
+    _validate_playlist_id(playlist_id)
+    user = auth_module.get_request_user(request)
+    try:
+        out = await studio_playlist_repo.rename(user["user_id"], playlist_id, name=name)
+    except studio_playlist_repo.DuplicateNameError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    except studio_playlist_repo.ReservedNameError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    if out is None:
+        raise HTTPException(status_code=404, detail="Playlist not found")
+    return out
+
+
+@app.delete("/api/playlists/{playlist_id}")
+async def delete_playlist(playlist_id: str, request: Request):
+    """Delete a playlist; cascades videos to 미지정. 404 if missing/cross-user."""
+    from modules.repositories import studio_playlist_repo
+    _validate_playlist_id(playlist_id)
+    user = auth_module.get_request_user(request)
+    ok = await studio_playlist_repo.delete(user["user_id"], playlist_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail="Playlist not found")
+    return {"message": "deleted", "playlist_id": playlist_id}
+
+
+@app.patch("/api/results/{task_id}/playlist")
+async def move_result_to_playlist(
+    task_id: str,
+    request: Request,
+    playlist_id: Optional[str] = Form(None),
+):
+    """Move a video to a playlist (or empty/null = 미지정). 404 if result
+    missing/cross-user OR if playlist_id is non-empty and unknown/cross-user."""
+    from modules.repositories import studio_result_repo
+    user = auth_module.get_request_user(request)
+    if not task_id.isalnum():
+        raise HTTPException(status_code=400, detail="Invalid task_id")
+    # Empty string from frontends that can't easily send null in a Form body
+    # collapses to "unassign". Explicit null-as-text is also normalized.
+    if playlist_id in ("", "null", None):
+        playlist_id = None
+    else:
+        _validate_playlist_id(playlist_id)
+    try:
+        out = await studio_result_repo.set_playlist(user["user_id"], task_id, playlist_id)
+    except LookupError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    if out is None:
+        raise HTTPException(status_code=404, detail="Result not found")
+    return {"task_id": task_id, "playlist_id": playlist_id, "message": "updated"}
 
 
 # ========================================

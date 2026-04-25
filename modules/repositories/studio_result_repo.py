@@ -29,6 +29,8 @@ import logging
 from datetime import datetime, timezone
 from typing import Any, Optional
 
+from pymongo import ReturnDocument
+
 from modules import db as db_module
 
 logger = logging.getLogger(__name__)
@@ -108,15 +110,67 @@ async def find_by_task_id(task_id: str) -> Optional[dict]:
     return doc
 
 
-async def list_completed(user_id: str, *, limit: int = 50) -> list[dict]:
-    """Return up to `limit` completed manifests for `user_id`,
-    newest first. Powers /api/history."""
+async def list_completed(
+    user_id: str,
+    *,
+    limit: int = 50,
+    playlist_id: Optional[str] = None,
+) -> list[dict]:
+    """Return up to `limit` completed manifests for `user_id`, newest first.
+
+    Powers /api/history. `playlist_id` filter:
+        None         → no filter (all playlists + unassigned)
+        "unassigned" → playlist_id is null or absent (matches default)
+        <hex id>     → exact match. Plan decision #12: unknown id → empty list,
+                       NOT 404 (the SPA may filter on a stale id from another
+                       tab and we don't want to break filter-UI restoration).
+    """
+    query: dict[str, Any] = {"user_id": user_id, "status": "completed"}
+    if playlist_id is not None:
+        if playlist_id == "unassigned":
+            query["playlist_id"] = None  # matches both null value and missing field
+        else:
+            query["playlist_id"] = playlist_id
     cursor = (_coll()
-              .find({"user_id": user_id, "status": "completed"},
-                    projection={"_id": 0, "_imported_at": 0})
+              .find(query, projection={"_id": 0, "_imported_at": 0})
               .sort("completed_at", -1)
               .limit(limit))
     return [d async for d in cursor]
+
+
+async def set_playlist(
+    user_id: str,
+    task_id: str,
+    playlist_id: Optional[str],
+) -> Optional[dict]:
+    """Move a result row to `playlist_id` (or null = 미지정).
+
+    Plan §9: validates target via studio_playlist_repo.exists. PATCH endpoint
+    surfaces LookupError as 404 (whereas the worker manifest upsert path
+    silently coerces to null — that lives in upsert(), not here).
+
+    Args:
+        playlist_id: target playlist hex id, or None to unassign.
+
+    Raises:
+        LookupError: when playlist_id is non-None and doesn't exist for user_id.
+
+    Returns:
+        Updated manifest, or None if (user_id, task_id) doesn't exist.
+    """
+    if playlist_id is not None:
+        # Late import to avoid circular dependency
+        # (studio_playlist_repo imports studio_result_repo for clear_playlist_id).
+        from modules.repositories import studio_playlist_repo
+        if not await studio_playlist_repo.exists(user_id, playlist_id):
+            raise LookupError(f"playlist {playlist_id} not found for user {user_id}")
+    doc = await _coll().find_one_and_update(
+        {"user_id": user_id, "task_id": task_id},
+        {"$set": {"playlist_id": playlist_id}},
+        return_document=ReturnDocument.AFTER,
+        projection={"_id": 0, "_imported_at": 0},
+    )
+    return doc
 
 
 async def count_for_user(user_id: str) -> int:
