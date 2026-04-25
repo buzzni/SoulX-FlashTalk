@@ -1,31 +1,39 @@
 /**
  * PlaylistPicker — Step 3 footer playlist assignment.
  *
- * Lets the user assign the about-to-render video to a playlist (or leave
- * unassigned = "미지정"). Inline-create uses POST /api/playlists; the new
- * playlist auto-selects per plan §6.
+ * Uses shadcn Select (Radix) instead of a native <select> so the dropdown
+ * chrome matches the rest of the wizard (Pretendard, primary blue, custom
+ * focus ring) and gets keyboard nav + portal rendering for free.
  *
- * Graceful degradation per plan decision #13: if /api/playlists fails to
- * load, render the notice + retry button. The user can still ship the
+ * Inline-create lives below the trigger and auto-selects the new playlist
+ * (plan §6). Graceful degrade per plan decision #13: if /api/playlists
+ * fails to load, render the warning + retry. The user can still ship the
  * render — it lands in 미지정.
- *
- * Lives inside the wizard's .studio-root so we lean on the wizard's Button
- * primitive and the bridged tokens (--accent, --border, --bg) — visually
- * matches the rest of Step 3 with zero per-component overrides.
  */
 
 import { useEffect, useState } from 'react';
-import Icon from '../Icon.jsx';
-import { Button } from '../primitives.jsx';
 import { listPlaylists, createPlaylist, type Playlist } from '../../api/playlists';
 import { humanizeError } from '../../api/http';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectSeparator,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import { AlertCircle, Plus } from 'lucide-react';
 
 export interface PlaylistPickerProps {
   selected: string | null; // playlist_id or null = 미지정
   onChange: (playlistId: string | null) => void;
 }
 
-const CREATE_TOKEN = '__create__';
+const UNASSIGNED = '__unassigned__';
+const CREATE = '__create__';
 
 export function PlaylistPicker({ selected, onChange }: PlaylistPickerProps) {
   const [playlists, setPlaylists] = useState<Playlist[] | null>(null);
@@ -85,15 +93,8 @@ export function PlaylistPicker({ selected, onChange }: PlaylistPickerProps) {
   // Graceful degradation — playlist list unreachable. User can still ship.
   if (loadError) {
     return (
-      <div
-        className="flex items-center gap-2 px-3 py-2 text-xs rounded"
-        style={{
-          color: 'var(--warn)',
-          background: 'var(--warn-soft)',
-          border: '1px solid var(--warn)',
-        }}
-      >
-        <Icon name="alert_circle" size={13} />
+      <div className="flex items-center gap-2 px-3 py-2 text-xs rounded-md border border-[hsl(38_92%_50%/0.4)] bg-[hsl(38_92%_96%)] text-[hsl(38_92%_30%)]">
+        <AlertCircle className="size-3.5 shrink-0" />
         <span className="flex-1">
           플레이리스트 목록을 못 불러왔어요 · 이번 영상은 미지정으로 저장됩니다
         </span>
@@ -104,49 +105,58 @@ export function PlaylistPicker({ selected, onChange }: PlaylistPickerProps) {
     );
   }
 
+  const handleValueChange = (v: string) => {
+    if (v === CREATE) {
+      setShowCreate(true);
+      return;
+    }
+    if (v === UNASSIGNED) {
+      onChange(null);
+      return;
+    }
+    onChange(v);
+  };
+
+  const triggerValue = selected ?? UNASSIGNED;
+
   return (
     <div className="flex flex-col gap-2">
-      <select
-        value={selected ?? ''}
-        onChange={(e) => {
-          const v = e.target.value;
-          if (v === CREATE_TOKEN) {
-            setShowCreate(true);
-            return;
-          }
-          onChange(v === '' ? null : v);
-        }}
+      <Select
+        value={triggerValue}
+        onValueChange={handleValueChange}
         disabled={playlists === null}
-        className="px-2.5 py-2 text-sm rounded max-w-xs disabled:opacity-60"
-        style={{
-          border: '1px solid var(--border)',
-          background: 'var(--bg-elev)',
-          color: 'var(--text)',
-        }}
       >
-        <option value="">미지정</option>
-        {playlists?.map((p) => (
-          <option key={p.playlist_id} value={p.playlist_id}>
-            {p.name}
-          </option>
-        ))}
-        <option disabled value="__sep__">──────────</option>
-        <option value={CREATE_TOKEN}>+ 새 플레이리스트 만들기</option>
-      </select>
+        <SelectTrigger className="w-full max-w-xs">
+          <SelectValue placeholder="미지정" />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectGroup>
+            <SelectItem value={UNASSIGNED}>미지정</SelectItem>
+            {playlists?.map((p) => (
+              <SelectItem key={p.playlist_id} value={p.playlist_id}>
+                {p.name}
+              </SelectItem>
+            ))}
+          </SelectGroup>
+          <SelectSeparator />
+          <SelectItem
+            value={CREATE}
+            className="text-primary focus:text-primary"
+          >
+            <Plus className="size-3.5" />
+            새 플레이리스트 만들기
+          </SelectItem>
+        </SelectContent>
+      </Select>
       {showCreate && (
         <div className="flex flex-wrap items-center gap-2">
-          <input
+          <Input
             type="text"
             value={newName}
             onChange={(e) => setNewName(e.target.value)}
             placeholder="플레이리스트 이름 (예: 겨울 컬렉션)"
             autoFocus
-            className="flex-1 min-w-[200px] px-2.5 py-2 text-sm rounded"
-            style={{
-              border: '1px solid var(--border)',
-              background: 'var(--bg-elev)',
-              color: 'var(--text)',
-            }}
+            className="flex-1 min-w-[200px]"
             onKeyDown={(e) => {
               if (e.key === 'Enter') {
                 e.preventDefault();
@@ -159,7 +169,6 @@ export function PlaylistPicker({ selected, onChange }: PlaylistPickerProps) {
           />
           <Button
             size="sm"
-            variant="primary"
             onClick={handleCreate}
             disabled={creating || !newName.trim()}
           >
@@ -169,12 +178,7 @@ export function PlaylistPicker({ selected, onChange }: PlaylistPickerProps) {
             취소
           </Button>
           {createError && (
-            <div
-              className="w-full text-xs"
-              style={{ color: 'var(--danger)' }}
-            >
-              {createError}
-            </div>
+            <div className="w-full text-xs text-destructive">{createError}</div>
           )}
         </div>
       )}

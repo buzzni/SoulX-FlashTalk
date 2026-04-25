@@ -30,6 +30,8 @@ import { ScriptEditor, buildScript } from './ScriptEditor';
 import { VoiceAdvancedSettings } from './VoiceAdvancedSettings';
 import { ResolutionPicker, type ResolutionPreset } from './ResolutionPicker';
 import { PlaylistPicker } from './PlaylistPicker';
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Mic, Copy, Upload } from 'lucide-react';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type UpdateFn = (updater: (state: any) => any) => void;
@@ -41,9 +43,9 @@ export interface Step3AudioProps {
 }
 
 const TABS = [
-  { id: 'tts' as const, label: '목소리 고르기', icon: 'mic' },
-  { id: 'clone' as const, label: '내 목소리 복제', icon: 'copy' },
-  { id: 'upload' as const, label: '녹음 파일 업로드', icon: 'upload' },
+  { id: 'tts' as const, label: '목소리 고르기', Icon: Mic },
+  { id: 'clone' as const, label: '내 목소리 복제', Icon: Copy },
+  { id: 'upload' as const, label: '녹음 파일 업로드', Icon: Upload },
 ];
 
 export default function Step3Audio({ state, update }: Step3AudioProps) {
@@ -174,18 +176,23 @@ export default function Step3Audio({ state, update }: Step3AudioProps) {
       </div>
 
       <Card>
-        <div className="tabs">
-          {TABS.map((t) => (
-            <button
-              key={t.id}
-              className={`tab ${voice.source === t.id ? 'on' : ''}`}
-              onClick={() => setV({ source: t.id })}
-            >
-              <Icon name={t.icon} size={13} />
-              {t.label}
-            </button>
-          ))}
-        </div>
+        <Tabs
+          value={voice.source ?? 'tts'}
+          onValueChange={(v) => setV({ source: v as 'tts' | 'clone' | 'upload' })}
+        >
+          <TabsList className="bg-transparent p-0 h-auto border-b border-border rounded-none w-full justify-start gap-1">
+            {TABS.map((t) => (
+              <TabsTrigger
+                key={t.id}
+                value={t.id}
+                className="data-[state=active]:bg-transparent data-[state=active]:shadow-none data-[state=active]:text-foreground data-[state=active]:border-b-2 data-[state=active]:border-primary data-[state=active]:rounded-b-none rounded-b-none -mb-px text-muted-foreground gap-1.5 h-9 px-3 text-[13px] border-b-2 border-transparent"
+              >
+                <t.Icon className="size-3.5" />
+                {t.label}
+              </TabsTrigger>
+            ))}
+          </TabsList>
+        </Tabs>
 
         {(voice.source === 'tts' || voice.source === 'clone') && (
           <>
