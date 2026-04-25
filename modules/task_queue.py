@@ -33,8 +33,19 @@ class TaskQueue:
             try:
                 with open(QUEUE_FILE, "r", encoding="utf-8") as f:
                     data = json.load(f)
-                self._queue = data.get("queue", [])
-                logger.info(f"Loaded {len(self._queue)} tasks from queue file")
+                raw = data.get("queue", [])
+                # Plan decision #9: legacy entries (pre-PR2) lack `user_id`.
+                # Skip them on load — they have no safe owner to assign and
+                # the worker would otherwise treat them as anyone's job.
+                self._queue = [e for e in raw if e.get("user_id")]
+                dropped = len(raw) - len(self._queue)
+                if dropped:
+                    logger.warning(
+                        f"Dropped {dropped} legacy queue entries lacking user_id "
+                        f"(loaded {len(self._queue)} owner-tagged)"
+                    )
+                else:
+                    logger.info(f"Loaded {len(self._queue)} tasks from queue file")
             except Exception as e:
                 logger.error(f"Failed to load queue file: {e}")
                 self._queue = []
@@ -55,11 +66,19 @@ class TaskQueue:
         """Register an async handler for a task type."""
         self._handlers[task_type] = handler
 
-    async def enqueue(self, task_id: str, task_type: str, params: dict, label: str = "") -> dict:
-        """Add a task to the queue. Returns the queue entry."""
+    async def enqueue(self, task_id: str, task_type: str, params: dict, *,
+                       user_id: str, label: str = "") -> dict:
+        """Add a task to the queue. Returns the queue entry.
+
+        `user_id` is required (PR2). It pins task ownership for queue/progress/cancel
+        endpoints and survives serialization to task_queue.json.
+        """
+        if not user_id:
+            raise ValueError("enqueue requires user_id (PR2 decision #9)")
         async with self._lock:
             entry = {
                 "task_id": task_id,
+                "user_id": user_id,
                 "type": task_type,
                 "params": params,
                 "label": label,
@@ -71,29 +90,50 @@ class TaskQueue:
             }
             self._queue.append(entry)
             self._save()
-            logger.info(f"Enqueued task {task_id} ({task_type}), queue size: {self._pending_count()}")
+            logger.info(
+                f"Enqueued task {task_id} ({task_type}) for user_id={user_id}, "
+                f"queue size: {self._pending_count()}"
+            )
 
         self._event.set()  # wake the worker
         return entry
 
-    async def cancel_task(self, task_id: str) -> bool:
-        """Cancel a pending task. Returns True if cancelled."""
+    async def cancel_task(self, task_id: str, *, requesting_user_id: Optional[str] = None,
+                           is_admin: bool = False) -> str:
+        """Cancel a pending task. Returns:
+            - "ok"          — cancelled
+            - "not_found"   — no such task in pending state
+            - "forbidden"   — task exists but belongs to another user
+        """
         async with self._lock:
             for entry in self._queue:
-                if entry["task_id"] == task_id and entry["status"] == "pending":
-                    entry["status"] = "cancelled"
-                    entry["completed_at"] = datetime.now().isoformat()
-                    self._save()
-                    logger.info(f"Cancelled task {task_id}")
-                    return True
-        return False
+                if entry["task_id"] != task_id:
+                    continue
+                if entry["status"] != "pending":
+                    return "not_found"
+                if (not is_admin and requesting_user_id is not None
+                        and entry.get("user_id") != requesting_user_id):
+                    return "forbidden"
+                entry["status"] = "cancelled"
+                entry["completed_at"] = datetime.now().isoformat()
+                self._save()
+                logger.info(f"Cancelled task {task_id} (by user={requesting_user_id})")
+                return "ok"
+        return "not_found"
 
-    async def get_status(self) -> dict:
-        """Get full queue status."""
+    async def get_status(self, *, user_id: Optional[str] = None) -> dict:
+        """Get queue status.
+
+        If `user_id` is given, the snapshot is filtered to that user's tasks
+        (per plan decision #9). Pass None for an admin / unfiltered view.
+        """
         async with self._lock:
-            running = [e for e in self._queue if e["status"] == "running"]
-            pending = [e for e in self._queue if e["status"] == "pending"]
-            recent = [e for e in self._queue if e["status"] in ("completed", "error", "cancelled")]
+            def _own(e: dict) -> bool:
+                return user_id is None or e.get("user_id") == user_id
+            running = [e for e in self._queue if e["status"] == "running" and _own(e)]
+            pending = [e for e in self._queue if e["status"] == "pending" and _own(e)]
+            recent = [e for e in self._queue
+                      if e["status"] in ("completed", "error", "cancelled") and _own(e)]
             # Keep only last 20 completed
             recent = sorted(recent, key=lambda x: x.get("completed_at") or "", reverse=True)[:20]
 
@@ -104,6 +144,14 @@ class TaskQueue:
                 "total_pending": len(pending),
                 "total_running": len(running),
             }
+
+    async def get_task_owner(self, task_id: str) -> Optional[str]:
+        """Return the user_id that owns task_id, or None if unknown."""
+        async with self._lock:
+            for entry in self._queue:
+                if entry["task_id"] == task_id:
+                    return entry.get("user_id")
+        return None
 
     # ── Worker ──
 

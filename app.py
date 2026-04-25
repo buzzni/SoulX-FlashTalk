@@ -21,6 +21,7 @@ from fastapi.staticfiles import StaticFiles
 import uvicorn
 
 import config
+from modules import auth as auth_module
 from modules import db as db_module
 from modules.task_queue import task_queue
 from modules.schemas import (
@@ -66,6 +67,14 @@ from utils.middleware import AuditLog, ApiKeyAuth, ContentLengthLimit
 app.add_middleware(AuditLog)  # outermost (logs even on 4xx)
 app.add_middleware(ApiKeyAuth)
 app.add_middleware(ContentLengthLimit)
+
+
+# Studio JWT auth (PR2). Goes inside CORS / AuditLog so 401s still get
+# CORS headers and audit lines. The middleware is a no-op for paths in
+# auth_module.PUBLIC_PATHS / PUBLIC_PATH_PREFIXES.
+@app.middleware("http")
+async def _studio_auth(request, call_next):
+    return await auth_module.auth_middleware(request, call_next)
 
 # Create directories
 for d in [config.UPLOADS_DIR, config.OUTPUTS_DIR, config.TEMP_DIR, config.EXAMPLES_DIR, config.HOSTS_DIR, config.RESULTS_DIR]:
@@ -754,6 +763,28 @@ async def get_config():
     }
 
 
+# --- Auth (PR2) ---
+
+@app.post("/api/auth/login")
+async def auth_login(payload: dict):
+    """Studio login. Body: {user_id, password}. Returns access_token + user."""
+    user_id = (payload or {}).get("user_id") or ""
+    password = (payload or {}).get("password") or ""
+    return await auth_module.login(user_id, password)
+
+
+@app.post("/api/auth/logout")
+async def auth_logout(request: Request):
+    user = auth_module.get_request_user(request)
+    new_sid = await auth_module.logout(user["user_id"])
+    return {"ok": True, "studio_token_version": new_sid}
+
+
+@app.get("/api/auth/me")
+async def auth_me(request: Request):
+    return auth_module.me(auth_module.get_request_user(request))
+
+
 # --- File Upload Endpoints ---
 
 @app.post("/api/upload/host-image")
@@ -1143,6 +1174,7 @@ async def clone_voice(
 
 @app.post("/api/generate")
 async def generate_video(
+    request: Request,
     audio_source: str = Form("upload"),  # "upload", "elevenlabs"
     host_image_path: Optional[str] = Form(None),
     audio_path: Optional[str] = Form(None),
@@ -1258,6 +1290,7 @@ async def generate_video(
         except json.JSONDecodeError as e:
             logger.warning("Invalid meta JSON on /api/generate: %s", e)
 
+    user = auth_module.get_request_user(request)
     await task_queue.enqueue(
         task_id=task_id,
         task_type="generate",
@@ -1274,10 +1307,11 @@ async def generate_video(
             "reference_image_paths": ref_paths,
             "meta": meta_obj,
         },
+        user_id=user["user_id"],
         label=_build_queue_label(queue_label, script_text, resolution, host_image_path),
     )
 
-    queue_status = await task_queue.get_status()
+    queue_status = await task_queue.get_status(user_id=user["user_id"])
     position = queue_status["total_pending"]
 
     return {"task_id": task_id, "message": "Video generation queued", "queue_position": position}
@@ -1337,15 +1371,20 @@ async def _progress_event_generator(task_id: str):
 
 
 @app.get("/api/progress/{task_id}")
-async def progress_stream(task_id: str):
-    """SSE endpoint for real-time progress."""
+async def progress_stream(task_id: str, request: Request):
+    """SSE endpoint for real-time progress. Owner-scoped (admins see all)."""
+    user = auth_module.get_request_user(request)
+    if user.get("role") not in ("admin", "master"):
+        owner = await task_queue.get_task_owner(task_id)
+        if owner is not None and owner != user["user_id"]:
+            raise HTTPException(status_code=404, detail="Task not found")
     if task_id not in task_states:
         raise HTTPException(status_code=404, detail="Task not found")
     return StreamingResponse(_progress_event_generator(task_id), media_type="text/event-stream")
 
 
 @app.get("/api/tasks/{task_id}/state", response_model=TaskStateSnapshot)
-async def task_state_snapshot(task_id: str):
+async def task_state_snapshot(task_id: str, request: Request):
     """Plain-JSON snapshot of current task state — polling alternative to the
     SSE endpoint above. Exists because some client environments (certain
     browser extensions, corporate proxies, weird connection-pool states) block
@@ -1364,6 +1403,11 @@ async def task_state_snapshot(task_id: str):
          task as failed after 8 consecutive 404s (~12s window).
       3. only 404 if the task genuinely doesn't exist anywhere.
     """
+    user = auth_module.get_request_user(request)
+    if user.get("role") not in ("admin", "master"):
+        owner = await task_queue.get_task_owner(task_id)
+        if owner is not None and owner != user["user_id"]:
+            raise HTTPException(status_code=404, detail="Task not found")
     state = task_states.get(task_id)
     if state:
         return {
@@ -1709,6 +1753,7 @@ async def generate_conversation_task(
 
 @app.post("/api/generate-conversation")
 async def generate_conversation_endpoint(
+    request: Request,
     dialog_data: str = Form(...),  # JSON string
     layout: str = Form("split"),
     prompt: Optional[str] = Form(None),
@@ -1742,6 +1787,7 @@ async def generate_conversation_endpoint(
     dialog_turns = parsed_data.get("dialog", [])
     label = dialog_turns[0]["text"][:50] if dialog_turns else "Conversation"
 
+    user = auth_module.get_request_user(request)
     await task_queue.enqueue(
         task_id=task_id,
         task_type="conversation",
@@ -1753,10 +1799,11 @@ async def generate_conversation_endpoint(
             "cpu_offload": cpu_offload,
             "resolution": resolution,
         },
+        user_id=user["user_id"],
         label=label,
     )
 
-    queue_status = await task_queue.get_status()
+    queue_status = await task_queue.get_status(user_id=user["user_id"])
     position = queue_status["total_pending"]
 
     return {"task_id": task_id, "message": "Conversation video generation queued", "queue_position": position}
@@ -1767,16 +1814,25 @@ async def generate_conversation_endpoint(
 # ========================================
 
 @app.get("/api/queue", response_model=QueueSnapshot)
-async def get_queue_status():
-    """Get current queue status: running, pending, and recent tasks."""
-    return await task_queue.get_status()
+async def get_queue_status(request: Request):
+    """Get queue status scoped to the authenticated user (admin sees all)."""
+    user = auth_module.get_request_user(request)
+    scope = None if user.get("role") in ("admin", "master") else user["user_id"]
+    return await task_queue.get_status(user_id=scope)
 
 
 @app.delete("/api/queue/{task_id}")
-async def cancel_queued_task(task_id: str):
-    """Cancel a pending task in the queue."""
-    success = await task_queue.cancel_task(task_id)
-    if not success:
+async def cancel_queued_task(task_id: str, request: Request):
+    """Cancel a pending task. Owner-only (admins/masters can cancel any)."""
+    user = auth_module.get_request_user(request)
+    is_admin = user.get("role") in ("admin", "master")
+    outcome = await task_queue.cancel_task(
+        task_id, requesting_user_id=user["user_id"], is_admin=is_admin,
+    )
+    if outcome == "not_found":
+        raise HTTPException(status_code=404, detail="Task not found or not in pending state")
+    if outcome == "forbidden":
+        # Don't leak whether task exists; return 404 (per plan auth posture)
         raise HTTPException(status_code=404, detail="Task not found or not in pending state")
     # Also update task_states
     if task_id in task_states:
@@ -1858,8 +1914,8 @@ def _synthesize_result_from_queue(entry: dict) -> dict:
 
 
 @app.get("/api/results/{task_id}", response_model=ResultManifest)
-async def get_result(task_id: str):
-    """Return the result manifest for a completed task.
+async def get_result(task_id: str, request: Request):
+    """Return the result manifest for a completed task. Owner-scoped.
 
     Reads outputs/results/{task_id}.json when present (written by the worker
     at completion). Falls back to synthesizing from task_queue.json so
@@ -1868,6 +1924,15 @@ async def get_result(task_id: str):
     # Path-traversal guard — task_id is user-supplied in the URL.
     if not task_id or "/" in task_id or "\\" in task_id or ".." in task_id:
         raise HTTPException(status_code=400, detail="Invalid task_id")
+
+    # Owner check: until PR5 moves results into DB with user_id, the queue is
+    # the only authoritative ownership source. Pre-PR2 tasks have no owner →
+    # fall through to allow access (legacy data, scoped tightening in PR5).
+    user = auth_module.get_request_user(request)
+    if user.get("role") not in ("admin", "master"):
+        owner = await task_queue.get_task_owner(task_id)
+        if owner is not None and owner != user["user_id"]:
+            raise HTTPException(status_code=404, detail="Task not found")
 
     manifest_path = os.path.join(config.RESULTS_DIR, f"{task_id}.json")
     if os.path.exists(manifest_path):

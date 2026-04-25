@@ -9,6 +9,9 @@ import './index.css'
 import './studio/styles/tokens.css'
 import './studio/styles/app.css'
 import './studio/styles/tailwind.css'
+// Side-effect import: registers the auth-header provider with http.ts and
+// the 401/403 redirect handler. Must run before any fetchJSON call.
+import './stores/authStore'
 import App from './App'
 
 createRoot(document.getElementById('root')).render(
