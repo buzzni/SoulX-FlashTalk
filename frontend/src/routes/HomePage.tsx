@@ -64,7 +64,7 @@ function ActionButton({ variant, iconName, title, subtitle, onClick }: ActionBut
   const variantClass =
     variant === 'primary'
       ? 'bg-primary text-primary-foreground hover:bg-[var(--color-brand-primary-hover)]'
-      : 'bg-secondary text-foreground border border-border hover:bg-accent/40';
+      : 'bg-secondary text-foreground border border-border hover:bg-muted';
   const iconBg =
     variant === 'primary'
       ? 'bg-white/15 text-primary-foreground'

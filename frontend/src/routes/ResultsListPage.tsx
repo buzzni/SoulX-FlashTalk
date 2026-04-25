@@ -272,7 +272,7 @@ function PlaylistSidebar({
         <button
           type="button"
           onClick={() => setCreating(true)}
-          className="flex items-center w-full text-left px-2.5 h-8 rounded-md text-[13px] font-medium text-primary transition-colors hover:bg-accent/40 cursor-pointer"
+          className="flex items-center w-full text-left px-2.5 h-8 rounded-md text-[13px] font-medium text-primary transition-colors hover:bg-muted cursor-pointer"
         >
           + 새 플레이리스트
         </button>
@@ -335,7 +335,7 @@ function SidebarRow({ label, count, active, onClick }: SidebarRowProps) {
     'flex items-center justify-between w-full text-left px-2.5 h-8 rounded-md text-[13px] transition-colors cursor-pointer';
   const variant = active
     ? 'bg-sidebar-accent text-sidebar-accent-foreground font-medium'
-    : 'text-sidebar-foreground hover:bg-accent/40';
+    : 'text-sidebar-foreground hover:bg-muted';
   return (
     <button type="button" onClick={onClick} className={`${base} ${variant}`}>
       <span className="truncate pr-2">{label}</span>
@@ -433,7 +433,7 @@ function SidebarPlaylistRow({
     'flex items-center justify-between w-full text-left pl-2.5 pr-9 h-8 rounded-md text-[13px] transition-colors cursor-pointer';
   const rowVariant = active
     ? 'bg-sidebar-accent text-sidebar-accent-foreground font-medium'
-    : 'text-sidebar-foreground hover:bg-accent/40';
+    : 'text-sidebar-foreground hover:bg-muted';
 
   return (
     <div
@@ -453,7 +453,7 @@ function SidebarPlaylistRow({
             type="button"
             aria-label="플레이리스트 옵션"
             title="옵션"
-            className={`absolute right-1.5 top-1/2 -translate-y-1/2 grid place-items-center size-6 rounded text-muted-foreground bg-card/90 border border-border hover:border-primary hover:text-foreground transition-colors cursor-pointer ${hover ? 'opacity-100' : 'opacity-0 data-[state=open]:opacity-100'}`}
+            className={`absolute right-1.5 top-1/2 -translate-y-1/2 grid place-items-center size-6 rounded text-muted-foreground bg-card/90 border border-border hover:bg-muted hover:text-foreground transition-colors cursor-pointer ${hover ? 'opacity-100' : 'opacity-0 data-[state=open]:opacity-100'}`}
           >
             <MoreHorizontal className="size-3.5" />
           </button>
