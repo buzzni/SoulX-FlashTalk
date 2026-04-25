@@ -380,6 +380,7 @@ async def generate_video_task(
     prompt: str,
     seed: int,
     cpu_offload: bool,
+    user_id: Optional[str] = None,
     script_text: str = "",
     resolution: str = "1280x720",
     scene_prompt: str = "",
@@ -638,12 +639,17 @@ async def generate_video_task(
             # delete the surrounding draft / prev_selected siblings. No-op
             # if the user never marked a selection (commit returns None).
             # task_id IS the video_id (frontend uses /api/videos/{task_id}).
-            try:
-                from modules import lifecycle
-                lifecycle.commit("host", task_id)
-                lifecycle.commit("composite", task_id)
-            except Exception as le:
-                logger.warning(f"Task {task_id}: lifecycle commit failed: {le}")
+            if user_id:
+                try:
+                    from modules.repositories import studio_host_repo as host_repo
+                    await host_repo.commit(user_id, "1-host", task_id)
+                    await host_repo.commit(user_id, "2-composite", task_id)
+                except Exception as le:
+                    logger.warning(f"Task {task_id}: lifecycle commit failed: {le}")
+            else:
+                # Pre-PR2 task with no owner — nothing to attribute the
+                # commit to. Skip; data integrity preserved by 007 import.
+                logger.info(f"Task {task_id}: skipping lifecycle commit (no user_id)")
 
             update_task(task_id, "complete", 1.0, f"비디오 생성 완료! ({generation_time:.1f}초)")
             logger.info(f"Task {task_id} completed: {output_path}")
@@ -703,10 +709,11 @@ async def shutdown_event():
     await db_module.close()
 
 
-async def _queue_generate_handler(task_id: str, **params):
+async def _queue_generate_handler(task_id: str, user_id: str, **params):
     """Queue handler that delegates to generate_video_task."""
     await generate_video_task(
         task_id=task_id,
+        user_id=user_id,
         host_image=params["host_image"],
         audio_path=params["audio_path"],
         audio_source_label=params["audio_source_label"],
@@ -721,10 +728,11 @@ async def _queue_generate_handler(task_id: str, **params):
     )
 
 
-async def _queue_conversation_handler(task_id: str, **params):
+async def _queue_conversation_handler(task_id: str, user_id: str, **params):
     """Queue handler that delegates to generate_conversation_task."""
     await generate_conversation_task(
         task_id=task_id,
+        user_id=user_id,
         dialog_data=params["dialog_data"],
         layout=params["layout"],
         prompt=params["prompt"],
@@ -1509,6 +1517,7 @@ async def generate_conversation_task(
     prompt: str,
     seed: int,
     cpu_offload: bool,
+    user_id: Optional[str] = None,
     resolution: str = "1280x720",
 ):
     """Run multi-agent conversation video generation in background."""
@@ -2065,6 +2074,7 @@ async def host_generate(
 
 @app.post("/api/host/generate/stream")
 async def host_generate_stream(
+    request: Request,
     mode: str = Form(...),
     prompt: Optional[str] = Form(None),
     extraPrompt: Optional[str] = Form(None),
@@ -2092,8 +2102,10 @@ async def host_generate_stream(
     """
     from utils.security import safe_upload_path
     from modules.host_generator import stream_host_candidates
-    from modules import lifecycle
+    from modules.repositories import studio_host_repo as host_repo
 
+    user = auth_module.get_request_user(request)
+    user_id = user["user_id"]
     face = safe_upload_path(faceRefPath) if faceRefPath else None
     outfit = safe_upload_path(outfitRefPath) if outfitRefPath else None
     style = safe_upload_path(styleRefPath) if styleRefPath else None
@@ -2111,7 +2123,7 @@ async def host_generate_stream(
         raise HTTPException(status_code=400, detail=f"temperature must be in [0.0, 2.0], got {temperature}")
 
     async def events():
-        batch_id = lifecycle.new_batch_id()
+        batch_id = f"batch_{uuid.uuid4().hex[:8]}"
         saved_paths: list = []
         try:
             async for evt in stream_host_candidates(
@@ -2135,11 +2147,11 @@ async def host_generate_stream(
                     saved_paths.append(evt["path"])
                 if evt.get("type") == "done" and saved_paths:
                     try:
-                        lifecycle.record_batch("host", saved_paths, batch_id)
-                        lifecycle.cleanup_after_generate("host", batch_id)
-                        state = lifecycle.get_state("host")
+                        await host_repo.record_batch(user_id, "1-host", saved_paths, batch_id)
+                        await host_repo.cleanup_after_generate(user_id, "1-host", batch_id)
+                        state = await host_repo.get_state(user_id, "1-host")
                         evt["batch_id"] = batch_id
-                        evt["prev_selected"] = lifecycle.serialize_record(state["prev_selected"])
+                        evt["prev_selected"] = state["prev_selected"]
                     except Exception as le:
                         logger.error("host lifecycle bookkeeping failed: %s", le)
                         evt["lifecycle_error"] = str(le)
@@ -2164,6 +2176,7 @@ async def host_generate_stream(
 
 @app.post("/api/composite/generate")
 async def composite_generate(
+    request: Request,
     hostImagePath: str = Form(...),
     productImagePaths: str = Form("[]"),  # JSON array of paths
     backgroundType: str = Form(...),  # "preset"|"upload"|"prompt"
@@ -2230,16 +2243,18 @@ async def composite_generate(
     # Lifecycle bookkeeping — tag fresh batch as draft, demote previous
     # selected to is_prev_selected, evict the older prev marker. Augment
     # the response so the frontend can render the 5-tile picker.
-    from modules import lifecycle
+    from modules.repositories import studio_host_repo as host_repo
+    user = auth_module.get_request_user(request)
+    user_id = user["user_id"]
     saved_paths = [c.get("path") for c in (result.get("candidates") or []) if c.get("path")]
     if saved_paths:
         try:
-            batch_id = lifecycle.new_batch_id()
-            lifecycle.record_batch("composite", saved_paths, batch_id)
-            lifecycle.cleanup_after_generate("composite", batch_id)
-            state = lifecycle.get_state("composite")
+            batch_id = f"batch_{uuid.uuid4().hex[:8]}"
+            await host_repo.record_batch(user_id, "2-composite", saved_paths, batch_id)
+            await host_repo.cleanup_after_generate(user_id, "2-composite", batch_id)
+            state = await host_repo.get_state(user_id, "2-composite")
             result["batch_id"] = batch_id
-            result["prev_selected"] = lifecycle.serialize_record(state["prev_selected"])
+            result["prev_selected"] = state["prev_selected"]
         except Exception as le:
             logger.error("composite lifecycle bookkeeping failed: %s", le)
             result["lifecycle_error"] = str(le)
@@ -2248,6 +2263,7 @@ async def composite_generate(
 
 @app.post("/api/composite/generate/stream")
 async def composite_generate_stream(
+    request: Request,
     hostImagePath: str = Form(...),
     productImagePaths: str = Form("[]"),
     backgroundType: str = Form(...),
@@ -2270,8 +2286,10 @@ async def composite_generate_stream(
     """
     from utils.security import safe_upload_path
     from modules.composite_generator import stream_composite_candidates
-    from modules import lifecycle
+    from modules.repositories import studio_host_repo as host_repo
 
+    user = auth_module.get_request_user(request)
+    user_id = user["user_id"]
     host_resolved = safe_upload_path(hostImagePath)
 
     try:
@@ -2290,7 +2308,7 @@ async def composite_generate_stream(
         raise HTTPException(status_code=400, detail=f"temperature must be in [0.0, 2.0], got {temperature}")
 
     async def events():
-        batch_id = lifecycle.new_batch_id()
+        batch_id = f"batch_{uuid.uuid4().hex[:8]}"
         saved_paths: list = []
         try:
             async for evt in stream_composite_candidates(
@@ -2314,11 +2332,11 @@ async def composite_generate_stream(
                     saved_paths.append(evt["path"])
                 if evt.get("type") == "done" and saved_paths:
                     try:
-                        lifecycle.record_batch("composite", saved_paths, batch_id)
-                        lifecycle.cleanup_after_generate("composite", batch_id)
-                        state = lifecycle.get_state("composite")
+                        await host_repo.record_batch(user_id, "2-composite", saved_paths, batch_id)
+                        await host_repo.cleanup_after_generate(user_id, "2-composite", batch_id)
+                        state = await host_repo.get_state(user_id, "2-composite")
                         evt["batch_id"] = batch_id
-                        evt["prev_selected"] = lifecycle.serialize_record(state["prev_selected"])
+                        evt["prev_selected"] = state["prev_selected"]
                     except Exception as le:
                         logger.error("composite lifecycle bookkeeping failed: %s", le)
                         evt["lifecycle_error"] = str(le)
@@ -2429,40 +2447,43 @@ def _validate_image_id(image_id: str) -> None:
 
 
 @app.post("/api/host/select")
-async def host_select(image_id: str = Form(...)):
+async def host_select(request: Request, image_id: str = Form(...)):
     """Mark a Step1 candidate as the user's current selection. Idempotent."""
-    from modules import lifecycle
+    from modules.repositories import studio_host_repo as host_repo
+    user = auth_module.get_request_user(request)
     _validate_image_id(image_id)
     try:
-        rec = lifecycle.select("host", image_id)
-    except FileNotFoundError:
+        rec = await host_repo.select(user["user_id"], "1-host", image_id)
+    except LookupError:
         raise HTTPException(status_code=404, detail="Image not found")
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
-    return {"selected": lifecycle.serialize_record(rec)}
+    return {"selected": rec}
 
 
 @app.post("/api/composite/select")
-async def composite_select(image_id: str = Form(...)):
+async def composite_select(request: Request, image_id: str = Form(...)):
     """Mark a Step2 candidate as the user's current selection. Idempotent."""
-    from modules import lifecycle
+    from modules.repositories import studio_host_repo as host_repo
+    user = auth_module.get_request_user(request)
     _validate_image_id(image_id)
     try:
-        rec = lifecycle.select("composite", image_id)
-    except FileNotFoundError:
+        rec = await host_repo.select(user["user_id"], "2-composite", image_id)
+    except LookupError:
         raise HTTPException(status_code=404, detail="Image not found")
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
-    return {"selected": lifecycle.serialize_record(rec)}
+    return {"selected": rec}
 
 
 @app.delete("/api/composites/{image_id}")
-async def delete_composite(image_id: str):
+async def delete_composite(image_id: str, request: Request):
     """Remove a single composite candidate. Refuses `committed` images —
     delete the parent video instead so video_ids bookkeeping stays consistent."""
-    from modules import lifecycle
+    from modules.repositories import studio_host_repo as host_repo
+    user = auth_module.get_request_user(request)
     _validate_image_id(image_id)
-    result = lifecycle.delete_candidate("composite", image_id)
+    result = await host_repo.delete_candidate(user["user_id"], "2-composite", image_id)
     if result == "not_found":
         raise HTTPException(status_code=404, detail="Composite not found")
     if result == "committed":
@@ -2474,17 +2495,18 @@ async def delete_composite(image_id: str):
 
 
 @app.delete("/api/videos/{task_id}")
-async def delete_video(task_id: str):
+async def delete_video(task_id: str, request: Request):
     """Remove a generated video. Cascade-deletes any committed step1/step2
     images linked exclusively to this video (see
-    `lifecycle.cascade_delete_by_video`). Also drops the result manifest
-    and history entry so the dashboard stops surfacing it."""
-    from modules import lifecycle
+    studio_host_repo.cascade_delete_by_video). Also drops the result
+    manifest and history entry so the dashboard stops surfacing it."""
+    from modules.repositories import studio_host_repo as host_repo
+    user = auth_module.get_request_user(request)
 
     if not task_id.replace("-", "").isalnum():
         raise HTTPException(status_code=400, detail="Invalid task_id")
 
-    removed_images = lifecycle.cascade_delete_by_video(task_id)
+    removed_images = await host_repo.cascade_delete_by_video(user["user_id"], task_id)
 
     # Resolve the video path. Prefer in-memory state; fall back to history.
     video_path: Optional[str] = None

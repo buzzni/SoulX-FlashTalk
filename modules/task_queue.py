@@ -222,7 +222,13 @@ class TaskQueue:
 
             logger.info(f"Processing task {task_id} ({task_type})")
             try:
-                await handler(task_id=task_id, **entry["params"])
+                # PR2: pass owner through to the handler so downstream code
+                # (lifecycle commit, manifest write) can scope by user_id.
+                await handler(
+                    task_id=task_id,
+                    user_id=entry.get("user_id"),
+                    **entry["params"],
+                )
                 await self._mark_done(task_id)
             except Exception as e:
                 logger.error(f"Task {task_id} failed in worker: {e}")
