@@ -7,6 +7,7 @@
  */
 
 import Icon from '../Icon.jsx';
+import { imageIdFromPath } from '../../api/mapping';
 import type { CompositionVariant } from '../../hooks/useCompositeGeneration';
 
 export interface CompositionVariantsProps {
@@ -23,17 +24,20 @@ export function CompositionVariants({
   onSelect,
 }: CompositionVariantsProps) {
   const cols = prevSelected ? 5 : 4;
+  const idOf = (v: CompositionVariant): string | null =>
+    v.imageId ?? imageIdFromPath(v.path);
   return (
     <div style={{ display: 'grid', gridTemplateColumns: `repeat(${cols}, 1fr)`, gap: 10 }}>
       {variants.map((v, i) => {
         if (v.placeholder) return <PlaceholderTile key={v.id} index={i} />;
         if (v.error) return <ErrorTile key={v.id} index={i} />;
+        const id = idOf(v);
         return (
           <PickableTile
             key={v.id}
             variant={v}
             label={`합성 ${i + 1}`}
-            selected={!!v.imageId && selectedImageId === v.imageId}
+            selected={!!id && selectedImageId === id}
             onSelect={onSelect}
           />
         );
@@ -43,7 +47,10 @@ export function CompositionVariants({
           key={prevSelected.id}
           variant={prevSelected}
           label="이전 선택"
-          selected={!!prevSelected.imageId && selectedImageId === prevSelected.imageId}
+          selected={(() => {
+            const id = idOf(prevSelected);
+            return !!id && selectedImageId === id;
+          })()}
           onSelect={onSelect}
           isPrev
         />

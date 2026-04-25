@@ -146,6 +146,7 @@ export default function Step2Composite({ state, update }: Step2CompositeProps) {
   };
 
   const selectComposite = (v: CompositionVariant) => {
+    const imageId = v.imageId ?? imageIdFromPath(v.path);
     update((s) => ({
       ...s,
       composition: {
@@ -154,11 +155,11 @@ export default function Step2Composite({ state, update }: Step2CompositeProps) {
         selectedSeed: v.seed,
         selectedPath: v.path ?? null,
         selectedUrl: v.url ?? null,
-        selectedImageId: v.imageId ?? null,
+        selectedImageId: imageId,
       },
     }));
-    if (v.imageId) {
-      selectCompositeApi(v.imageId).catch((e) => {
+    if (imageId) {
+      selectCompositeApi(imageId).catch((e) => {
         // eslint-disable-next-line no-console
         console.warn('composite select sync failed (non-fatal):', e);
       });

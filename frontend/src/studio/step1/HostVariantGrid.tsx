@@ -17,6 +17,7 @@
  */
 
 import Icon from '../Icon.jsx';
+import { imageIdFromPath } from '../../api/mapping';
 import type { HostVariant } from '../../hooks/useHostGeneration';
 
 export interface HostVariantGridProps {
@@ -36,17 +37,23 @@ export function HostVariantGrid({
   onSelect,
 }: HostVariantGridProps) {
   const cols = prevSelected ? 5 : 4;
+  // imageId is the canonical selection key; fall back to deriving it
+  // from `path` so variants persisted before the imageId field existed
+  // (or rehydrated without it) still highlight correctly on click.
+  const idOf = (v: HostVariant): string | null =>
+    v.imageId ?? imageIdFromPath(v.path);
   return (
     <div style={{ display: 'grid', gridTemplateColumns: `repeat(${cols}, 1fr)`, gap: 10 }}>
       {variants.map((v, i) => {
         if (v.placeholder) return <PlaceholderTile key={v.id} index={i} />;
         if (v.error) return <ErrorTile key={v.id} index={i} />;
+        const id = idOf(v);
         return (
           <PickableTile
             key={v.id}
             variant={v}
             label={`후보 ${i + 1}`}
-            selected={!!v.imageId && selectedImageId === v.imageId}
+            selected={!!id && selectedImageId === id}
             onSelect={onSelect}
           />
         );
@@ -56,7 +63,10 @@ export function HostVariantGrid({
           key={prevSelected.id}
           variant={prevSelected}
           label="이전 선택"
-          selected={!!prevSelected.imageId && selectedImageId === prevSelected.imageId}
+          selected={(() => {
+            const id = idOf(prevSelected);
+            return !!id && selectedImageId === id;
+          })()}
           onSelect={onSelect}
           isPrev
         />
