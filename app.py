@@ -83,9 +83,6 @@ for d in [config.UPLOADS_DIR, config.OUTPUTS_DIR, config.TEMP_DIR, config.EXAMPL
 # Mount static files (UPLOADS only — NOT PROJECT_ROOT; Phase 0 Critical #1)
 app.mount("/static", StaticFiles(directory=config.UPLOADS_DIR), name="static")
 
-# Video history file
-VIDEO_HISTORY_FILE = os.path.join(config.OUTPUTS_DIR, "video_history.json")
-
 
 # ========================================
 # Task Progress Tracking
@@ -211,46 +208,6 @@ def set_task_error(task_id: str, error: str):
 
 
 # ========================================
-# Video History
-# ========================================
-
-def load_video_history() -> list:
-    if not os.path.exists(VIDEO_HISTORY_FILE):
-        return []
-    try:
-        with open(VIDEO_HISTORY_FILE, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except Exception:
-        return []
-
-
-def save_video_history(history: list):
-    try:
-        with open(VIDEO_HISTORY_FILE, "w", encoding="utf-8") as f:
-            json.dump(history, f, ensure_ascii=False, indent=2)
-    except Exception as e:
-        logger.error(f"Failed to save history: {e}")
-
-
-def add_to_history(task_id: str, script_text: str, host_image: str, audio_source: str, output_path: str, generation_time: float = None):
-    history = load_video_history()
-    file_size = os.path.getsize(output_path) if os.path.exists(output_path) else 0
-    history.insert(0, {
-        "task_id": task_id,
-        "timestamp": datetime.now().isoformat(),
-        "script_text": script_text[:100] + "..." if len(script_text) > 100 else script_text,
-        "host_image": os.path.basename(host_image),
-        "audio_source": audio_source,
-        "output_path": output_path,
-        "file_size": file_size,
-        "video_url": f"/api/videos/{task_id}",
-        "generation_time": round(generation_time, 2) if generation_time else None,
-    })
-    history = history[:100]
-    save_video_history(history)
-
-
-# ========================================
 # Helper
 # ========================================
 
@@ -355,22 +312,6 @@ def _ensure_multitalk_pipeline(cpu_offload: bool):
 # ========================================
 # Video Generation (async)
 # ========================================
-
-def _write_result_manifest(task_id: str, manifest: dict) -> str:
-    """Persist a per-task result manifest to outputs/results/{task_id}.json.
-
-    Called on successful render — the manifest is the source of truth for the
-    frontend /result/:taskId page. Unlike the task queue (which trims to the
-    last 20 entries), manifests live forever so old completions remain viewable.
-    """
-    os.makedirs(config.RESULTS_DIR, exist_ok=True)
-    path = os.path.join(config.RESULTS_DIR, f"{task_id}.json")
-    tmp = path + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(manifest, f, ensure_ascii=False, indent=2)
-    os.replace(tmp, path)
-    return path
-
 
 async def generate_video_task(
     task_id: str,
@@ -594,45 +535,53 @@ async def generate_video_task(
             # Record
             task_states[task_id]["output_path"] = output_path
             generation_time = time.time() - start_time
-            add_to_history(task_id, script_text, host_image, audio_source_label, output_path, generation_time)
 
             # Result manifest — source of truth for the frontend /result/:taskId
-            # page. Kept separate from task_queue.json because the queue trims
-            # to the last 20 entries (we want completed renders viewable
-            # forever). Captures both sides: the backend payload actually used
+            # page. Captures both sides: the backend payload actually used
             # (resolution AFTER 16× snap, file stats, seed, output path) AND
             # the client snapshot (`meta`) when one was attached at dispatch.
+            # Persisted to studio_results (PR5; was outputs/results/<task>.json).
+            video_bytes = os.path.getsize(output_path) if os.path.exists(output_path) else 0
+            from modules import storage as _storage
             try:
-                video_bytes = os.path.getsize(output_path) if os.path.exists(output_path) else 0
-                _write_result_manifest(task_id, {
-                    "task_id": task_id,
-                    "type": "generate",
-                    "status": "completed",
-                    "completed_at": datetime.now().isoformat(),
-                    "generation_time_sec": round(generation_time, 2),
-                    "video_url": f"/api/videos/{task_id}",
-                    "video_path": output_path,
-                    "video_bytes": video_bytes,
-                    "video_filename": os.path.basename(output_path),
-                    "params": {
-                        "host_image": host_image,
-                        "audio_path": audio_path,
-                        "audio_source_label": audio_source_label,
-                        "prompt": prompt,
-                        "seed": seed,
-                        "cpu_offload": cpu_offload,
-                        "script_text": script_text,
-                        "resolution_requested": resolution,
-                        "resolution_actual": f"{target_h}x{target_w}",
-                        "scene_prompt": scene_prompt,
-                        "reference_image_paths": reference_image_paths or [],
-                    },
-                    "meta": meta,
-                })
-            except Exception as e:
-                # Never fail the task because the manifest write failed; log
-                # and move on — the video itself already landed on disk.
-                logger.warning(f"Task {task_id}: manifest write failed: {e}")
+                video_storage_key = _storage.media_store.key_from_path(output_path)
+            except ValueError:
+                video_storage_key = None
+            manifest = {
+                "task_id": task_id,
+                "type": "generate",
+                "status": "completed",
+                "completed_at": datetime.now(),
+                "generation_time_sec": round(generation_time, 2),
+                "video_url": f"/api/videos/{task_id}",
+                "video_storage_key": video_storage_key,
+                "video_path": output_path,
+                "video_bytes": video_bytes,
+                "video_filename": os.path.basename(output_path),
+                "params": {
+                    "host_image": host_image,
+                    "audio_path": audio_path,
+                    "audio_source_label": audio_source_label,
+                    "prompt": prompt,
+                    "seed": seed,
+                    "cpu_offload": cpu_offload,
+                    "script_text": script_text,
+                    "resolution_requested": resolution,
+                    "resolution_actual": f"{target_h}x{target_w}",
+                    "scene_prompt": scene_prompt,
+                    "reference_image_paths": reference_image_paths or [],
+                },
+                "meta": meta,
+            }
+            if user_id:
+                try:
+                    from modules.repositories import studio_result_repo as _result_repo
+                    await _result_repo.upsert(user_id, manifest)
+                except Exception as e:
+                    # Never fail the task because the manifest write failed.
+                    logger.warning(f"Task {task_id}: manifest upsert failed: {e}")
+            else:
+                logger.info(f"Task {task_id}: skipping manifest persist (no user_id)")
 
             # Lifecycle commit — promote each step's currently-selected
             # candidate to "committed" (linked to this video task_id) and
@@ -1489,21 +1438,54 @@ async def get_video(task_id: str, download: bool = False):
             headers["Content-Disposition"] = "inline"
         return FileResponse(state["output_path"], media_type="video/mp4", headers=headers)
 
-    # Fallback: search history
-    history = load_video_history()
-    for entry in history:
-        if entry["task_id"] == task_id:
-            if os.path.exists(entry["output_path"]):
-                headers = {"Content-Disposition": "attachment" if download else "inline"}
-                return FileResponse(entry["output_path"], media_type="video/mp4", headers=headers)
+    # Fallback: studio_results lookup (no user filter — public endpoint per
+    # plan §6 because <video> tags can't send Authorization headers).
+    from modules.repositories import studio_result_repo as _result_repo
+    doc = await _result_repo.find_by_task_id(task_id)
+    if doc:
+        # Prefer the absolute video_path the worker recorded; fall back to
+        # resolving the storage_key. Either way the file must still exist.
+        candidate = doc.get("video_path")
+        if not candidate and doc.get("video_storage_key"):
+            from modules import storage as _storage
+            try:
+                candidate = str(_storage.media_store.local_path_for(doc["video_storage_key"]))
+            except ValueError:
+                candidate = None
+        if candidate and os.path.exists(candidate):
+            headers = {"Content-Disposition": "attachment" if download else "inline"}
+            return FileResponse(candidate, media_type="video/mp4", headers=headers)
 
     raise HTTPException(status_code=404, detail="Video not found")
 
 
 @app.get("/api/history", response_model=HistoryResponse)
-async def get_history(limit: int = 50):
-    history = load_video_history()
-    return {"total": len(history), "videos": history[:limit]}
+async def get_history(request: Request, limit: int = 50):
+    """Return the authenticated user's recent completed renders.
+
+    PR5 cutover: was outputs/video_history.json (global), now studio_results
+    scoped to the calling user (admin/master sees all).
+    """
+    from modules.repositories import studio_result_repo as _result_repo
+    user = auth_module.get_request_user(request)
+    rows = await _result_repo.list_completed(user["user_id"], limit=limit)
+    # Project the legacy `videos` shape so the SPA's existing parser keeps working.
+    videos = []
+    for r in rows:
+        videos.append({
+            "task_id": r["task_id"],
+            "timestamp": (r.get("completed_at").isoformat()
+                          if hasattr(r.get("completed_at"), "isoformat")
+                          else r.get("completed_at")),
+            "script_text": (r.get("params") or {}).get("script_text", ""),
+            "host_image": (r.get("params") or {}).get("host_image", ""),
+            "audio_source": (r.get("params") or {}).get("audio_source_label", ""),
+            "output_path": r.get("video_path"),
+            "file_size": r.get("video_bytes", 0),
+            "video_url": r.get("video_url") or f"/api/videos/{r['task_id']}",
+            "generation_time": r.get("generation_time_sec"),
+        })
+    return {"total": len(videos), "videos": videos}
 
 
 # ========================================
@@ -1723,14 +1705,38 @@ async def generate_conversation_task(
             if len(dialog.turns) > 3:
                 script_summary += f" ... (+{len(dialog.turns) - 3}턴)"
 
-            add_to_history(
-                task_id,
-                script_summary,
-                "multi-agent",
-                f"conversation:{layout}",
-                output_path,
-                generation_time,
-            )
+            # Result manifest persisted to studio_results (PR5).
+            video_bytes = os.path.getsize(output_path) if os.path.exists(output_path) else 0
+            from modules import storage as _storage
+            try:
+                video_storage_key = _storage.media_store.key_from_path(output_path)
+            except ValueError:
+                video_storage_key = None
+            manifest = {
+                "task_id": task_id,
+                "type": "conversation",
+                "status": "completed",
+                "completed_at": datetime.now(),
+                "generation_time_sec": round(generation_time, 2),
+                "video_url": f"/api/videos/{task_id}",
+                "video_storage_key": video_storage_key,
+                "video_path": output_path,
+                "video_bytes": video_bytes,
+                "video_filename": os.path.basename(output_path),
+                "params": {
+                    "script_summary": script_summary,
+                    "layout": layout,
+                    "host_image": "multi-agent",
+                    "audio_source_label": f"conversation:{layout}",
+                },
+                "meta": None,
+            }
+            if user_id:
+                try:
+                    from modules.repositories import studio_result_repo as _result_repo
+                    await _result_repo.upsert(user_id, manifest)
+                except Exception as e:
+                    logger.warning(f"Conversation task {task_id}: manifest upsert failed: {e}")
 
             update_task(task_id, "complete", 1.0, f"대화 영상 생성 완료! ({generation_time:.1f}초)")
             logger.info(f"Conversation task {task_id} completed: {output_path}")
@@ -1926,32 +1932,38 @@ def _synthesize_result_from_queue(entry: dict) -> dict:
 async def get_result(task_id: str, request: Request):
     """Return the result manifest for a completed task. Owner-scoped.
 
-    Reads outputs/results/{task_id}.json when present (written by the worker
-    at completion). Falls back to synthesizing from task_queue.json so
-    pre-manifest tasks remain viewable in the frontend /result/:taskId page.
+    PR5: reads from studio_results. Falls back to synthesizing from the
+    task_queue snapshot for in-flight tasks the worker hasn't yet upserted.
     """
-    # Path-traversal guard — task_id is user-supplied in the URL.
     if not task_id or "/" in task_id or "\\" in task_id or ".." in task_id:
         raise HTTPException(status_code=400, detail="Invalid task_id")
 
-    # Owner check: until PR5 moves results into DB with user_id, the queue is
-    # the only authoritative ownership source. Pre-PR2 tasks have no owner →
-    # fall through to allow access (legacy data, scoped tightening in PR5).
+    from modules.repositories import studio_result_repo as _result_repo
     user = auth_module.get_request_user(request)
-    if user.get("role") not in ("admin", "master"):
+    is_admin = user.get("role") in ("admin", "master")
+
+    # Primary path — studio_results.
+    if is_admin:
+        doc = await _result_repo.find_by_task_id(task_id)
+    else:
+        doc = await _result_repo.get(user["user_id"], task_id)
+        if doc is None:
+            # Cross-check the queue: if the user owns the task but the
+            # manifest hasn't landed yet, fall through to the synthesizer.
+            owner = await task_queue.get_task_owner(task_id)
+            if owner is not None and owner != user["user_id"]:
+                raise HTTPException(status_code=404, detail="Task not found")
+    if doc is not None:
+        # Strip user_id from the returned payload — the SPA doesn't need it
+        # and we don't want to expose it indirectly.
+        doc.pop("user_id", None)
+        return doc
+
+    # Fallback — in-flight tasks not yet persisted to studio_results.
+    if not is_admin:
         owner = await task_queue.get_task_owner(task_id)
         if owner is not None and owner != user["user_id"]:
             raise HTTPException(status_code=404, detail="Task not found")
-
-    manifest_path = os.path.join(config.RESULTS_DIR, f"{task_id}.json")
-    if os.path.exists(manifest_path):
-        try:
-            with open(manifest_path, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except Exception as e:
-            logger.warning(f"Failed to read manifest for {task_id}: {e}")
-
-    # Fallback: scan task_queue for this id
     status = await task_queue.get_status()
     for bucket in ("running", "pending", "recent"):
         for entry in status.get(bucket, []):
@@ -2508,16 +2520,22 @@ async def delete_video(task_id: str, request: Request):
 
     removed_images = await host_repo.cascade_delete_by_video(user["user_id"], task_id)
 
-    # Resolve the video path. Prefer in-memory state; fall back to history.
+    # Resolve the video path: prefer in-memory state, then studio_results.
+    from modules.repositories import studio_result_repo as _result_repo
     video_path: Optional[str] = None
     state = task_states.get(task_id)
     if state and state.get("output_path"):
         video_path = state["output_path"]
     if not video_path:
-        for entry in load_video_history():
-            if entry.get("task_id") == task_id:
-                video_path = entry.get("output_path")
-                break
+        doc = await _result_repo.get(user["user_id"], task_id)
+        if doc:
+            video_path = doc.get("video_path")
+            if not video_path and doc.get("video_storage_key"):
+                from modules import storage as _storage
+                try:
+                    video_path = str(_storage.media_store.local_path_for(doc["video_storage_key"]))
+                except ValueError:
+                    video_path = None
 
     deleted_video = False
     if video_path and os.path.exists(video_path):
@@ -2527,19 +2545,8 @@ async def delete_video(task_id: str, request: Request):
         except OSError as e:
             logger.warning("Failed to delete video file %s: %s", video_path, e)
 
-    # Manifest sidecar (RESULTS_DIR/<task_id>.json)
-    manifest_path = os.path.join(config.RESULTS_DIR, f"{task_id}.json")
-    if os.path.exists(manifest_path):
-        try:
-            os.unlink(manifest_path)
-        except OSError as e:
-            logger.warning("Failed to delete manifest %s: %s", manifest_path, e)
-
-    # History entry — keep the dashboard view consistent
-    history = load_video_history()
-    new_history = [e for e in history if e.get("task_id") != task_id]
-    if len(new_history) != len(history):
-        save_video_history(new_history)
+    # Result row (PR5 replacement for outputs/results/<task>.json + history.json).
+    await _result_repo.delete(user["user_id"], task_id)
 
     # In-memory task state (best effort)
     task_states.pop(task_id, None)

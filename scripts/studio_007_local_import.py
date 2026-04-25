@@ -1,7 +1,8 @@
-"""Import legacy on-disk host artifacts into studio_hosts / studio_saved_hosts.
+"""Import legacy on-disk host + result artifacts into the studio_* collections.
 
-This is the PR4 portion of studio_007. The PR5 portion (results manifests
-→ studio_results) is added separately.
+PR4 added the host portion (studio_hosts + studio_saved_hosts).
+PR5 added the result portion (studio_results) — see _list_result_manifests
++ _result_doc + _upsert_results below.
 
 Per plan §8.3 + decision #13:
 - NO outer "skip if migration name exists" guard. Per-record upsert by
@@ -267,6 +268,58 @@ def _utcnow():
     return datetime.now(timezone.utc)
 
 
+# ── Result manifests (outputs/results/*.json) → studio_results ─────────
+
+def _list_result_manifests() -> list[Path]:
+    rdir = Path(config.OUTPUTS_DIR) / "results"
+    if not rdir.is_dir():
+        return []
+    return sorted(p for p in rdir.iterdir() if p.suffix == ".json")
+
+
+def _result_doc(owner: str, payload: dict) -> Optional[dict]:
+    task_id = payload.get("task_id")
+    if not task_id:
+        return None
+    # Convert every absolute path scattered through params/meta to a
+    # bucket-prefixed storage_key (best effort — strings that don't look
+    # like local paths are returned unchanged).
+    scrubbed = _scrub_paths(payload)
+
+    video_path = scrubbed.get("video_path")
+    video_storage_key = video_path if (video_path and not video_path.startswith("/")) else None
+
+    doc = {
+        "user_id": owner,
+        "task_id": task_id,
+        "type": scrubbed.get("type", "generate"),
+        "status": scrubbed.get("status", "completed"),
+        "completed_at": scrubbed.get("completed_at"),
+        "generation_time_sec": scrubbed.get("generation_time_sec"),
+        "video_url": scrubbed.get("video_url") or f"/api/videos/{task_id}",
+        "video_storage_key": video_storage_key,
+        "video_path": payload.get("video_path"),  # keep original abs path too
+        "video_bytes": scrubbed.get("video_bytes"),
+        "video_filename": scrubbed.get("video_filename"),
+        "params": scrubbed.get("params"),
+        "meta": scrubbed.get("meta"),
+        "error": scrubbed.get("error"),
+    }
+    return doc
+
+
+def _upsert_results(db, docs: list[dict]) -> int:
+    n = 0
+    for d in docs:
+        db.studio_results.update_one(
+            {"user_id": d["user_id"], "task_id": d["task_id"]},
+            {"$set": d, "$setOnInsert": {"_imported_at": _utcnow()}},
+            upsert=True,
+        )
+        n += 1
+    return n
+
+
 # ── Main ────────────────────────────────────────────────────────────────
 
 def _parse_args() -> argparse.Namespace:
@@ -321,6 +374,22 @@ def main() -> int:
             continue
         saved_payloads.append(doc)
 
+    result_docs: list[dict] = []
+    skipped_results = 0
+    for manifest_path in _list_result_manifests():
+        try:
+            with open(manifest_path, "r", encoding="utf-8") as fh:
+                payload = json.load(fh)
+        except (OSError, json.JSONDecodeError) as e:
+            logger.warning("  ! failed to parse %s: %s", manifest_path, e)
+            skipped_results += 1
+            continue
+        doc = _result_doc(args.owner, payload)
+        if doc is None:
+            skipped_results += 1
+            continue
+        result_docs.append(doc)
+
     demoted = _enforce_at_most_one_selected(candidate_docs)
 
     mode = "COMMIT" if args.commit else "DRY-RUN"
@@ -335,6 +404,7 @@ def main() -> int:
     for step, n in sorted(by_step.items()):
         logger.info("      %s : %d", step, n)
     logger.info("  saved-host sidecars:    %d (skipped: %d)", len(saved_payloads), skipped_saved)
+    logger.info("  result manifests:       %d (skipped: %d)", len(result_docs), skipped_results)
     logger.info("  selected demotions:     %d", demoted)
 
     if not args.commit:
@@ -343,11 +413,13 @@ def main() -> int:
 
     n_hosts = _upsert_candidates(db, candidate_docs)
     n_saved = _upsert_saved(db, saved_payloads)
+    n_results = _upsert_results(db, result_docs)
     summary = (
-        f"hosts={n_hosts} saved={n_saved} demoted={demoted} "
-        f"skipped_meta={skipped_meta} skipped_saved={skipped_saved}"
+        f"hosts={n_hosts} saved={n_saved} results={n_results} "
+        f"demoted={demoted} skipped_meta={skipped_meta} "
+        f"skipped_saved={skipped_saved} skipped_results={skipped_results}"
     )
-    record_migration(db, "studio_007_local_import_hosts", summary)
+    record_migration(db, "studio_007_local_import", summary)
     logger.info("\n  ✓ committed. %s", summary)
     return 0
 

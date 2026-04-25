@@ -192,7 +192,7 @@ def test_rerun_is_idempotent_per_record(fresh_setup, monkeypatch):
     assert db.studio_hosts.count_documents({}) == 1
     # studio_migrations row appended both times
     assert db.studio_migrations.count_documents(
-        {"name": "studio_007_local_import_hosts"}) == 2
+        {"name": "studio_007_local_import"}) == 2
 
 
 def test_imports_saved_hosts_from_uuid_sidecars(fresh_setup, monkeypatch):
@@ -220,6 +220,62 @@ def test_imports_saved_hosts_from_uuid_sidecars(fresh_setup, monkeypatch):
     assert rows[0]["host_id"] == uuid32
     assert rows[0]["name"] == "library host"
     assert rows[0]["storage_key"] == f"outputs/hosts/saved/{uuid32}.png"
+
+
+def test_imports_result_manifests(fresh_setup, monkeypatch):
+    """PR5: outputs/results/*.json → studio_results."""
+    uploads, outputs, _, _, db = fresh_setup
+    import config
+    monkeypatch.setattr(config, "OUTPUTS_DIR", str(outputs))
+    monkeypatch.setattr(config, "UPLOADS_DIR", str(uploads))
+    monkeypatch.setattr(config, "EXAMPLES_DIR", str(uploads.parent / "examples"))
+
+    rdir = outputs / "results"
+    rdir.mkdir(parents=True, exist_ok=True)
+    manifest = {
+        "task_id": "abc123",
+        "type": "generate",
+        "status": "completed",
+        "completed_at": "2026-04-25T12:00:00",
+        "generation_time_sec": 60.5,
+        "video_url": "/api/videos/abc123",
+        "video_path": str(outputs / "res_abc123.mp4"),
+        "video_bytes": 1234,
+        "video_filename": "res_abc123.mp4",
+        "params": {
+            "host_image": str(outputs / "hosts" / "saved" / "host_x.png"),  # absolute
+            "audio_path": str(uploads / "audio.wav"),                       # absolute
+            "prompt": "p",
+            "seed": 42,
+            "reference_image_paths": [str(uploads / "ref.png")],
+        },
+        "meta": {
+            "host": {
+                "selectedPath": str(outputs / "hosts" / "saved" / "host_x.png"),
+                "imageUrl": "/api/files/outputs/hosts/saved/host_x.png",
+            },
+        },
+    }
+    (rdir / "abc123.json").write_text(json.dumps(manifest), encoding="utf-8")
+
+    monkeypatch.setenv("DB_NAME", _test_db_name())
+    rc, out, err = _run_inline(["--owner", "jack", "--commit"], REPO_ROOT)
+    assert rc == 0, out + err
+
+    rows = list(db.studio_results.find({}))
+    assert len(rows) == 1
+    r = rows[0]
+    assert r["task_id"] == "abc123"
+    assert r["user_id"] == "jack"
+    # Absolute paths in params should be scrubbed to bucket-prefixed keys.
+    assert r["params"]["host_image"] == "outputs/hosts/saved/host_x.png"
+    assert r["params"]["audio_path"] == "uploads/audio.wav"
+    assert r["params"]["reference_image_paths"] == ["uploads/ref.png"]
+    assert r["meta"]["host"]["selectedPath"] == "outputs/hosts/saved/host_x.png"
+    # imageUrl is not a filesystem path → unchanged.
+    assert r["meta"]["host"]["imageUrl"] == "/api/files/outputs/hosts/saved/host_x.png"
+    # video_storage_key derived from the scrubbed video_path.
+    assert r["video_storage_key"] == "outputs/res_abc123.mp4"
 
 
 def test_assert_local_only_blocks_prod_url(fresh_setup, monkeypatch):
