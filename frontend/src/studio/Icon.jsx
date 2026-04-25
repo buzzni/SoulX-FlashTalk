@@ -16,7 +16,7 @@ const Icon = ({ name, size = 16, style = {} }) => {
     arrow_right: <path d="M5 10h10M10 5l5 5-5 5"/>,
     arrow_left: <path d="M15 10H5M10 5l-5 5 5 5"/>,
     download: <><path d="M10 3v11M5 9l5 5 5-5"/><path d="M3 17h14"/></>,
-    refresh: <path d="M16 5v4h-4M4 15v-4h4M15.5 7a6 6 0 10-.5 7.5"/>,
+    refresh: <><path d="M3 10a7 7 0 1 0 2-5"/><path d="M3 3v4h4"/></>,
     swap: <><path d="M4 7h11M12 4l3 3-3 3"/><path d="M16 13H5M8 16l-3-3 3-3"/></>,
     settings: <><circle cx="10" cy="10" r="2.5"/><path d="M10 2v2M10 16v2M4 10H2M18 10h-2M4.2 4.2l1.4 1.4M14.4 14.4l1.4 1.4M4.2 15.8l1.4-1.4M14.4 5.6l1.4-1.4"/></>,
     wand: <><path d="M4 16L14 6M14 6l2-2M14 6l-2-2M4 16l-2 2M4 16l2 2"/><path d="M16 10l.5 1.5L18 12l-1.5.5L16 14l-.5-1.5L14 12l1.5-.5z"/></>,
