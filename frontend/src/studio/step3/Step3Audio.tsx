@@ -29,6 +29,7 @@ import { AudioUploader, type UploadedAudio } from './AudioUploader';
 import { ScriptEditor, buildScript } from './ScriptEditor';
 import { VoiceAdvancedSettings } from './VoiceAdvancedSettings';
 import { ResolutionPicker, type ResolutionPreset } from './ResolutionPicker';
+import { PlaylistPicker } from './PlaylistPicker';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type UpdateFn = (updater: (state: any) => any) => void;
@@ -295,6 +296,14 @@ export default function Step3Audio({ state, update }: Step3AudioProps) {
 
       <Card title="영상 화질" subtitle="세로 영상 · 어디에 올릴지에 맞춰서 고르세요">
         <ResolutionPicker selectedKey={resolution.key} onSelect={setR} />
+      </Card>
+
+      <Card title="플레이리스트" subtitle="만들어진 영상을 묶어두는 폴더예요. 비워두면 미지정에 저장됩니다.">
+        <PlaylistPicker
+          selected={(state.playlist_id as string | null | undefined) ?? null}
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          onChange={(pid) => update((s: any) => ({ ...s, playlist_id: pid }))}
+        />
       </Card>
     </div>
   );

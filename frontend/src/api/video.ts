@@ -59,6 +59,7 @@ export interface GenerateVideoInput {
     } | null;
     resolution: { width?: number; height?: number; label?: string };
     imageQuality?: string;
+    playlist_id?: string | null;
   };
   audio: { audio_path: string };
 }
@@ -83,6 +84,9 @@ export async function generateVideo(
   body.append('audio_path', audio.audio_path);
   body.append('audio_source', 'upload');
   body.append('resolution', stringifyResolution(state.resolution));
+  // Playlist assignment (per docs/playlist-feature-plan.md decision #3).
+  // Empty string is the "미지정" signal the backend understands.
+  if (state.playlist_id) body.append('playlist_id', state.playlist_id);
 
   // Provenance snapshot — see comment in the original api.js. Kept verbatim
   // so the queue entry + manifest shape doesn't change between refactor
