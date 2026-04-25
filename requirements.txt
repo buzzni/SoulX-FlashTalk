@@ -18,3 +18,9 @@ decord
 xformers==0.0.31
 librosa
 optimum-quanto==0.2.6
+
+# DB integration (PR0+)
+pymongo>=4.17.0
+motor>=3.7.1
+bcrypt>=5.0.0
+PyJWT>=2.12.0
