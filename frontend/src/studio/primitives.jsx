@@ -1,159 +1,179 @@
-// Primitive UI components — ported verbatim from prototype primitives.jsx.
-// Divergence from prototype: ES module imports; named exports instead of window globals.
+/**
+ * Wizard primitives — shadcn/Radix-backed wrappers that preserve the
+ * pre-shadcn API surface so existing call sites keep working.
+ *
+ * Visual primitives (Card, Button, Badge, Dialog, Slider) are real shadcn
+ * components underneath, which gives us focus trap / scroll lock / keyboard
+ * nav / portal rendering for free. The wrapper layer maps our old prop
+ * names (variant="primary"/"danger", icon="sparkles") to shadcn's prop
+ * names (variant="default"/"destructive", child <Icon>), so consumers
+ * don't have to change.
+ *
+ * Custom primitives kept here:
+ *   - Field (label + hint + child) — shadcn doesn't ship a paired version
+ *   - Chip (toggle pill button) — wrapped via shadcn Toggle styling
+ *   - Segmented (3-way single-select) — wrapped via shadcn ToggleGroup
+ *   - UploadTile (file dropzone with paste support) — app-specific behavior
+ *
+ * Phase D will inline the shadcn imports at call sites and remove this
+ * wrapper file. Until then this is the bridge.
+ */
 import { useState, useEffect, useRef } from 'react';
 import Icon from './Icon.jsx';
+import { cn } from '@/lib/utils';
+import { Button as ShadButton } from '@/components/ui/button';
+import { Badge as ShadBadge } from '@/components/ui/badge';
+import {
+  Card as ShadCard,
+  CardHeader as ShadCardHeader,
+  CardTitle as ShadCardTitle,
+  CardDescription as ShadCardDescription,
+  CardContent as ShadCardContent,
+  CardAction as ShadCardAction,
+} from '@/components/ui/card';
+import {
+  Dialog as ShadDialog,
+  DialogContent as ShadDialogContent,
+  DialogHeader as ShadDialogHeader,
+  DialogTitle as ShadDialogTitle,
+  DialogFooter as ShadDialogFooter,
+} from '@/components/ui/dialog';
+import { Slider as ShadSlider } from '@/components/ui/slider';
+import { ToggleGroup as ShadToggleGroup, ToggleGroupItem as ShadToggleGroupItem } from '@/components/ui/toggle-group';
 
 /* ---------- Button ---------- */
-export const Button = ({ children, variant = 'secondary', size = '', icon, iconRight, onClick, disabled, type = 'button', className = '', style, ...rest }) => (
-  <button
+// Old API: variant in {primary, secondary, ghost, danger}, size in {sm, lg, ''}, icon, iconRight.
+// shadcn: variant in {default, secondary, ghost, destructive, outline, link}, size in {default, sm, lg, icon, xs}.
+const VARIANT_MAP = {
+  primary: 'default',
+  secondary: 'outline',
+  ghost: 'ghost',
+  danger: 'destructive',
+};
+const SIZE_MAP = {
+  sm: 'sm',
+  lg: 'lg',
+  '': 'default',
+};
+
+export const Button = ({
+  children,
+  variant = 'secondary',
+  size = '',
+  icon,
+  iconRight,
+  onClick,
+  disabled,
+  type = 'button',
+  className = '',
+  style,
+  ...rest
+}) => (
+  <ShadButton
     type={type}
-    className={`btn btn-${variant} ${size ? `btn-${size}` : ''} ${className}`}
+    variant={VARIANT_MAP[variant] ?? 'outline'}
+    size={SIZE_MAP[size] ?? 'default'}
     onClick={onClick}
     disabled={disabled}
     style={style}
+    className={className}
     {...rest}
   >
     {icon && <Icon name={icon} size={size === 'sm' ? 13 : 14} />}
     {children}
     {iconRight && <Icon name={iconRight} size={size === 'sm' ? 13 : 14} />}
-  </button>
+  </ShadButton>
 );
 
 /* ---------- Segmented ---------- */
+// Single-select toggle group. shadcn ToggleGroup type="single".
 export const Segmented = ({ options, value, onChange }) => (
-  <div className="seg" role="tablist">
-    {options.map(o => (
-      <button
-        key={o.value}
-        role="tab"
-        aria-selected={value === o.value}
-        className={value === o.value ? 'on' : ''}
-        onClick={() => onChange(o.value)}
+  <ShadToggleGroup
+    type="single"
+    value={String(value)}
+    onValueChange={(v) => {
+      if (!v) return; // ToggleGroup allows empty; protect existing single-select contract
+      // Coerce back to original value type (number vs string) by matching options
+      const match = options.find((o) => String(o.value) === v);
+      if (match) onChange(match.value);
+    }}
+    variant="outline"
+    size="sm"
+    className="bg-muted/50 p-0.5 rounded-md"
+  >
+    {options.map((o) => (
+      <ShadToggleGroupItem
+        key={String(o.value)}
+        value={String(o.value)}
+        className="data-[state=on]:bg-card data-[state=on]:text-foreground data-[state=on]:shadow-sm text-muted-foreground border-0 h-7 px-3 text-[13px]"
       >
         {o.icon && <Icon name={o.icon} size={13} />}
         {o.label}
-      </button>
+      </ShadToggleGroupItem>
     ))}
-  </div>
+  </ShadToggleGroup>
 );
 
 /* ---------- Slider ---------- */
-export const Slider = ({ value, onChange, min = 0, max = 1, step = 0.01, formatValue, ariaLabel }) => {
-  const trackRef = useRef(null);
-  const dragging = useRef(false);
-
-  const pct = ((value - min) / (max - min)) * 100;
-
-  const handleMove = (clientX) => {
-    const rect = trackRef.current.getBoundingClientRect();
-    const ratio = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
-    const raw = min + ratio * (max - min);
-    const snapped = Math.round(raw / step) * step;
-    onChange(Number(snapped.toFixed(3)));
-  };
-  const onDown = (e) => {
-    dragging.current = true;
-    handleMove(e.clientX);
-    e.preventDefault();
-  };
-  const onKey = (e) => {
-    // a11y Tier-1: keyboard stepping
-    if (e.key === 'ArrowLeft' || e.key === 'ArrowDown') {
-      e.preventDefault();
-      onChange(Math.max(min, Number((value - step).toFixed(3))));
-    } else if (e.key === 'ArrowRight' || e.key === 'ArrowUp') {
-      e.preventDefault();
-      onChange(Math.min(max, Number((value + step).toFixed(3))));
-    } else if (e.key === 'Home') {
-      e.preventDefault();
-      onChange(min);
-    } else if (e.key === 'End') {
-      e.preventDefault();
-      onChange(max);
-    }
-  };
-  useEffect(() => {
-    const move = (e) => { if (dragging.current) handleMove(e.clientX); };
-    const up = () => { dragging.current = false; };
-    window.addEventListener('mousemove', move);
-    window.addEventListener('mouseup', up);
-    return () => { window.removeEventListener('mousemove', move); window.removeEventListener('mouseup', up); };
-  });
-
-  return (
-    <div className="slider-row">
-      <div
-        className="slider-track"
-        ref={trackRef}
-        onMouseDown={onDown}
-        role="slider"
-        aria-label={ariaLabel}
-        aria-valuemin={min}
-        aria-valuemax={max}
-        aria-valuenow={value}
-        tabIndex={0}
-        onKeyDown={onKey}
-      >
-        <div className="slider-fill" style={{ width: `${pct}%` }} />
-        <div className="slider-thumb" style={{ left: `${pct}%` }} />
-      </div>
-      <span className="slider-value num">{formatValue ? formatValue(value) : value}</span>
-    </div>
-  );
-};
+// shadcn Slider is array-based (supports range). Wrap to single-number API.
+export const Slider = ({ value, onChange, min = 0, max = 1, step = 0.01, formatValue, ariaLabel }) => (
+  <div className="flex items-center gap-3">
+    <ShadSlider
+      value={[value]}
+      onValueChange={(v) => onChange(Number(Number(v[0]).toFixed(3)))}
+      min={min}
+      max={max}
+      step={step}
+      aria-label={ariaLabel}
+      className="flex-1"
+    />
+    <span className="num text-[12px] text-muted-foreground min-w-[40px] text-right">
+      {formatValue ? formatValue(value) : value}
+    </span>
+  </div>
+);
 
 /* ---------- Upload tile ---------- */
+// Kept custom — app-specific behavior (FileReader, paste handler, sample button).
+// Migrated visual chrome from .upload-tile CSS class to Tailwind so it isn't
+// dependent on .studio-root scoping forever.
 export const UploadTile = ({ file, onFile, onRemove, label = '클릭 또는 드래그해서 업로드', sub = 'JPG, PNG · 최대 20MB', accept = 'image/*', compact = false }) => {
   const [dragOver, setDragOver] = useState(false);
   const inputRef = useRef(null);
   const handleFile = (f) => {
     if (!f) return;
-    console.log('[UploadTile] handleFile', { name: f.name, size: f.size, type: f.type, isFile: f instanceof File, isBlob: f instanceof Blob });
     const reader = new FileReader();
     reader.onload = (e) => {
-      const urlLen = typeof e.target.result === 'string' ? e.target.result.length : 0;
-      console.log('[UploadTile] FileReader.onload', { name: f.name, urlLen, urlHead: (e.target.result || '').slice(0, 40) });
       onFile({ name: f.name, size: f.size, type: f.type, url: e.target.result, _fake: false, _file: f });
     };
-    reader.onerror = (e) => {
-      console.error('[UploadTile] FileReader.onerror', {
-        readerError: reader.error ? { name: reader.error.name, message: reader.error.message, code: reader.error.code } : null,
-        readyState: reader.readyState,
-      });
-      // No blob URL fallback — creating an <img src="blob:..."> that Chromium
-      // can't resolve on network-IP origins ties up a socket in the connection
-      // pool per tile and causes subsequent POSTs to queue until timeout.
-      // Preview just stays blank; the File is preserved so upload still works.
+    reader.onerror = () => {
+      // No blob URL fallback — Chromium can't resolve blob:// on network-IP origins
+      // and ties up sockets. Preview goes blank; the File ref still uploads fine.
       onFile({ name: f.name, size: f.size, type: f.type, url: null, _fake: false, _file: f });
-    };
-    reader.onabort = () => {
-      console.warn('[UploadTile] FileReader.onabort', { readyState: reader.readyState });
     };
     try {
       reader.readAsDataURL(f);
-    } catch (err) {
-      console.error('[UploadTile] readAsDataURL threw synchronously', err);
+    } catch {
       onFile({ name: f.name, size: f.size, type: f.type, url: null, _fake: false, _file: f });
     }
   };
   const fakeUpload = () => {
-    const fake = {
+    onFile({
       name: `reference_${Date.now().toString(36)}.jpg`,
       size: Math.floor(Math.random() * 2e6 + 1e5),
       type: 'image/jpeg',
       url: null,
       _fake: true,
-    };
-    onFile(fake);
+    });
   };
 
   if (file) {
     return (
       <div className="upload-tile has-file">
-        <input type="file" accept={accept} ref={inputRef} style={{ display: 'none' }} onChange={e => handleFile(e.target.files[0])} />
+        <input type="file" accept={accept} ref={inputRef} style={{ display: 'none' }} onChange={(e) => handleFile(e.target.files[0])} />
         <div className="file-thumb" onClick={() => inputRef.current?.click()} style={{ cursor: 'pointer' }}>
           {file.url ? <img src={file.url} alt={file.name} /> :
-            <div className="striped-placeholder">{file.name.toLowerCase().includes('.mp3') || file.name.toLowerCase().includes('.wav') ? 'AUDIO' : 'IMAGE'}<br/>reference</div>}
+            <div className="striped-placeholder">{file.name.toLowerCase().includes('.mp3') || file.name.toLowerCase().includes('.wav') ? 'AUDIO' : 'IMAGE'}<br />reference</div>}
         </div>
         <div className="file-meta">
           <span className="truncate">{file.name}</span>
@@ -172,9 +192,8 @@ export const UploadTile = ({ file, onFile, onRemove, label = '클릭 또는 드�
   }
 
   // Clipboard paste handler — bypasses FileReader / multipart-POST paths that
-  // AhnLab ASTx and similar enterprise security agents tend to block. Image
-  // bytes come from Chrome's clipboard buffer rather than an OS file handle,
-  // so the NotReadableError trigger (file-lock / snapshot-state) doesn't apply.
+  // some enterprise security agents block. Image bytes come from Chrome's
+  // clipboard buffer instead of an OS file handle.
   const onPaste = (e) => {
     const items = e.clipboardData?.items;
     if (!items) return;
@@ -194,81 +213,126 @@ export const UploadTile = ({ file, onFile, onRemove, label = '클릭 또는 드�
       style={dragOver ? { borderColor: 'var(--accent)', background: 'var(--accent-soft)' } : {}}
       tabIndex={0}
       onClick={() => { inputRef.current?.click(); }}
-      onDragOver={e => { e.preventDefault(); setDragOver(true); }}
+      onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
       onDragLeave={() => setDragOver(false)}
-      onDrop={e => { e.preventDefault(); setDragOver(false); handleFile(e.dataTransfer.files[0]); }}
+      onDrop={(e) => { e.preventDefault(); setDragOver(false); handleFile(e.dataTransfer.files[0]); }}
       onPaste={onPaste}
     >
-      <input type="file" accept={accept} ref={inputRef} style={{ display: 'none' }} onChange={e => handleFile(e.target.files[0])} />
+      <input type="file" accept={accept} ref={inputRef} style={{ display: 'none' }} onChange={(e) => handleFile(e.target.files[0])} />
       <Icon name="upload" size={compact ? 18 : 22} />
       <div className="label">{label}</div>
       <div className="sub">{sub}</div>
       <div className="sub" style={{ marginTop: 4, fontSize: 10, color: 'var(--text-tertiary)' }}>
-        또는 이미지 복사 후 이 영역에 <kbd style={{ fontFamily: 'monospace', padding: '0 4px', border: '1px solid var(--border)', borderRadius: 3 }}>Ctrl+V</kbd> / <kbd style={{ fontFamily: 'monospace', padding: '0 4px', border: '1px solid var(--border)', borderRadius: 3 }}>Cmd+V</kbd>
+        또는 이미지 복사 후 이 영역에 <kbd className="font-mono px-1 border border-border rounded text-[10px]">Ctrl+V</kbd> / <kbd className="font-mono px-1 border border-border rounded text-[10px]">Cmd+V</kbd>
       </div>
-      <button className="btn btn-secondary btn-sm mt-1" onClick={e => { e.stopPropagation(); fakeUpload(); }} type="button">
+      <ShadButton variant="outline" size="sm" className="mt-1" onClick={(e) => { e.stopPropagation(); fakeUpload(); }} type="button">
         샘플 사용
-      </button>
+      </ShadButton>
     </div>
   );
 };
 
 /* ---------- Chip ---------- */
+// Pill toggle button. Kept hand-rolled (shadcn Toggle is rectangular).
+// Uses tokens directly so it inherits the wizard color bridge.
 export const Chip = ({ on, onClick, children }) => (
   <button
-    className={`chip ${on ? 'on' : ''}`}
-    onClick={onClick}
     type="button"
+    onClick={onClick}
     aria-pressed={!!on}
-  >{children}</button>
+    className={cn(
+      'inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[12px] cursor-pointer transition-colors',
+      'border focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50',
+      on
+        ? 'bg-primary text-primary-foreground border-primary'
+        : 'bg-card text-muted-foreground border-border hover:border-input hover:text-foreground',
+    )}
+  >
+    {children}
+  </button>
 );
 
 /* ---------- Badge ---------- */
-export const Badge = ({ variant = 'neutral', children, icon }) => (
-  <span className={`badge badge-${variant}`}>
+// Old variants: neutral, accent, success, warn. Map to shadcn equivalents
+// + custom Tailwind classes for semantic colors that shadcn doesn't ship.
+const BADGE_VARIANT_MAP = {
+  neutral: 'secondary',
+  accent: 'default',
+  success: 'outline', // override className for green
+  warn: 'outline', // override className for amber
+};
+const BADGE_VARIANT_OVERRIDES = {
+  success: 'border-[hsl(142_71%_45%/0.4)] bg-[hsl(142_71%_96%)] text-[hsl(142_71%_30%)]',
+  warn: 'border-[hsl(38_92%_50%/0.4)] bg-[hsl(38_92%_96%)] text-[hsl(38_92%_35%)]',
+};
+export const Badge = ({ variant = 'neutral', children, icon, className }) => (
+  <ShadBadge
+    variant={BADGE_VARIANT_MAP[variant] ?? 'secondary'}
+    className={cn(BADGE_VARIANT_OVERRIDES[variant], 'gap-1', className)}
+  >
     {icon && <Icon name={icon} size={11} />}
     {children}
-  </span>
+  </ShadBadge>
 );
 
 /* ---------- Card ---------- */
-export const Card = ({ title, subtitle, eyebrow, action, children, style }) => (
-  <section className="card" style={style}>
-    {(title || subtitle || eyebrow || action) && (
-      <div className="card-header">
-        <div>
-          {eyebrow && <div className="card-eyebrow">{eyebrow}</div>}
-          {title && <div className="card-title">{title}</div>}
-          {subtitle && <div className="card-subtitle">{subtitle}</div>}
-        </div>
-        {action}
-      </div>
+// Old API: <Card title subtitle eyebrow action>children</Card>
+// Wraps shadcn Card — but the wizard's expectation is "padded box with
+// vertical rhythm" not "header / content / footer slots." So we adapt:
+// shadcn Card's outer wrapper provides border + radius + shadow; we add
+// uniform padding + gap inside via Tailwind.
+export const Card = ({ title, subtitle, eyebrow, action, children, style, className = '' }) => (
+  <ShadCard
+    style={style}
+    className={cn(
+      'gap-3.5 py-5 px-5 shadow-xs', // override shadcn's default 6 padding
+      className,
     )}
-    {children}
-  </section>
+  >
+    {(title || subtitle || eyebrow || action) && (
+      <ShadCardHeader className="px-0 gap-1">
+        <div>
+          {eyebrow && <div className="text-[11px] uppercase tracking-widest font-semibold text-muted-foreground">{eyebrow}</div>}
+          {title && <ShadCardTitle className="text-[15px] tracking-tight">{title}</ShadCardTitle>}
+          {subtitle && <ShadCardDescription className="text-[12px]">{subtitle}</ShadCardDescription>}
+        </div>
+        {action && <ShadCardAction>{action}</ShadCardAction>}
+      </ShadCardHeader>
+    )}
+    <ShadCardContent className="px-0 flex flex-col gap-3.5">
+      {children}
+    </ShadCardContent>
+  </ShadCard>
 );
 
 /* ---------- Field ---------- */
+// label + hint + child stack. Kept custom (shadcn doesn't ship a paired
+// label-hint primitive at this density).
 export const Field = ({ label, hint, children }) => (
-  <div className="field">
-    {label && <label>{label}{hint && <span className="hint">{hint}</span>}</label>}
+  <div className="flex flex-col gap-1.5">
+    {label && (
+      <label className="flex items-center justify-between text-[12px] font-medium text-foreground/80">
+        {label}
+        {hint && <span className="text-muted-foreground font-normal">{hint}</span>}
+      </label>
+    )}
     {children}
   </div>
 );
 
 /* ---------- Modal ---------- */
-export const Modal = ({ open, onClose, title, children, footer }) => {
-  if (!open) return null;
-  return (
-    <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal" onClick={e => e.stopPropagation()} role="dialog" aria-modal="true" aria-label={title}>
-        <div className="modal-header">
-          <div style={{ fontSize: 16, fontWeight: 600 }}>{title}</div>
-          <button className="btn btn-ghost btn-sm btn-icon" onClick={onClose} aria-label="닫기"><Icon name="close" /></button>
-        </div>
-        <div className="modal-body">{children}</div>
-        {footer && <div style={{ padding: '16px 24px', borderTop: '1px solid var(--border)', display: 'flex', justifyContent: 'flex-end', gap: 8 }}>{footer}</div>}
-      </div>
-    </div>
-  );
-};
+// Old: <Modal open onClose title footer>children</Modal>
+// shadcn Dialog uses open/onOpenChange — wrap to keep onClose semantics.
+export const Modal = ({ open, onClose, title, children, footer }) => (
+  <ShadDialog open={open} onOpenChange={(o) => { if (!o) onClose?.(); }}>
+    <ShadDialogContent className="sm:max-w-lg">
+      {title && (
+        <ShadDialogHeader>
+          <ShadDialogTitle>{title}</ShadDialogTitle>
+        </ShadDialogHeader>
+      )}
+      <div className="text-[13px] text-foreground leading-relaxed">{children}</div>
+      {footer && <ShadDialogFooter>{footer}</ShadDialogFooter>}
+    </ShadDialogContent>
+  </ShadDialog>
+);
