@@ -12,8 +12,9 @@
  * use the `panel-glass` utility, rows use `panel-row`, surfaces use
  * `surface-base`. No inline hex colors.
  */
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
+import { MoreHorizontal } from 'lucide-react';
 import { AppHeader } from './AppHeader';
 import { fetchJSON, humanizeError } from '../api/http';
 import {
@@ -25,6 +26,14 @@ import {
   type Playlist,
   type PlaylistListResponse,
 } from '../api/playlists';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 
 interface HistoryItem {
   task_id: string;
@@ -349,23 +358,10 @@ function SidebarPlaylistRow({
   onChanged,
 }: SidebarPlaylistRowProps) {
   const [hover, setHover] = useState(false);
-  const [menuOpen, setMenuOpen] = useState(false);
   const [renaming, setRenaming] = useState(false);
   const [name, setName] = useState(playlist.name);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const menuRef = useRef<HTMLDivElement | null>(null);
-
-  useEffect(() => {
-    if (!menuOpen) return;
-    const close = (e: MouseEvent) => {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
-        setMenuOpen(false);
-      }
-    };
-    document.addEventListener('mousedown', close);
-    return () => document.removeEventListener('mousedown', close);
-  }, [menuOpen]);
 
   const submitRename = async () => {
     const n = name.trim();
@@ -451,44 +447,26 @@ function SidebarPlaylistRow({
           {playlist.video_count}
         </span>
       </button>
-      {(hover || menuOpen) && (
-        <button
-          type="button"
-          onClick={(e) => {
-            e.stopPropagation();
-            setMenuOpen((v) => !v);
-          }}
-          aria-label="플레이리스트 옵션"
-          title="옵션"
-          className="absolute right-1.5 top-1/2 -translate-y-1/2 grid place-items-center w-6 h-6 rounded text-muted-foreground bg-card/90 border border-border hover:border-primary hover:text-foreground transition-colors cursor-pointer"
-        >
-          ⋯
-        </button>
-      )}
-      {menuOpen && (
-        <div
-          ref={menuRef}
-          className="absolute right-1 top-full mt-1 z-20 min-w-[140px] panel-glass p-1 flex flex-col animate-fade-in"
-        >
-          <PopoverItem
-            onClick={() => {
-              setMenuOpen(false);
-              setRenaming(true);
-            }}
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <button
+            type="button"
+            aria-label="플레이리스트 옵션"
+            title="옵션"
+            className={`absolute right-1.5 top-1/2 -translate-y-1/2 grid place-items-center size-6 rounded text-muted-foreground bg-card/90 border border-border hover:border-primary hover:text-foreground transition-colors cursor-pointer ${hover ? 'opacity-100' : 'opacity-0 data-[state=open]:opacity-100'}`}
           >
+            <MoreHorizontal className="size-3.5" />
+          </button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" className="min-w-[140px]">
+          <DropdownMenuItem onSelect={() => setRenaming(true)}>
             이름 변경
-          </PopoverItem>
-          <PopoverItem
-            variant="danger"
-            onClick={() => {
-              setMenuOpen(false);
-              submitDelete();
-            }}
-          >
+          </DropdownMenuItem>
+          <DropdownMenuItem onSelect={submitDelete} variant="destructive">
             삭제
-          </PopoverItem>
-        </div>
-      )}
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
       {error && !renaming && (
         <div className="text-[11px] text-destructive px-2 pt-1">{error}</div>
       )}
@@ -505,28 +483,14 @@ interface ResultCardProps {
 }
 
 function ResultCard({ item, playlists, onMoved }: ResultCardProps) {
-  const [menuOpen, setMenuOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const menuRef = useRef<HTMLDivElement | null>(null);
-
-  useEffect(() => {
-    if (!menuOpen) return;
-    const close = (e: MouseEvent) => {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
-        setMenuOpen(false);
-      }
-    };
-    document.addEventListener('mousedown', close);
-    return () => document.removeEventListener('mousedown', close);
-  }, [menuOpen]);
 
   const move = async (playlistId: string | null) => {
     setBusy(true);
     setError(null);
     try {
       await moveResultToPlaylist(item.task_id, playlistId);
-      setMenuOpen(false);
       onMoved();
     } catch (e) {
       setError(humanizeError(e));
@@ -557,72 +521,42 @@ function ResultCard({ item, playlists, onMoved }: ResultCardProps) {
           </div>
         </div>
       </Link>
-      <button
-        type="button"
-        onClick={(e) => {
-          e.preventDefault();
-          e.stopPropagation();
-          setMenuOpen((v) => !v);
-        }}
-        aria-label="옵션"
-        title="옵션"
-        className="absolute top-2 right-2 grid place-items-center w-7 h-7 rounded-md bg-foreground/55 text-card text-base leading-none cursor-pointer transition-colors hover:bg-foreground/75"
-      >
-        ⋯
-      </button>
-      {menuOpen && (
-        <div
-          ref={menuRef}
-          className="absolute top-10 right-2 z-20 min-w-[160px] max-h-[320px] overflow-y-auto panel-glass p-1 flex flex-col animate-fade-in"
-        >
-          <div className="text-[11px] font-semibold uppercase tracking-widest px-2.5 pt-1.5 pb-1 text-muted-foreground">
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <button
+            type="button"
+            aria-label="옵션"
+            title="옵션"
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+            }}
+            disabled={busy}
+            className="absolute top-2 right-2 grid place-items-center size-7 rounded-md bg-foreground/55 text-card cursor-pointer transition-colors hover:bg-foreground/75 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+          >
+            <MoreHorizontal className="size-4" />
+          </button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" className="min-w-[160px] max-h-[320px] overflow-y-auto">
+          <DropdownMenuLabel className="text-[10px] uppercase tracking-widest text-muted-foreground font-semibold">
             다른 플레이리스트로 이동
-          </div>
-          <PopoverItem onClick={() => move(null)} disabled={busy}>
-            미지정
-          </PopoverItem>
+          </DropdownMenuLabel>
+          <DropdownMenuItem onSelect={() => move(null)}>미지정</DropdownMenuItem>
           {playlists.map((p) => (
-            <PopoverItem
+            <DropdownMenuItem
               key={p.playlist_id}
-              onClick={() => move(p.playlist_id)}
-              disabled={busy}
+              onSelect={() => move(p.playlist_id)}
             >
               {p.name}
-            </PopoverItem>
+            </DropdownMenuItem>
           ))}
-          {error && (
-            <div className="text-[11px] text-destructive px-2 pt-1">{error}</div>
-          )}
+        </DropdownMenuContent>
+      </DropdownMenu>
+      {error && (
+        <div className="absolute top-12 right-2 text-[11px] text-destructive bg-card border border-border rounded px-2 py-1 shadow-sm">
+          {error}
         </div>
       )}
     </div>
-  );
-}
-
-// ── shared popover item ──────────────────────────────────────────────
-
-interface PopoverItemProps {
-  onClick: () => void;
-  disabled?: boolean;
-  variant?: 'default' | 'danger';
-  children: React.ReactNode;
-}
-
-function PopoverItem({
-  onClick,
-  disabled = false,
-  variant = 'default',
-  children,
-}: PopoverItemProps) {
-  const color = variant === 'danger' ? 'text-destructive' : 'text-foreground';
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      disabled={disabled}
-      className={`text-left px-2.5 py-2 text-[13px] rounded transition-colors hover:bg-secondary disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer ${color}`}
-    >
-      {children}
-    </button>
   );
 }
