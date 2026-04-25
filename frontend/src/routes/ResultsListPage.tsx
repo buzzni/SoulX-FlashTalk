@@ -115,8 +115,8 @@ export function ResultsListPage() {
   return (
     <div className="min-h-screen flex flex-col bg-background">
       <AppHeader />
-      <main className="flex-1 px-6 py-6 max-w-[1280px] w-full mx-auto">
-        <div className="grid gap-6 items-start" style={{ gridTemplateColumns: 'minmax(220px, 240px) minmax(0, 1fr)' }}>
+      <main className="flex-1 px-4 md:px-6 py-6 max-w-[1280px] w-full mx-auto">
+        <div className="grid gap-4 md:gap-6 items-start grid-cols-1 md:grid-cols-[minmax(220px,240px)_minmax(0,1fr)]">
           <PlaylistSidebar
             playlists={playlists}
             error={playlistsError}
@@ -163,7 +163,7 @@ export function ResultsListPage() {
               </div>
             )}
             {!historyError && items !== null && items.length > 0 && (
-              <div className="grid gap-4" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))' }}>
+              <div className="grid gap-4 grid-cols-[repeat(auto-fill,minmax(220px,1fr))]">
                 {items.map((it) => (
                   <ResultCard
                     key={it.task_id}
@@ -232,7 +232,7 @@ function PlaylistSidebar({
   };
 
   return (
-    <aside className="flex flex-col gap-1 p-3 rounded-lg bg-sidebar-background border border-sidebar-border sticky top-4">
+    <aside className="flex flex-col gap-1 p-3 rounded-lg bg-sidebar-background border border-sidebar-border md:sticky md:top-4">
       {error && (
         <div className="px-2 py-1.5 text-xs text-destructive">{error}</div>
       )}
