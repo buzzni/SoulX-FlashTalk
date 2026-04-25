@@ -45,7 +45,8 @@ def _bypass_studio_auth(monkeypatch, request):
     # Repo tests do their own DB setup against per-worker test DBs.
     if mod_name in ("test_studio_host_repo", "test_studio_saved_host_repo",
                     "test_db_connection", "test_user_repo",
-                    "test_studio_006_add_subscriptions", "test_storage_local"):
+                    "test_studio_006_add_subscriptions", "test_storage_local",
+                    "test_studio_007_local_import"):
         return
 
     # Redirect DB so api-level tests don't pollute the dev `ai_showhost`.

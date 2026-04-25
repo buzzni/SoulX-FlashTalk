@@ -31,10 +31,10 @@ def assert_local_only(mongo_url: str, db_name: str) -> None:
             f"refused: MONGO_URL host {host!r} is not localhost. "
             f"This script only runs against a local dev mongod."
         )
-    if not re.fullmatch(r"ai_showhost(?:_test(?:_[A-Za-z0-9]+)?)?", db_name):
+    if not re.fullmatch(r"ai_showhost(?:_test(?:_[A-Za-z0-9_]+)?)?", db_name):
         raise RuntimeError(
             f"refused: DB_NAME {db_name!r} is not an allowed dev DB name "
-            f"(expected: ai_showhost | ai_showhost_test | ai_showhost_test_<worker>)."
+            f"(expected: ai_showhost | ai_showhost_test | ai_showhost_test_<suffix>)."
         )
 
 
