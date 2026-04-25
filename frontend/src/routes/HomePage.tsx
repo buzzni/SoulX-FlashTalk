@@ -16,16 +16,14 @@ export function HomePage() {
   return (
     <div className="min-h-screen flex flex-col bg-secondary">
       <AppHeader />
-      <main className="flex-1 flex items-center justify-center px-6 py-10">
-        <div className="w-full max-w-3xl rounded-2xl surface-base p-12 text-center shadow-[0_4px_24px_rgba(0,0,0,0.04)] animate-fade-in">
-          {greeting && (
-            <p className="text-sm text-muted-foreground">
-              안녕하세요, {greeting} 님
-            </p>
-          )}
-          <h1 className="mt-2 mb-8 text-3xl font-bold tracking-tight">
-            무엇을 할까요?
+      <main className="flex-1 flex justify-center items-start px-4 md:px-6 pt-12 md:pt-20 pb-10">
+        <div className="w-full max-w-3xl rounded-2xl surface-base p-6 md:p-10 shadow-[0_4px_24px_rgba(0,0,0,0.04)] animate-fade-in">
+          <h1 className="text-2xl md:text-[28px] font-bold tracking-tight leading-tight">
+            {greeting ? `${greeting}님, ` : ''}무엇을 만들어볼까요?
           </h1>
+          <p className="mt-1.5 mb-7 text-sm text-muted-foreground">
+            호스트 영상부터 결과 관리까지 한 곳에서.
+          </p>
           <div className="grid gap-4 sm:grid-cols-2">
             <ActionButton
               variant="primary"
