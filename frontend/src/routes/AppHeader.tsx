@@ -13,7 +13,10 @@ import { ProfileMenu } from './ProfileMenu';
 export function AppHeader() {
   return (
     <header className="flex items-center justify-between min-h-[56px] px-5 bg-card border-b border-border">
-      <Link to="/" className="no-underline text-foreground">
+      <Link
+        to="/"
+        className="no-underline text-foreground inline-flex items-center min-h-[44px] -mx-2 px-2 rounded transition-colors hover:bg-secondary"
+      >
         <div className="flex items-center gap-2.5 text-sm font-semibold tracking-tight">
           <span
             aria-hidden
