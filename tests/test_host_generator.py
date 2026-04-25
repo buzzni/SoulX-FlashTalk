@@ -11,6 +11,32 @@ pytestmark = pytest.mark.phase1
 # ---- Input validation (no Gemini calls required) ----
 
 
+def test_sanitize_refs_drops_paths_in_text_mode():
+    """Defense-in-depth: when frontend leaves stale face/outfit ref paths in
+    the form payload after a mode switch to "설명으로 만들기", the backend
+    must drop them so Gemini doesn't silently attach the prior session's
+    images. See modules/host_generator.py::_sanitize_refs_by_mode docstring.
+    """
+    from modules.host_generator import _sanitize_refs_by_mode
+
+    face, outfit, style = _sanitize_refs_by_mode(
+        "text", "/uploads/face.png", "/uploads/outfit.png", "/uploads/style.png"
+    )
+    assert face is None and outfit is None and style is None
+
+
+def test_sanitize_refs_passthrough_in_image_modes():
+    from modules.host_generator import _sanitize_refs_by_mode
+
+    for mode in ("face-outfit", "style-ref"):
+        face, outfit, style = _sanitize_refs_by_mode(
+            mode, "/uploads/face.png", "/uploads/outfit.png", "/uploads/style.png"
+        )
+        assert face == "/uploads/face.png"
+        assert outfit == "/uploads/outfit.png"
+        assert style == "/uploads/style.png"
+
+
 def test_validate_inputs_text_mode_requires_prompt():
     from modules.host_generator import _validate_inputs
 

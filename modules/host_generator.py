@@ -103,6 +103,9 @@ async def generate_host_candidates(
         ValueError: invalid mode / missing required inputs
         RuntimeError: fewer than min_success candidates succeeded
     """
+    face_ref_path, outfit_ref_path, style_ref_path = _sanitize_refs_by_mode(
+        mode, face_ref_path, outfit_ref_path, style_ref_path
+    )
     _validate_inputs(mode, text_prompt, face_ref_path, outfit_ref_path, style_ref_path, outfit_text)
 
     out_dir = output_dir or config.HOSTS_DIR
@@ -201,6 +204,9 @@ async def stream_host_candidates(
     The UI consumes these via SSE so each finished tile renders immediately
     instead of waiting for the slowest sibling (blocking gather).
     """
+    face_ref_path, outfit_ref_path, style_ref_path = _sanitize_refs_by_mode(
+        mode, face_ref_path, outfit_ref_path, style_ref_path
+    )
     _validate_inputs(mode, text_prompt, face_ref_path, outfit_ref_path, style_ref_path, outfit_text)
 
     out_dir = output_dir or config.HOSTS_DIR
@@ -275,6 +281,27 @@ async def stream_host_candidates(
         "partial": success_count < n,
         "min_success_met": success_count >= min_success,
     }
+
+
+def _sanitize_refs_by_mode(
+    mode: str,
+    face_ref_path: Optional[str],
+    outfit_ref_path: Optional[str],
+    style_ref_path: Optional[str],
+) -> tuple[Optional[str], Optional[str], Optional[str]]:
+    """Defense-in-depth: drop ref paths that don't apply to the chosen mode.
+
+    The frontend's mode switcher (Step1Host.tsx) only updates `host.mode` and
+    leaves the previously-uploaded face/outfit refs in wizard state. A spread
+    in handleGenerate then ships those stale paths back to /api/host/generate
+    even after the user switched to "설명으로 만들기". Without this guard,
+    `_sync_generate` (line ~425) silently attaches the leaked images to the
+    Gemini contents list, producing variants that look like the prior session
+    instead of the new text prompt.
+    """
+    if mode == "text":
+        return None, None, None
+    return face_ref_path, outfit_ref_path, style_ref_path
 
 
 def _validate_inputs(mode, text_prompt, face_ref, outfit_ref, style_ref, outfit_text=None):
