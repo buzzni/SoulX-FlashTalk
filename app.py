@@ -1954,24 +1954,26 @@ async def get_result(task_id: str, request: Request):
 
 @app.get("/api/files/{filename:path}")
 async def get_file(filename: str):
-    """Serve files from SAFE_ROOTS (UPLOADS/OUTPUTS/EXAMPLES). No PROJECT_ROOT fallback.
+    """Serve files. Accepts both legacy (bucket-less) and PR3 storage_key forms.
 
-    Phase 0 CSO Critical #1 fix. Probes each safe root in order; rejects path
-    traversal via utils.security.safe_upload_path realpath containment.
+    Examples:
+      /api/files/outputs/hosts/saved/x.png   ← PR3 storage_key
+      /api/files/hosts/saved/x.png           ← legacy (still resolves)
+      /api/files/ref_img_abc.png             ← legacy (probes UPLOADS)
+
+    Bucket-prefixed keys go through `modules.storage` (rejects `..`).
+    Legacy filenames probe every bucket dir and pass through `safe_upload_path`
+    for the final realpath-containment check.
     """
     from utils.security import safe_upload_path
+    from modules.storage import resolve_legacy_or_keyed
 
-    candidate = None
-    for root in config.SAFE_ROOTS:
-        probe = os.path.join(root, filename)
-        if os.path.exists(probe):
-            candidate = probe
-            break
-    if candidate is None:
+    resolved = resolve_legacy_or_keyed(filename)
+    if resolved is None:
         raise HTTPException(status_code=404, detail="File not found")
-
-    # Validate no traversal escape (safe_upload_path raises on any escape)
-    filepath = safe_upload_path(candidate)
+    # Defense in depth — confirm realpath stays inside a safe root even if
+    # the storage layer's traversal check is somehow bypassed.
+    filepath = safe_upload_path(str(resolved))
 
     ext = os.path.splitext(filename)[1].lower()
     media_types = {
