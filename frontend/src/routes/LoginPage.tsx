@@ -40,13 +40,21 @@ export default function LoginPage() {
   }
 
   return (
-    <div style={containerStyle}>
-      <form onSubmit={onSubmit} style={formStyle} aria-labelledby="login-heading">
-        <h1 id="login-heading" style={titleStyle}>SoulX-FlashTalk Studio</h1>
-        <p style={subtitleStyle}>로그인이 필요합니다</p>
+    <div className="min-h-screen flex items-center justify-center bg-secondary px-4">
+      <form
+        onSubmit={onSubmit}
+        aria-labelledby="login-heading"
+        className="w-full max-w-sm flex flex-col gap-4 p-8 rounded-lg surface-base shadow-[0_4px_24px_rgba(0,0,0,0.06)] animate-fade-in"
+      >
+        <div className="flex flex-col gap-1">
+          <h1 id="login-heading" className="text-xl font-bold tracking-tight">
+            SoulX-FlashTalk Studio
+          </h1>
+          <p className="text-sm text-muted-foreground">로그인이 필요합니다</p>
+        </div>
 
-        <label style={labelStyle}>
-          <span>아이디</span>
+        <label className="flex flex-col gap-1.5 text-[13px]">
+          <span className="font-medium">아이디</span>
           <input
             type="text"
             autoComplete="username"
@@ -54,85 +62,39 @@ export default function LoginPage() {
             value={userId}
             onChange={(e) => setUserId(e.target.value)}
             disabled={busy}
-            style={inputStyle}
+            className="px-3 py-2.5 text-sm rounded-md border border-input bg-card disabled:opacity-60 transition-colors focus:border-primary"
           />
         </label>
 
-        <label style={labelStyle}>
-          <span>비밀번호</span>
+        <label className="flex flex-col gap-1.5 text-[13px]">
+          <span className="font-medium">비밀번호</span>
           <input
             type="password"
             autoComplete="current-password"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             disabled={busy}
-            style={inputStyle}
+            className="px-3 py-2.5 text-sm rounded-md border border-input bg-card disabled:opacity-60 transition-colors focus:border-primary"
           />
         </label>
 
-        {error && <div role="alert" style={errorStyle}>{error}</div>}
+        {error && (
+          <div
+            role="alert"
+            className="px-3 py-2 text-[13px] rounded-md border bg-[hsl(0_90%_96%)] text-destructive border-destructive/30"
+          >
+            {error}
+          </div>
+        )}
 
-        <button type="submit" disabled={busy} style={buttonStyle}>
+        <button
+          type="submit"
+          disabled={busy}
+          className="px-4 py-3 text-sm font-semibold rounded-md bg-primary text-primary-foreground transition-colors hover:bg-[var(--color-brand-primary-hover)] disabled:opacity-60 disabled:cursor-not-allowed"
+        >
           {busy ? '확인 중…' : '로그인'}
         </button>
       </form>
     </div>
   );
 }
-
-const containerStyle: React.CSSProperties = {
-  minHeight: '100vh',
-  display: 'flex',
-  alignItems: 'center',
-  justifyContent: 'center',
-  background: '#f7f7fa',
-};
-
-const formStyle: React.CSSProperties = {
-  display: 'flex',
-  flexDirection: 'column',
-  gap: 16,
-  width: 360,
-  padding: 32,
-  background: '#fff',
-  borderRadius: 12,
-  boxShadow: '0 4px 24px rgba(0,0,0,0.08)',
-};
-
-const titleStyle: React.CSSProperties = { margin: 0, fontSize: 22, fontWeight: 700 };
-const subtitleStyle: React.CSSProperties = { margin: 0, color: '#666', fontSize: 14 };
-
-const labelStyle: React.CSSProperties = {
-  display: 'flex',
-  flexDirection: 'column',
-  gap: 6,
-  fontSize: 13,
-  color: '#333',
-};
-
-const inputStyle: React.CSSProperties = {
-  padding: '10px 12px',
-  fontSize: 14,
-  border: '1px solid #d0d0d6',
-  borderRadius: 8,
-  outline: 'none',
-};
-
-const errorStyle: React.CSSProperties = {
-  padding: '8px 12px',
-  background: '#fff1f1',
-  color: '#b00020',
-  borderRadius: 6,
-  fontSize: 13,
-};
-
-const buttonStyle: React.CSSProperties = {
-  padding: '12px 16px',
-  fontSize: 14,
-  fontWeight: 600,
-  background: '#3553ff',
-  color: '#fff',
-  border: 'none',
-  borderRadius: 8,
-  cursor: 'pointer',
-};

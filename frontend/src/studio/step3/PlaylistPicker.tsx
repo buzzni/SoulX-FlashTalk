@@ -8,6 +8,10 @@
  * Graceful degradation per plan decision #13: if /api/playlists fails to
  * load, render the notice + retry button. The user can still ship the
  * render — it lands in 미지정.
+ *
+ * Lives inside the wizard's .studio-root so we lean on the wizard's Button
+ * primitive and the bridged tokens (--accent, --border, --bg) — visually
+ * matches the rest of Step 3 with zero per-component overrides.
  */
 
 import { useEffect, useState } from 'react';
@@ -81,9 +85,18 @@ export function PlaylistPicker({ selected, onChange }: PlaylistPickerProps) {
   // Graceful degradation — playlist list unreachable. User can still ship.
   if (loadError) {
     return (
-      <div style={errorStyle}>
-        <Icon name="alert_circle" size={13} style={{ color: 'var(--warn)' }} />
-        <span>플레이리스트 목록을 못 불러왔어요 · 이번 영상은 미지정으로 저장됩니다</span>
+      <div
+        className="flex items-center gap-2 px-3 py-2 text-xs rounded"
+        style={{
+          color: 'var(--warn)',
+          background: 'var(--warn-soft)',
+          border: '1px solid var(--warn)',
+        }}
+      >
+        <Icon name="alert_circle" size={13} />
+        <span className="flex-1">
+          플레이리스트 목록을 못 불러왔어요 · 이번 영상은 미지정으로 저장됩니다
+        </span>
         <Button size="sm" variant="ghost" onClick={() => loadList()}>
           다시 시도
         </Button>
@@ -92,8 +105,7 @@ export function PlaylistPicker({ selected, onChange }: PlaylistPickerProps) {
   }
 
   return (
-    <div style={containerStyle}>
-      <label style={labelStyle}>플레이리스트</label>
+    <div className="flex flex-col gap-2">
       <select
         value={selected ?? ''}
         onChange={(e) => {
@@ -104,8 +116,13 @@ export function PlaylistPicker({ selected, onChange }: PlaylistPickerProps) {
           }
           onChange(v === '' ? null : v);
         }}
-        style={selectStyle}
         disabled={playlists === null}
+        className="px-2.5 py-2 text-sm rounded max-w-xs disabled:opacity-60"
+        style={{
+          border: '1px solid var(--border)',
+          background: 'var(--bg-elev)',
+          color: 'var(--text)',
+        }}
       >
         <option value="">미지정</option>
         {playlists?.map((p) => (
@@ -117,14 +134,19 @@ export function PlaylistPicker({ selected, onChange }: PlaylistPickerProps) {
         <option value={CREATE_TOKEN}>+ 새 플레이리스트 만들기</option>
       </select>
       {showCreate && (
-        <div style={createRowStyle}>
+        <div className="flex flex-wrap items-center gap-2">
           <input
             type="text"
             value={newName}
             onChange={(e) => setNewName(e.target.value)}
             placeholder="플레이리스트 이름 (예: 겨울 컬렉션)"
             autoFocus
-            style={inputStyle}
+            className="flex-1 min-w-[200px] px-2.5 py-2 text-sm rounded"
+            style={{
+              border: '1px solid var(--border)',
+              background: 'var(--bg-elev)',
+              color: 'var(--text)',
+            }}
             onKeyDown={(e) => {
               if (e.key === 'Enter') {
                 e.preventDefault();
@@ -146,63 +168,16 @@ export function PlaylistPicker({ selected, onChange }: PlaylistPickerProps) {
           <Button size="sm" variant="ghost" onClick={closeCreate} disabled={creating}>
             취소
           </Button>
-          {createError && <div style={createErrorStyle}>{createError}</div>}
+          {createError && (
+            <div
+              className="w-full text-xs"
+              style={{ color: 'var(--danger)' }}
+            >
+              {createError}
+            </div>
+          )}
         </div>
       )}
     </div>
   );
 }
-
-const containerStyle: React.CSSProperties = {
-  display: 'flex',
-  flexDirection: 'column',
-  gap: 8,
-};
-
-const labelStyle: React.CSSProperties = {
-  fontSize: 13,
-  fontWeight: 600,
-  color: 'var(--text-secondary, #444)',
-};
-
-const selectStyle: React.CSSProperties = {
-  padding: '8px 10px',
-  fontSize: 14,
-  borderRadius: 6,
-  border: '1px solid var(--border, #ddd)',
-  background: '#fff',
-  maxWidth: 320,
-};
-
-const errorStyle: React.CSSProperties = {
-  display: 'flex',
-  alignItems: 'center',
-  gap: 8,
-  padding: '8px 10px',
-  fontSize: 12,
-  color: 'var(--warn, #d77)',
-  background: 'var(--warn-soft, #fff7eb)',
-  borderRadius: 6,
-};
-
-const createRowStyle: React.CSSProperties = {
-  display: 'flex',
-  alignItems: 'center',
-  gap: 8,
-  flexWrap: 'wrap',
-};
-
-const inputStyle: React.CSSProperties = {
-  flex: 1,
-  minWidth: 200,
-  padding: '8px 10px',
-  fontSize: 14,
-  borderRadius: 6,
-  border: '1px solid var(--border, #ddd)',
-};
-
-const createErrorStyle: React.CSSProperties = {
-  width: '100%',
-  fontSize: 12,
-  color: 'var(--danger, #d33)',
-};

@@ -2,10 +2,15 @@
  * /results — grid of completed renders + playlist sidebar.
  *
  * Lane E of docs/playlist-feature-plan.md. Two-pane layout: sidebar with
- * 전체 / 미지정 / each playlist (alphabetical, plan decision #11), card grid
- * filters via /api/history?playlist_id=. Card [⋯] popover moves to another
- * playlist; sidebar item [⋯] renames/deletes. Cascade-on-delete sends videos
- * back to 미지정 (plan §5).
+ * 전체 / 미지정 / each playlist (alphabetical, plan decision #11), card
+ * grid filters via /api/history?playlist_id=. Card [⋯] popover moves to
+ * another playlist; sidebar item [⋯] renames/deletes. Cascade-on-delete
+ * sends videos back to 미지정 (plan §5).
+ *
+ * Styling — Tailwind utility classes against the design tokens defined in
+ * `frontend/src/index.css`. Sidebar uses `--color-sidebar-*`, popovers
+ * use the `panel-glass` utility, rows use `panel-row`, surfaces use
+ * `surface-base`. No inline hex colors.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
@@ -47,8 +52,6 @@ export function ResultsListPage() {
   const [playlists, setPlaylists] = useState<PlaylistListResponse | null>(null);
   const [playlistsError, setPlaylistsError] = useState<string | null>(null);
 
-  // Bumping `epoch` triggers a refetch of both panes — used after every
-  // mutation (create/rename/delete/move).
   const [epoch, setEpoch] = useState(0);
   const refresh = useCallback(() => setEpoch((n) => n + 1), []);
 
@@ -91,8 +94,7 @@ export function ResultsListPage() {
 
   // If the currently-selected playlist gets deleted (this tab or another),
   // fall back to "전체". Trigger only when `playlists` changes — adding
-  // `filter` to the deps would race the create-then-select flow, where
-  // setFilter(new_id) runs before the refreshed playlists list has loaded.
+  // `filter` to the deps would race the create-then-select flow.
   useEffect(() => {
     if (!playlists) return;
     if (filter === 'all' || filter === 'unassigned') return;
@@ -111,10 +113,10 @@ export function ResultsListPage() {
   }, [filter, playlists]);
 
   return (
-    <div style={pageStyle}>
+    <div className="min-h-screen flex flex-col bg-background">
       <AppHeader />
-      <main style={mainStyle}>
-        <div style={layoutStyle}>
+      <main className="flex-1 px-6 py-6 max-w-[1280px] w-full mx-auto">
+        <div className="grid gap-6 items-start" style={{ gridTemplateColumns: 'minmax(220px, 240px) minmax(0, 1fr)' }}>
           <PlaylistSidebar
             playlists={playlists}
             error={playlistsError}
@@ -126,33 +128,42 @@ export function ResultsListPage() {
               setFilter(p.playlist_id);
             }}
           />
-          <section style={contentStyle}>
-            <div style={headerStyle}>
-              <h1 style={titleStyle}>{filterTitle}</h1>
+          <section className="min-w-0">
+            <div className="flex items-baseline gap-3 mb-4">
+              <h1 className="m-0 text-[22px] font-bold tracking-tight">{filterTitle}</h1>
               {items !== null && (
-                <span style={countStyle}>{items.length}개</span>
+                <span className="text-sm text-muted-foreground tabular-nums">
+                  {items.length}개
+                </span>
               )}
             </div>
-            {historyError && <div style={errorStyle}>{historyError}</div>}
+            {historyError && (
+              <div className="px-4 py-3 rounded-md bg-[hsl(0_90%_96%)] text-destructive border border-destructive/30">
+                {historyError}
+              </div>
+            )}
             {!historyError && items === null && (
-              <div style={loadingStyle}>불러오는 중…</div>
+              <div className="px-4 py-3 text-muted-foreground">불러오는 중…</div>
             )}
             {!historyError && items !== null && items.length === 0 && (
-              <div style={emptyStyle}>
-                <p style={{ margin: 0, fontSize: 14, color: '#666' }}>
+              <div className="flex flex-col items-center gap-3 py-12 px-4 surface-base rounded-xl text-center animate-fade-in">
+                <p className="m-0 text-sm text-muted-foreground">
                   {filter === 'all'
                     ? '아직 만든 영상이 없어요.'
                     : '이 플레이리스트는 비어있어요.'}
                 </p>
                 {filter === 'all' && (
-                  <Link to="/step/1" style={linkStyle}>
+                  <Link
+                    to="/step/1"
+                    className="text-sm font-semibold text-primary no-underline hover:underline"
+                  >
                     첫 영상 만들러 가기 →
                   </Link>
                 )}
               </div>
             )}
             {!historyError && items !== null && items.length > 0 && (
-              <div style={gridStyle}>
+              <div className="grid gap-4" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))' }}>
                 {items.map((it) => (
                   <ResultCard
                     key={it.task_id}
@@ -221,8 +232,10 @@ function PlaylistSidebar({
   };
 
   return (
-    <aside style={sidebarStyle}>
-      {error && <div style={sidebarErrorStyle}>{error}</div>}
+    <aside className="flex flex-col gap-1 p-3 rounded-lg bg-sidebar-background border border-sidebar-border sticky top-4">
+      {error && (
+        <div className="px-2 py-1.5 text-xs text-destructive">{error}</div>
+      )}
       <SidebarRow
         label="전체"
         count={totalCount}
@@ -235,7 +248,7 @@ function PlaylistSidebar({
         active={selected === 'unassigned'}
         onClick={() => onSelect('unassigned')}
       />
-      <hr style={hrStyle} />
+      <hr className="border-0 border-t border-sidebar-border my-2" />
       {(playlists?.playlists ?? []).map((p) => (
         <SidebarPlaylistRow
           key={p.playlist_id}
@@ -245,17 +258,17 @@ function PlaylistSidebar({
           onChanged={onChanged}
         />
       ))}
-      <hr style={hrStyle} />
+      <hr className="border-0 border-t border-sidebar-border my-2" />
       {!creating ? (
         <button
           type="button"
-          style={createBtnStyle}
           onClick={() => setCreating(true)}
+          className="flex items-center justify-between w-full text-left px-2.5 py-2 rounded text-sm font-semibold text-primary transition-colors hover:bg-accent/40 cursor-pointer"
         >
           + 새 플레이리스트
         </button>
       ) : (
-        <div style={createWrapStyle}>
+        <div className="flex flex-col gap-1.5 px-1.5 py-1.5">
           <input
             type="text"
             value={newName}
@@ -263,7 +276,7 @@ function PlaylistSidebar({
             placeholder="이름 (예: 신상품)"
             autoFocus
             disabled={busy}
-            style={createInputStyle}
+            className="px-2 py-1.5 text-[13px] rounded border border-input bg-card disabled:opacity-60 transition-colors focus:border-primary"
             onKeyDown={(e) => {
               if (e.key === 'Enter') {
                 e.preventDefault();
@@ -274,12 +287,12 @@ function PlaylistSidebar({
               }
             }}
           />
-          <div style={{ display: 'flex', gap: 6 }}>
+          <div className="flex gap-1.5">
             <button
               type="button"
               onClick={submitCreate}
               disabled={busy || !newName.trim()}
-              style={primaryBtnStyle}
+              className="flex-1 px-2 py-1.5 text-xs font-semibold rounded bg-primary text-primary-foreground transition-colors hover:bg-[var(--color-brand-primary-hover)] disabled:opacity-60 disabled:cursor-not-allowed cursor-pointer"
             >
               만들기
             </button>
@@ -287,12 +300,14 @@ function PlaylistSidebar({
               type="button"
               onClick={closeCreate}
               disabled={busy}
-              style={ghostBtnStyle}
+              className="flex-1 px-2 py-1.5 text-xs rounded border border-input bg-card text-muted-foreground transition-colors hover:bg-secondary disabled:opacity-60 cursor-pointer"
             >
               취소
             </button>
           </div>
-          {createError && <div style={inlineErrorStyle}>{createError}</div>}
+          {createError && (
+            <div className="text-[11px] text-destructive">{createError}</div>
+          )}
         </div>
       )}
     </aside>
@@ -307,14 +322,15 @@ interface SidebarRowProps {
 }
 
 function SidebarRow({ label, count, active, onClick }: SidebarRowProps) {
+  const base =
+    'flex items-center justify-between w-full text-left px-2.5 py-2 rounded text-sm transition-colors cursor-pointer';
+  const variant = active
+    ? 'bg-sidebar-accent text-sidebar-accent-foreground font-semibold'
+    : 'text-sidebar-foreground hover:bg-accent/40';
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      style={active ? rowActiveStyle : rowStyle}
-    >
-      <span style={rowLabelStyle}>{label}</span>
-      <span style={rowCountStyle}>{count}</span>
+    <button type="button" onClick={onClick} className={`${base} ${variant}`}>
+      <span className="truncate pr-2">{label}</span>
+      <span className="text-xs text-muted-foreground tabular-nums">{count}</span>
     </button>
   );
 }
@@ -340,7 +356,6 @@ function SidebarPlaylistRow({
   const [error, setError] = useState<string | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
 
-  // Close [⋯] popover on outside click.
   useEffect(() => {
     if (!menuOpen) return;
     const close = (e: MouseEvent) => {
@@ -391,14 +406,14 @@ function SidebarPlaylistRow({
 
   if (renaming) {
     return (
-      <div style={rowStyle}>
+      <div className="px-1.5">
         <input
           type="text"
           value={name}
           onChange={(e) => setName(e.target.value)}
           autoFocus
           disabled={busy}
-          style={renameInputStyle}
+          className="w-full px-2 py-1.5 text-[13px] rounded border border-primary bg-card disabled:opacity-60"
           onKeyDown={(e) => {
             if (e.key === 'Enter') {
               e.preventDefault();
@@ -411,24 +426,30 @@ function SidebarPlaylistRow({
           }}
           onBlur={submitRename}
         />
-        {error && <span style={inlineErrorStyle}>{error}</span>}
+        {error && (
+          <div className="text-[11px] text-destructive px-1 pt-1">{error}</div>
+        )}
       </div>
     );
   }
 
+  const rowBase =
+    'flex items-center justify-between w-full text-left pl-2.5 pr-9 py-2 rounded text-sm transition-colors cursor-pointer';
+  const rowVariant = active
+    ? 'bg-sidebar-accent text-sidebar-accent-foreground font-semibold'
+    : 'text-sidebar-foreground hover:bg-accent/40';
+
   return (
     <div
-      style={{ position: 'relative' }}
+      className="relative"
       onMouseEnter={() => setHover(true)}
       onMouseLeave={() => setHover(false)}
     >
-      <button
-        type="button"
-        onClick={onSelect}
-        style={active ? rowActiveStyle : rowStyle}
-      >
-        <span style={rowLabelStyle}>{playlist.name}</span>
-        <span style={rowCountStyle}>{playlist.video_count}</span>
+      <button type="button" onClick={onSelect} className={`${rowBase} ${rowVariant}`}>
+        <span className="truncate pr-2">{playlist.name}</span>
+        <span className="text-xs text-muted-foreground tabular-nums">
+          {playlist.video_count}
+        </span>
       </button>
       {(hover || menuOpen) && (
         <button
@@ -437,38 +458,40 @@ function SidebarPlaylistRow({
             e.stopPropagation();
             setMenuOpen((v) => !v);
           }}
-          style={moreBtnStyle}
           aria-label="플레이리스트 옵션"
           title="옵션"
+          className="absolute right-1.5 top-1/2 -translate-y-1/2 grid place-items-center w-6 h-6 rounded text-muted-foreground bg-card/90 border border-border hover:border-primary hover:text-foreground transition-colors cursor-pointer"
         >
           ⋯
         </button>
       )}
       {menuOpen && (
-        <div ref={menuRef} style={popoverStyle}>
-          <button
-            type="button"
-            style={popoverItemStyle}
+        <div
+          ref={menuRef}
+          className="absolute right-1 top-full mt-1 z-20 min-w-[140px] panel-glass p-1 flex flex-col animate-fade-in"
+        >
+          <PopoverItem
             onClick={() => {
               setMenuOpen(false);
               setRenaming(true);
             }}
           >
             이름 변경
-          </button>
-          <button
-            type="button"
-            style={popoverItemDangerStyle}
+          </PopoverItem>
+          <PopoverItem
+            variant="danger"
             onClick={() => {
               setMenuOpen(false);
               submitDelete();
             }}
           >
             삭제
-          </button>
+          </PopoverItem>
         </div>
       )}
-      {error && !renaming && <div style={inlineErrorStyle}>{error}</div>}
+      {error && !renaming && (
+        <div className="text-[11px] text-destructive px-2 pt-1">{error}</div>
+      )}
     </div>
   );
 }
@@ -518,14 +541,17 @@ function ResultCard({ item, playlists, onMoved }: ResultCardProps) {
   const blurb = item.script_text || item.host_image || item.task_id.slice(0, 8);
 
   return (
-    <div style={cardWrapStyle}>
-      <Link to={`/result/${item.task_id}`} style={cardStyle}>
-        <div style={thumbWrapStyle}>
-          <video src={videoUrl} preload="metadata" muted style={thumbStyle} />
+    <div className="relative group">
+      <Link
+        to={`/result/${item.task_id}`}
+        className="flex flex-col rounded-lg surface-base overflow-hidden no-underline text-foreground shadow-[0_2px_8px_rgba(0,0,0,0.04)] transition-shadow hover:shadow-[0_6px_18px_rgba(0,0,0,0.08)]"
+      >
+        <div className="w-full aspect-video bg-foreground overflow-hidden">
+          <video src={videoUrl} preload="metadata" muted className="block w-full h-full object-cover" />
         </div>
-        <div style={cardBodyStyle}>
-          <div style={cardTitleStyle} title={blurb}>{blurb}</div>
-          <div style={cardMetaStyle}>
+        <div className="p-3">
+          <div className="text-sm font-semibold mb-1 truncate" title={blurb}>{blurb}</div>
+          <div className="text-xs text-muted-foreground">
             {ts}
             {dur && ` · ${dur}`}
           </div>
@@ -538,366 +564,65 @@ function ResultCard({ item, playlists, onMoved }: ResultCardProps) {
           e.stopPropagation();
           setMenuOpen((v) => !v);
         }}
-        style={cardMoreBtnStyle}
         aria-label="옵션"
         title="옵션"
+        className="absolute top-2 right-2 grid place-items-center w-7 h-7 rounded-md bg-foreground/55 text-card text-base leading-none cursor-pointer transition-colors hover:bg-foreground/75"
       >
         ⋯
       </button>
       {menuOpen && (
-        <div ref={menuRef} style={cardPopoverStyle}>
-          <div style={popoverHeaderStyle}>다른 플레이리스트로 이동</div>
-          <button
-            type="button"
-            style={popoverItemStyle}
-            onClick={() => move(null)}
-            disabled={busy}
-          >
+        <div
+          ref={menuRef}
+          className="absolute top-10 right-2 z-20 min-w-[160px] max-h-[320px] overflow-y-auto panel-glass p-1 flex flex-col animate-fade-in"
+        >
+          <div className="text-[11px] font-semibold uppercase tracking-widest px-2.5 pt-1.5 pb-1 text-muted-foreground">
+            다른 플레이리스트로 이동
+          </div>
+          <PopoverItem onClick={() => move(null)} disabled={busy}>
             미지정
-          </button>
+          </PopoverItem>
           {playlists.map((p) => (
-            <button
+            <PopoverItem
               key={p.playlist_id}
-              type="button"
-              style={popoverItemStyle}
               onClick={() => move(p.playlist_id)}
               disabled={busy}
             >
               {p.name}
-            </button>
+            </PopoverItem>
           ))}
-          {error && <div style={inlineErrorStyle}>{error}</div>}
+          {error && (
+            <div className="text-[11px] text-destructive px-2 pt-1">{error}</div>
+          )}
         </div>
       )}
     </div>
   );
 }
 
-// ── styles ───────────────────────────────────────────────────────────
+// ── shared popover item ──────────────────────────────────────────────
 
-const pageStyle: React.CSSProperties = {
-  minHeight: '100vh',
-  background: '#f7f7fa',
-  display: 'flex',
-  flexDirection: 'column',
-};
+interface PopoverItemProps {
+  onClick: () => void;
+  disabled?: boolean;
+  variant?: 'default' | 'danger';
+  children: React.ReactNode;
+}
 
-const mainStyle: React.CSSProperties = {
-  flex: 1,
-  padding: '24px 32px',
-  maxWidth: 1280,
-  width: '100%',
-  margin: '0 auto',
-};
-
-const layoutStyle: React.CSSProperties = {
-  display: 'grid',
-  gridTemplateColumns: '220px 1fr',
-  gap: 24,
-  alignItems: 'start',
-};
-
-const sidebarStyle: React.CSSProperties = {
-  display: 'flex',
-  flexDirection: 'column',
-  gap: 4,
-  padding: 12,
-  background: '#fff',
-  borderRadius: 10,
-  position: 'sticky',
-  top: 16,
-};
-
-const sidebarErrorStyle: React.CSSProperties = {
-  fontSize: 12,
-  color: '#b00020',
-  padding: 6,
-};
-
-const contentStyle: React.CSSProperties = { minWidth: 0 };
-
-const rowStyle: React.CSSProperties = {
-  display: 'flex',
-  alignItems: 'center',
-  justifyContent: 'space-between',
-  padding: '8px 10px',
-  background: 'transparent',
-  border: 'none',
-  borderRadius: 6,
-  cursor: 'pointer',
-  fontSize: 14,
-  color: '#333',
-  textAlign: 'left',
-  width: '100%',
-  position: 'relative',
-};
-
-const rowActiveStyle: React.CSSProperties = {
-  ...rowStyle,
-  background: '#eef2ff',
-  fontWeight: 600,
-  color: '#3553ff',
-};
-
-const rowLabelStyle: React.CSSProperties = {
-  flex: 1,
-  whiteSpace: 'nowrap',
-  overflow: 'hidden',
-  textOverflow: 'ellipsis',
-  paddingRight: 30, // leave room for the [⋯] button
-};
-
-const rowCountStyle: React.CSSProperties = {
-  fontSize: 12,
-  color: '#888',
-  fontVariantNumeric: 'tabular-nums',
-};
-
-const moreBtnStyle: React.CSSProperties = {
-  position: 'absolute',
-  right: 8,
-  top: '50%',
-  transform: 'translateY(-50%)',
-  width: 24,
-  height: 24,
-  background: 'rgba(255,255,255,0.9)',
-  border: '1px solid #ddd',
-  borderRadius: 4,
-  cursor: 'pointer',
-  fontSize: 14,
-  lineHeight: 1,
-  padding: 0,
-  display: 'flex',
-  alignItems: 'center',
-  justifyContent: 'center',
-};
-
-const popoverStyle: React.CSSProperties = {
-  position: 'absolute',
-  right: 4,
-  top: '100%',
-  marginTop: 4,
-  background: '#fff',
-  border: '1px solid #ddd',
-  borderRadius: 8,
-  boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
-  zIndex: 10,
-  minWidth: 140,
-  display: 'flex',
-  flexDirection: 'column',
-  padding: 4,
-};
-
-const popoverItemStyle: React.CSSProperties = {
-  background: 'transparent',
-  border: 'none',
-  padding: '8px 10px',
-  fontSize: 13,
-  textAlign: 'left',
-  cursor: 'pointer',
-  borderRadius: 4,
-  color: '#333',
-};
-
-const popoverItemDangerStyle: React.CSSProperties = {
-  ...popoverItemStyle,
-  color: '#b00020',
-};
-
-const popoverHeaderStyle: React.CSSProperties = {
-  fontSize: 11,
-  color: '#888',
-  padding: '6px 10px 4px',
-  fontWeight: 600,
-  textTransform: 'uppercase',
-  letterSpacing: 0.4,
-};
-
-const hrStyle: React.CSSProperties = {
-  border: 'none',
-  borderTop: '1px solid #eee',
-  margin: '8px 4px',
-};
-
-const createBtnStyle: React.CSSProperties = {
-  ...rowStyle,
-  color: '#3553ff',
-  fontWeight: 600,
-};
-
-const createWrapStyle: React.CSSProperties = {
-  display: 'flex',
-  flexDirection: 'column',
-  gap: 6,
-  padding: '6px 8px',
-};
-
-const createInputStyle: React.CSSProperties = {
-  padding: '6px 8px',
-  fontSize: 13,
-  borderRadius: 4,
-  border: '1px solid #ddd',
-};
-
-const renameInputStyle: React.CSSProperties = {
-  flex: 1,
-  padding: '6px 8px',
-  fontSize: 13,
-  borderRadius: 4,
-  border: '1px solid #3553ff',
-};
-
-const primaryBtnStyle: React.CSSProperties = {
-  flex: 1,
-  padding: '5px 8px',
-  fontSize: 12,
-  background: '#3553ff',
-  color: '#fff',
-  border: 'none',
-  borderRadius: 4,
-  cursor: 'pointer',
-};
-
-const ghostBtnStyle: React.CSSProperties = {
-  flex: 1,
-  padding: '5px 8px',
-  fontSize: 12,
-  background: 'transparent',
-  color: '#666',
-  border: '1px solid #ddd',
-  borderRadius: 4,
-  cursor: 'pointer',
-};
-
-const inlineErrorStyle: React.CSSProperties = {
-  fontSize: 11,
-  color: '#b00020',
-  padding: '4px 8px',
-};
-
-const headerStyle: React.CSSProperties = {
-  display: 'flex',
-  alignItems: 'baseline',
-  gap: 12,
-  marginBottom: 16,
-};
-
-const titleStyle: React.CSSProperties = { margin: 0, fontSize: 22, fontWeight: 700 };
-const countStyle: React.CSSProperties = { fontSize: 14, color: '#666' };
-
-const errorStyle: React.CSSProperties = {
-  padding: 16,
-  background: '#fff1f1',
-  color: '#b00020',
-  borderRadius: 8,
-};
-
-const loadingStyle: React.CSSProperties = {
-  padding: 16,
-  color: '#666',
-};
-
-const emptyStyle: React.CSSProperties = {
-  padding: '48px 16px',
-  textAlign: 'center',
-  background: '#fff',
-  borderRadius: 12,
-  display: 'flex',
-  flexDirection: 'column',
-  gap: 12,
-  alignItems: 'center',
-};
-
-const linkStyle: React.CSSProperties = {
-  fontSize: 14,
-  fontWeight: 600,
-  color: '#3553ff',
-  textDecoration: 'none',
-};
-
-const gridStyle: React.CSSProperties = {
-  display: 'grid',
-  gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))',
-  gap: 16,
-};
-
-const cardWrapStyle: React.CSSProperties = {
-  position: 'relative',
-};
-
-const cardStyle: React.CSSProperties = {
-  display: 'flex',
-  flexDirection: 'column',
-  background: '#fff',
-  borderRadius: 10,
-  overflow: 'hidden',
-  textDecoration: 'none',
-  color: 'inherit',
-  boxShadow: '0 2px 8px rgba(0,0,0,0.04)',
-};
-
-const cardMoreBtnStyle: React.CSSProperties = {
-  position: 'absolute',
-  top: 8,
-  right: 8,
-  width: 28,
-  height: 28,
-  background: 'rgba(0,0,0,0.55)',
-  color: '#fff',
-  border: 'none',
-  borderRadius: 6,
-  cursor: 'pointer',
-  fontSize: 16,
-  lineHeight: 1,
-  padding: 0,
-  display: 'flex',
-  alignItems: 'center',
-  justifyContent: 'center',
-};
-
-const cardPopoverStyle: React.CSSProperties = {
-  position: 'absolute',
-  top: 40,
-  right: 8,
-  background: '#fff',
-  border: '1px solid #ddd',
-  borderRadius: 8,
-  boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
-  zIndex: 10,
-  minWidth: 160,
-  maxHeight: 320,
-  overflowY: 'auto',
-  display: 'flex',
-  flexDirection: 'column',
-  padding: 4,
-};
-
-const thumbWrapStyle: React.CSSProperties = {
-  width: '100%',
-  aspectRatio: '16 / 9',
-  background: '#000',
-  overflow: 'hidden',
-};
-
-const thumbStyle: React.CSSProperties = {
-  width: '100%',
-  height: '100%',
-  objectFit: 'cover',
-  display: 'block',
-};
-
-const cardBodyStyle: React.CSSProperties = { padding: 12 };
-
-const cardTitleStyle: React.CSSProperties = {
-  fontSize: 14,
-  fontWeight: 600,
-  marginBottom: 4,
-  whiteSpace: 'nowrap',
-  overflow: 'hidden',
-  textOverflow: 'ellipsis',
-};
-
-const cardMetaStyle: React.CSSProperties = {
-  fontSize: 12,
-  color: '#888',
-};
+function PopoverItem({
+  onClick,
+  disabled = false,
+  variant = 'default',
+  children,
+}: PopoverItemProps) {
+  const color = variant === 'danger' ? 'text-destructive' : 'text-foreground';
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      className={`text-left px-2.5 py-2 text-[13px] rounded transition-colors hover:bg-secondary disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer ${color}`}
+    >
+      {children}
+    </button>
+  );
+}

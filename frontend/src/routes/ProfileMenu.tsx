@@ -47,101 +47,51 @@ export function ProfileMenu() {
   }
 
   return (
-    <div ref={ref} style={wrapStyle}>
+    <div ref={ref} className="relative inline-block">
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
         aria-haspopup="menu"
         aria-expanded={open}
-        style={triggerStyle}
+        className="inline-flex items-center gap-2 px-2.5 py-1.5 rounded-full border bg-card text-foreground transition-colors hover:bg-secondary cursor-pointer"
       >
-        <span style={avatarStyle}>{(display[0] || '?').toUpperCase()}</span>
-        <span style={nameStyle}>{display}</span>
-        <span style={caretStyle}>▾</span>
+        <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-primary text-primary-foreground text-[12px] font-bold">
+          {(display[0] || '?').toUpperCase()}
+        </span>
+        <span className="text-[13px] font-medium max-w-[140px] truncate">{display}</span>
+        <span className="text-[11px] opacity-60">▾</span>
       </button>
       {open && (
-        <div role="menu" style={menuStyle}>
-          <button role="menuitem" style={itemStyle} onClick={() => go('/mypage')}>
-            마이페이지
-          </button>
-          <button role="menuitem" style={itemStyle} onClick={() => go('/results')}>
-            내 영상들
-          </button>
-          <div style={dividerStyle} />
-          <button role="menuitem" style={{ ...itemStyle, color: '#b00020' }} onClick={onLogout}>
-            로그아웃
-          </button>
+        <div
+          role="menu"
+          className="absolute top-[calc(100%+6px)] right-0 min-w-[160px] panel-glass p-1.5 z-50 animate-fade-in"
+        >
+          <MenuItem onClick={() => go('/mypage')}>마이페이지</MenuItem>
+          <MenuItem onClick={() => go('/results')}>내 영상들</MenuItem>
+          <div className="h-px bg-border my-1.5" />
+          <MenuItem onClick={onLogout} variant="danger">로그아웃</MenuItem>
         </div>
       )}
     </div>
   );
 }
 
-const wrapStyle: React.CSSProperties = { position: 'relative', display: 'inline-block' };
+interface MenuItemProps {
+  onClick: () => void;
+  variant?: 'default' | 'danger';
+  children: React.ReactNode;
+}
 
-const triggerStyle: React.CSSProperties = {
-  display: 'inline-flex',
-  alignItems: 'center',
-  gap: 8,
-  padding: '6px 10px',
-  background: 'transparent',
-  border: '1px solid var(--border, #d0d0d6)',
-  borderRadius: 999,
-  cursor: 'pointer',
-  font: 'inherit',
-};
-
-const avatarStyle: React.CSSProperties = {
-  width: 24,
-  height: 24,
-  borderRadius: '50%',
-  background: '#3553ff',
-  color: '#fff',
-  fontSize: 12,
-  fontWeight: 700,
-  display: 'inline-flex',
-  alignItems: 'center',
-  justifyContent: 'center',
-};
-
-const nameStyle: React.CSSProperties = {
-  fontSize: 13,
-  fontWeight: 500,
-  maxWidth: 140,
-  overflow: 'hidden',
-  textOverflow: 'ellipsis',
-  whiteSpace: 'nowrap',
-};
-
-const caretStyle: React.CSSProperties = { fontSize: 11, opacity: 0.6 };
-
-const menuStyle: React.CSSProperties = {
-  position: 'absolute',
-  top: 'calc(100% + 6px)',
-  right: 0,
-  minWidth: 160,
-  background: '#fff',
-  border: '1px solid #e5e5ea',
-  borderRadius: 10,
-  boxShadow: '0 8px 24px rgba(0,0,0,0.08)',
-  padding: 6,
-  zIndex: 100,
-};
-
-const itemStyle: React.CSSProperties = {
-  display: 'block',
-  width: '100%',
-  textAlign: 'left',
-  padding: '8px 12px',
-  background: 'transparent',
-  border: 'none',
-  borderRadius: 6,
-  fontSize: 13,
-  cursor: 'pointer',
-};
-
-const dividerStyle: React.CSSProperties = {
-  height: 1,
-  background: '#eef',
-  margin: '6px 0',
-};
+function MenuItem({ onClick, variant = 'default', children }: MenuItemProps) {
+  const color = variant === 'danger' ? 'text-destructive' : 'text-foreground';
+  return (
+    <button
+      role="menuitem"
+      type="button"
+      onClick={onClick}
+      className={`block w-full text-left px-3 py-2 text-[13px] rounded transition-colors hover:bg-secondary cursor-pointer ${color}`}
+    >
+      {children}
+    </button>
+  );
+}
