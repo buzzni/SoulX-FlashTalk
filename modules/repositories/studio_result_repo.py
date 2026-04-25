@@ -72,6 +72,20 @@ async def delete(user_id: str, task_id: str) -> bool:
     return res.deleted_count > 0
 
 
+async def clear_playlist_id(user_id: str, playlist_id: str) -> int:
+    """Set playlist_id=null on all studio_results owned by user_id with the
+    given playlist_id. Returns count of modified docs.
+
+    Used by studio_playlist_repo.delete() cascade (plan §5). Bulk update is
+    safe because (user_id, playlist_id) is owner-scoped.
+    """
+    res = await _coll().update_many(
+        {"user_id": user_id, "playlist_id": playlist_id},
+        {"$set": {"playlist_id": None}},
+    )
+    return res.modified_count
+
+
 # ── Reads ────────────────────────────────────────────────────────────
 
 async def get(user_id: str, task_id: str) -> Optional[dict]:

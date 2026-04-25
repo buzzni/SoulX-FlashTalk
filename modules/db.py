@@ -3,7 +3,7 @@
 The client is a process-wide singleton. FastAPI's startup hook calls init();
 shutdown calls close(). Repositories import `get_db()` and call its methods.
 
-Indexes (per docs/db-integration-plan.md §4 + §7):
+Indexes (per docs/db-integration-plan.md §4 + §7, docs/playlist-feature-plan.md §3):
 - studio_hosts:        {user_id, image_id} unique;
                         {user_id, step, status, generated_at} compound;
                         {user_id, batch_id};
@@ -11,7 +11,10 @@ Indexes (per docs/db-integration-plan.md §4 + §7):
 - studio_saved_hosts:  {user_id, host_id} unique;
                         {user_id, created_at}
 - studio_results:      {user_id, task_id} unique;
-                        {user_id, status, completed_at}
+                        {user_id, status, completed_at};
+                        {user_id, playlist_id, completed_at} compound (filter)
+- studio_playlists:    {user_id, playlist_id} unique;
+                        {user_id, name_normalized} unique
 
 Re-running init_indexes() is a no-op on collections that already have the
 spec — motor's create_index uses the same idempotent semantics as pymongo.
@@ -96,6 +99,22 @@ async def init_indexes() -> None:
     await db.studio_results.create_index(
         [("user_id", 1), ("status", 1), ("completed_at", -1)],
         name="user_status_completed",
+    )
+    # Playlist filter index — see docs/playlist-feature-plan.md §3.
+    await db.studio_results.create_index(
+        [("user_id", 1), ("playlist_id", 1), ("completed_at", -1)],
+        name="user_playlist_completed",
+    )
+    # studio_playlists (per-user playlists)
+    await db.studio_playlists.create_index(
+        [("user_id", 1), ("playlist_id", 1)],
+        unique=True,
+        name="user_playlist_uniq",
+    )
+    await db.studio_playlists.create_index(
+        [("user_id", 1), ("name_normalized", 1)],
+        unique=True,
+        name="user_name_normalized_uniq",
     )
 
 
