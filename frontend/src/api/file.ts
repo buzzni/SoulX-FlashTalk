@@ -10,6 +10,7 @@
  * Length rather than a rough resolution-based estimate.
  */
 
+import { z } from 'zod';
 import { API_BASE, getAuthHeaders, fetchJSON } from './http';
 
 export interface CallOptions {
@@ -26,13 +27,25 @@ export interface ServerFile {
   modified: number;
 }
 
+const ServerFileSchema = z.object({
+  filename: z.string(),
+  path: z.string(),
+  url: z.string(),
+  size: z.number(),
+  modified: z.number(),
+});
+
+const ListServerFilesResponseSchema = z.object({
+  files: z.array(ServerFileSchema),
+});
+
 export function listServerFiles(
   kind: ServerFileKind = 'image',
   { signal }: CallOptions = {},
 ): Promise<{ files: ServerFile[] }> {
-  return fetchJSON<{ files: ServerFile[] }>(
+  return fetchJSON(
     `/api/upload/list?kind=${encodeURIComponent(kind)}`,
-    { label: '서버 파일 목록 조회', signal },
+    { label: '서버 파일 목록 조회', signal, schema: ListServerFilesResponseSchema },
   );
 }
 

@@ -69,7 +69,7 @@ describe('api.abort — subscribeProgress', () => {
     // wants to schedule a second tick; without unsubscribe, it would.
     global.fetch = vi.fn().mockResolvedValue({
       ok: true,
-      json: async () => ({ stage: 'generating', progress: 0.5, message: '…' }),
+      json: async () => ({ task_id: 'task-1', stage: 'generating', progress: 0.5, message: '…' }),
     });
 
     const unsubscribe = subscribeProgress('task-1', onUpdate);

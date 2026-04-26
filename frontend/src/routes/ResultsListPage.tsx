@@ -14,6 +14,7 @@ import { Spinner } from '../components/spinner';
 import { EmptyState } from '../components/empty-state';
 import { videoTitle, formatCompactDate, formatDuration } from '../lib/format';
 import { fetchJSON, humanizeError } from '../api/http';
+import { schemas } from '../api/schemas-generated';
 import {
   createPlaylist,
   deletePlaylist,
@@ -83,11 +84,12 @@ export function ResultsListPage() {
     setHistoryError(null);
     const qs =
       filter === 'all' ? '' : `&playlist_id=${encodeURIComponent(filter)}`;
-    fetchJSON<HistoryResponse>(`/api/history?limit=200${qs}`, {
+    fetchJSON(`/api/history?limit=200${qs}`, {
       signal: ctl.signal,
       label: '내 영상 목록',
+      schema: schemas.HistoryResponse,
     })
-      .then((r) => setItems(r.videos))
+      .then((r) => setItems((r.videos ?? []) as HistoryItem[]))
       .catch((e) => {
         if ((e as { name?: string })?.name === 'AbortError') return;
         setHistoryError(humanizeError(e));

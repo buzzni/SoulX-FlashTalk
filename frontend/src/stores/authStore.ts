@@ -11,6 +11,7 @@
  * No external state library — a tiny event-emitter is enough.
  */
 
+import { z } from 'zod';
 import { fetchJSON, setAuthProvider, setUnauthorizedHandler } from '../api/http';
 
 const TOKEN_KEY = 'studio.jwt.access';
@@ -29,6 +30,26 @@ export interface LoginResponse {
   expires_in: number;
   user: AuthUser;
 }
+
+const AuthUserSchema = z
+  .object({
+    user_id: z.string(),
+    display_name: z.string(),
+    role: z.string(),
+    subscriptions: z.array(z.string()),
+  })
+  .passthrough();
+
+const LoginResponseSchema = z
+  .object({
+    access_token: z.string(),
+    token_type: z.string(),
+    expires_in: z.number(),
+    user: AuthUserSchema,
+  })
+  .passthrough();
+
+const LogoutResponseSchema = z.unknown();
 
 let _token: string | null = null;
 let _user: AuthUser | null = null;
@@ -89,11 +110,12 @@ export function subscribe(listener: () => void): () => void {
 }
 
 export async function login(user_id: string, password: string): Promise<AuthUser> {
-  const res = await fetchJSON<LoginResponse>('/api/auth/login', {
+  const res = await fetchJSON('/api/auth/login', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ user_id, password }),
     label: '로그인',
+    schema: LoginResponseSchema,
   });
   _token = res.access_token;
   _user = res.user;
@@ -105,7 +127,11 @@ export async function login(user_id: string, password: string): Promise<AuthUser
 export async function logout(): Promise<void> {
   if (!_token) return;
   try {
-    await fetchJSON('/api/auth/logout', { method: 'POST', label: '로그아웃' });
+    await fetchJSON('/api/auth/logout', {
+      method: 'POST',
+      label: '로그아웃',
+      schema: LogoutResponseSchema,
+    });
   } catch {
     // Even if the server call fails, drop local state.
   }
@@ -116,7 +142,10 @@ export async function logout(): Promise<void> {
 }
 
 export async function fetchMe(): Promise<AuthUser> {
-  const me = await fetchJSON<AuthUser>('/api/auth/me', { label: '인증 확인' });
+  const me = await fetchJSON('/api/auth/me', {
+    label: '인증 확인',
+    schema: AuthUserSchema,
+  });
   _user = me;
   _persist();
   _notify();
