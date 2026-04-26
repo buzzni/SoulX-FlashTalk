@@ -88,7 +88,13 @@ describe('Lane C — persist hydrate safeParse gate', () => {
       },
     };
     const out = migrateWizardEnvelope(blob, 8);
-    expect(out.voice.generation.state).toBe('generating');
+    // Voice.upload variant has no `generation`; tts/clone do — gate on
+    // the discriminator before reading.
+    if (out.voice.source === 'tts' || out.voice.source === 'clone') {
+      expect(out.voice.generation.state).toBe('generating');
+    } else {
+      throw new Error('unexpected voice source after migrate');
+    }
   });
 
   it('round-trips: hydrated state passes the same schema again', () => {

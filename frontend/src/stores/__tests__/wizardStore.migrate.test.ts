@@ -33,7 +33,7 @@ const v7Base = {
 describe('migrateWizardEnvelope — v7 → v8', () => {
   it('hoists snake_case playlist_id into top-level playlistId', () => {
     const before = { ...v7Base, script: 'dead-legacy', playlist_id: 'pl-001' };
-    const after = migrateWizardEnvelope(before, 7) as Record<string, unknown>;
+    const after = migrateWizardEnvelope(before, 7) as unknown as Record<string, unknown>;
     expect(after.playlistId).toBe('pl-001');
     expect(after.playlist_id).toBeUndefined();
     expect(after.script).toBeUndefined();
@@ -41,7 +41,7 @@ describe('migrateWizardEnvelope — v7 → v8', () => {
 
   it('keeps camelCase playlistId when both keys exist', () => {
     const before = { ...v7Base, playlist_id: 'losing-snake', playlistId: 'winning-camel' };
-    const after = migrateWizardEnvelope(before, 7) as Record<string, unknown>;
+    const after = migrateWizardEnvelope(before, 7) as unknown as Record<string, unknown>;
     expect(after.playlistId).toBe('winning-camel');
   });
 
@@ -50,19 +50,19 @@ describe('migrateWizardEnvelope — v7 → v8', () => {
     // string|null, so parse normalises a missing-field blob into the
     // initial state where playlistId === null. Important: never
     // `undefined` — components rely on the strict null contract.
-    const after = migrateWizardEnvelope({ ...v7Base }, 7) as Record<string, unknown>;
+    const after = migrateWizardEnvelope({ ...v7Base }, 7) as unknown as Record<string, unknown>;
     expect(after.playlistId).toBe(null);
   });
 
   it('drops dead top-level script even when playlist_id is absent', () => {
     const before = { ...v7Base, script: 'should-be-gone' };
-    const after = migrateWizardEnvelope(before, 7) as Record<string, unknown>;
+    const after = migrateWizardEnvelope(before, 7) as unknown as Record<string, unknown>;
     expect(after.script).toBeUndefined();
   });
 
   it('passes already-v8 envelopes through unchanged', () => {
     const before = { ...v7Base, playlistId: 'pl-009' };
-    const after = migrateWizardEnvelope(before, 8) as Record<string, unknown>;
+    const after = migrateWizardEnvelope(before, 8) as unknown as Record<string, unknown>;
     expect(after.playlistId).toBe('pl-009');
     expect(after.script).toBeUndefined();
   });

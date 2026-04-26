@@ -407,6 +407,58 @@ export const useWizardStore = create<WizardStore>()(
 );
 
 // ────────────────────────────────────────────────────────────────────
+// Per-slice selector hooks (Phase 3 prereq for Lane D).
+//
+// Each hook subscribes to one slice via the `useStore(selector)` form
+// — a keystroke in Step 3 that updates the script doesn't re-render
+// Step 1's host card. `useWizardActions()` returns a stable reference
+// to the setter functions; safe to destructure inside a component
+// body without triggering re-renders.
+// ────────────────────────────────────────────────────────────────────
+
+export const useHost = (): Host => useWizardStore((s) => s.host);
+export const useProducts = (): Product[] => useWizardStore((s) => s.products);
+export const useBackground = (): Background => useWizardStore((s) => s.background);
+export const useComposition = (): Composition => useWizardStore((s) => s.composition);
+export const useVoice = (): Voice => useWizardStore((s) => s.voice);
+export const useResolution = (): ResolutionKey => useWizardStore((s) => s.resolution);
+export const useImageQuality = (): string => useWizardStore((s) => s.imageQuality);
+export const usePlaylistId = (): string | null => useWizardStore((s) => s.playlistId);
+export const useWizardEpoch = (): number => useWizardStore((s) => s.wizardEpoch);
+
+export interface WizardActionsRef {
+  setHost: WizardActions['setHost'];
+  setProducts: WizardActions['setProducts'];
+  setBackground: WizardActions['setBackground'];
+  setComposition: WizardActions['setComposition'];
+  setVoice: WizardActions['setVoice'];
+  setResolution: WizardActions['setResolution'];
+  setImageQuality: WizardActions['setImageQuality'];
+  setPlaylistId: WizardActions['setPlaylistId'];
+  reset: WizardActions['reset'];
+}
+
+/** Stable getter for every slice setter — destructure freely. Reads
+ * via `getState()` so the returned object is identity-stable across
+ * renders. zustand's setters are created once at store init and never
+ * swap, so destructuring this in a component body costs nothing and
+ * avoids the "fresh object every render" subscription footgun. */
+export function useWizardActions(): WizardActionsRef {
+  const s = useWizardStore.getState();
+  return {
+    setHost: s.setHost,
+    setProducts: s.setProducts,
+    setBackground: s.setBackground,
+    setComposition: s.setComposition,
+    setVoice: s.setVoice,
+    setResolution: s.setResolution,
+    setImageQuality: s.setImageQuality,
+    setPlaylistId: s.setPlaylistId,
+    reset: s.reset,
+  };
+}
+
+// ────────────────────────────────────────────────────────────────────
 // Test / debug helpers — not part of the public surface.
 // ────────────────────────────────────────────────────────────────────
 
