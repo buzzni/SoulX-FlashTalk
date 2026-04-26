@@ -6,10 +6,6 @@
  * most people never touch them. `voice.pitch` was cut pre-
  * refactor — not an ElevenLabs v3 param and the ffmpeg post-
  * processing pipeline to do it ourselves isn't built.
- *
- * Phase 2c.4: schema-typed. Takes a single `advanced: VoiceAdvanced`
- * object + one onAdvancedChange — the parent doesn't have to thread
- * four separate setters anymore.
  */
 
 import Icon from '../Icon.jsx';

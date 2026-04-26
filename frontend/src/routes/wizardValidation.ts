@@ -26,20 +26,18 @@ export interface WizardValidity {
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export function computeValidity(state: any): WizardValidity {
   const v: WizardValidity = { 1: false, 2: false, 3: false };
-  // Phase 2b: host is schema-typed. Step 1 is satisfied iff a candidate
-  // has been picked (generation.state === 'ready' && selected !== null).
+  // Step 1 is satisfied iff a candidate has been picked
+  // (generation.state === 'ready' && selected !== null).
   v[1] =
     state?.host?.generation?.state === 'ready' &&
     state?.host?.generation?.selected != null;
-  // Phase 2c: composition is schema-typed. Step 2 done iff a composite
-  // has been picked (generation.state === 'ready' && selected != null).
+  // Step 2 done iff a composite has been picked.
   v[2] =
     v[1] &&
     state?.composition?.generation?.state === 'ready' &&
     state?.composition?.generation?.selected != null;
-  // Phase 2c.4: voice is schema-typed. `isVoiceReady` covers all three
-  // source modes — tts/clone need a generated audio + voice_id; upload
-  // needs a server-side audio asset. Resolution stays a key string.
+  // `isVoiceReady` covers all three source modes — tts/clone need a
+  // generated audio + voice_id; upload needs a server-side audio asset.
   const voice = state?.voice as Voice | undefined;
   v[3] =
     v[2] &&

@@ -172,12 +172,15 @@ export function toVoiceGenerateRequest(voice: Voice): GenerateVoiceInput {
         ? voice.voiceId
         : null;
 
+  // generateVoice() reads `paragraphs` and joins them via
+  // paragraphsToScript with the right separator, so we don't pre-join
+  // here. (A prior version did, with the wrong separator — and the
+  // result was overridden anyway.)
   return {
     voice: {
       source: voice.source,
       voiceId: voiceId ?? null,
       paragraphs: voice.script.paragraphs,
-      script: voice.script.paragraphs.join('\n\n[breath]\n\n'),
       speed: voice.advanced.speed,
       stability: voice.advanced.stability,
       style: voice.advanced.style,

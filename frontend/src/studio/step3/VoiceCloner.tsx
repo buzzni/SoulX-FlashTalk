@@ -2,34 +2,36 @@
  * VoiceCloner — user uploads a recording sample; backend clones it
  * into an ElevenLabs voice_id we can then use for TTS generation.
  *
- * Phase 2c.4: schema-typed. Drives the `voice.sample` state machine
- * (empty → pending → cloned). The actual clone-on-generate happens
- * in Step3Audio via useVoiceClone — this component only stages the
- * file (pending) or surfaces the cloned identity (cloned).
+ * Drives the `voice.sample` state machine (empty → pending → cloned).
+ * The actual clone-on-generate happens in Step3Audio via
+ * useVoiceClone — this component only stages the file (pending) or
+ * surfaces the cloned identity (cloned).
  */
 
+import { useEffect } from 'react';
 import Icon from '../Icon.jsx';
 import { Field } from '@/components/field';
 import { UploadTile } from '@/components/upload-tile';
-import type { LocalAsset, VoiceCloneSample } from '@/wizard/schema';
+import {
+  localAssetFromUploadFile,
+  revokeLocalAssetIfBlob,
+  type UploadTileFile,
+} from '@/components/upload-tile-bridge';
+import type { VoiceCloneSample } from '@/wizard/schema';
 
 export interface VoiceClonerProps {
   sample: VoiceCloneSample;
   onSampleChange: (sample: VoiceCloneSample) => void;
 }
 
-interface UploadTileFile {
-  name?: string;
-  size?: number;
-  type?: string;
-  url?: string | null;
-  _file?: File;
-}
-
 export function VoiceCloner({ sample, onSampleChange }: VoiceClonerProps) {
-  // UploadTile speaks the legacy `{name, size, _file, url}` shape;
-  // we lift to/from schema here so the component is the only place
-  // touching that shape.
+  // Revoke our blob: previewUrl on replace or unmount.
+  useEffect(() => {
+    return () => {
+      if (sample.state === 'pending') revokeLocalAssetIfBlob(sample.asset);
+    };
+  }, [sample]);
+
   const tileFile: UploadTileFile | null = (() => {
     if (sample.state === 'pending') {
       return {
@@ -40,25 +42,17 @@ export function VoiceCloner({ sample, onSampleChange }: VoiceClonerProps) {
         _file: sample.asset.file,
       };
     }
-    if (sample.state === 'cloned') {
-      return { name: sample.name };
-    }
+    if (sample.state === 'cloned') return { name: sample.name };
     return null;
   })();
 
   const handlePick = (next: UploadTileFile | null) => {
-    if (!next || !next._file) {
+    if (sample.state === 'pending') revokeLocalAssetIfBlob(sample.asset);
+    const asset = localAssetFromUploadFile(next);
+    if (!asset) {
       onSampleChange({ state: 'empty' });
       return;
     }
-    const asset: LocalAsset = {
-      file: next._file,
-      previewUrl:
-        typeof next.url === 'string' && next.url
-          ? next.url
-          : URL.createObjectURL(next._file),
-      name: next.name ?? next._file.name,
-    };
     onSampleChange({ state: 'pending', asset });
   };
 
@@ -87,7 +81,7 @@ export function VoiceCloner({ sample, onSampleChange }: VoiceClonerProps) {
         <UploadTile
           file={tileFile}
           onFile={handlePick}
-          onRemove={() => onSampleChange({ state: 'empty' })}
+          onRemove={() => handlePick(null)}
           accept="audio/*"
           label="녹음 파일 올리기"
           sub="10초 이상, 주변 소음 없는 파일"

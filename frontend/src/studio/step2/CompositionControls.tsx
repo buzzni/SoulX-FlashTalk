@@ -29,11 +29,11 @@ export interface CompositionControlsProps {
   onGenerate: () => void;
 }
 
-// Phase 2c: schema's CompositionShot is close|medium|far. Labels use
-// Korean film-industry standards (클로즈업/미디엄샷/풀샷). Tooltips
-// describe the framing range so users don't have to know the jargon.
-// Pre-2c.4 the UI had 4 buttons with 상반신 and 미디엄 both wired to
-// 'medium' — collapsed to match the schema, which only has 3 values.
+// Schema's CompositionShot is close|medium|far. Labels use Korean
+// film-industry standards (클로즈업/미디엄샷/풀샷); tooltips describe
+// the framing range so users don't have to know the jargon. The UI
+// previously had 4 buttons with 상반신 and 미디엄 both wired to
+// 'medium' — same value, identical behavior. Collapsed.
 const SHOT_OPTS = [
   { v: 'close' as const, label: '클로즈업', desc: '얼굴 중심 (Close-Up)' },
   { v: 'medium' as const, label: '미디엄샷', desc: '머리~허리 (Medium Shot)' },
@@ -154,8 +154,7 @@ export function CompositionControls({
             >
               <span className="product-ref-thumb">
                 {(() => {
-                  // Schema-typed Product (Phase 2c). Derive preview URL
-                  // from the source discriminator.
+                  // Derive preview URL from the source discriminator.
                   const url =
                     p.source.kind === 'localFile'
                       ? p.source.asset.previewUrl

@@ -5,14 +5,21 @@
  * Also accepts an optional subtitle script (schema `Script`) so the
  * video can render on-screen text matching what the user said.
  *
- * Phase 2c.4: schema-typed. Emits `voice.audio` (ServerAsset |
- * LocalAsset | null) — Step3Audio orchestrates the local→server
- * upload transition; this component only stages the file.
+ * Emits `voice.audio` (ServerAsset | LocalAsset | null) — Step3Audio
+ * orchestrates the local→server upload transition; this component
+ * only stages the file.
  */
 
+import { useEffect } from 'react';
 import Icon from '../Icon.jsx';
 import { Field } from '@/components/field';
 import { UploadTile } from '@/components/upload-tile';
+import {
+  localAssetFromUploadFile,
+  revokeLocalAssetIfBlob,
+  uploadFileFromAsset,
+  type UploadTileFile,
+} from '@/components/upload-tile-bridge';
 import { isLocalAsset } from '@/wizard/normalizers';
 import type { LocalAsset, Script, ServerAsset } from '@/wizard/schema';
 
@@ -26,14 +33,6 @@ export interface AudioUploaderProps {
   onScriptChange: (script: Script) => void;
 }
 
-interface UploadTileFile {
-  name?: string;
-  size?: number;
-  type?: string;
-  url?: string | null;
-  _file?: File;
-}
-
 export function AudioUploader({
   audio,
   script,
@@ -41,36 +40,19 @@ export function AudioUploader({
   onAudioChange,
   onScriptChange,
 }: AudioUploaderProps) {
-  // UploadTile speaks the legacy `{name, _file, url}` shape; we lift
-  // to/from schema here so the rest of the component reads cleanly.
-  const tileFile: UploadTileFile | null = (() => {
-    if (!audio) return null;
-    if (isLocalAsset(audio)) {
-      return {
-        name: audio.name,
-        size: audio.file.size,
-        type: audio.file.type,
-        url: audio.previewUrl,
-        _file: audio.file,
-      };
-    }
-    return { name: audio.name, url: audio.url };
-  })();
+  // Revoke our blob: previewUrl when the LocalAsset is replaced or
+  // unmounted. data: URLs (the FileReader path) are no-ops.
+  useEffect(() => {
+    return () => {
+      if (audio && isLocalAsset(audio)) revokeLocalAssetIfBlob(audio);
+    };
+  }, [audio]);
+
+  const tileFile = uploadFileFromAsset(audio);
 
   const handlePick = (next: UploadTileFile | null) => {
-    if (!next || !next._file) {
-      onAudioChange(null);
-      return;
-    }
-    const asset: LocalAsset = {
-      file: next._file,
-      previewUrl:
-        typeof next.url === 'string' && next.url
-          ? next.url
-          : URL.createObjectURL(next._file),
-      name: next.name ?? next._file.name,
-    };
-    onAudioChange(asset);
+    if (audio && isLocalAsset(audio)) revokeLocalAssetIfBlob(audio);
+    onAudioChange(localAssetFromUploadFile(next));
   };
 
   const subtitleText = script.paragraphs.join('\n\n');
@@ -99,7 +81,7 @@ export function AudioUploader({
         <UploadTile
           file={tileFile}
           onFile={handlePick}
-          onRemove={() => onAudioChange(null)}
+          onRemove={() => handlePick(null)}
           accept="audio/*"
           label="녹음 파일 올리기"
           sub="MP3, WAV, M4A"
@@ -111,9 +93,9 @@ export function AudioUploader({
           placeholder="녹음 내용을 그대로 적어주시면 영상에 자막으로 나와요."
           value={subtitleText}
           onChange={(e) => {
-            // Subtitle script is single-textarea; split paragraph
-            // boundaries on blank-line separators so the schema
-            // multi-paragraph shape stays consistent with TTS mode.
+            // Subtitle is a single textarea; split on blank-line
+            // separators so the schema multi-paragraph shape stays
+            // consistent with TTS mode.
             const paragraphs = e.target.value.split(/\n\s*\n/);
             onScriptChange({ paragraphs: paragraphs.length > 0 ? paragraphs : [''] });
           }}

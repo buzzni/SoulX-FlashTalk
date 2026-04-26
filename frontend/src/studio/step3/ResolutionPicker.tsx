@@ -1,10 +1,10 @@
 /**
  * ResolutionPicker — 4-tile video-quality picker.
  *
- * Phase 2c: schema-typed. Emits a `ResolutionKey` string only — the
- * full meta (width/height/size/speed/label) is derived via
- * `resolutionMeta(key)` from wizard/schema, so consumers don't have
- * to copy-paste an object that's already in the canonical table.
+ * Emits a `ResolutionKey` string only — full meta
+ * (width/height/size/speed/label) is derived via `resolutionMeta(key)`
+ * from wizard/schema so consumers don't copy-paste an object already
+ * in the canonical table.
  */
 import { Clock } from 'lucide-react';
 import type { ResolutionKey } from '@/wizard/schema';

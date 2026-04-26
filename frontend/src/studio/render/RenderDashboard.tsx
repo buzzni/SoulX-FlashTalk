@@ -89,11 +89,10 @@ export default function RenderDashboard({
 
     (async () => {
       try {
-        // Phase 2c.4: voice is schema-typed. Audio path lives on
-        // `voice.generation.audio.path` (tts/clone) or
-        // `voice.audio.path` if it's a server-side ServerAsset
-        // (upload). LocalAsset upload-mode = still uploading,
-        // surface the same "missing audio" error.
+        // Audio path lives on `voice.generation.audio.path` (tts /
+        // clone) or `voice.audio.path` (upload mode, once the file
+        // has uploaded — LocalAsset means still uploading and surfaces
+        // the same "missing audio" error).
         const audio_path = (() => {
           const v = state.voice;
           if (!v || typeof v !== 'object') return '';
@@ -203,8 +202,8 @@ export default function RenderDashboard({
         return { width: Number(w), height: Number(h), label: `${w}×${h}` };
       }
     }
-    // Phase 2c: state.resolution is a ResolutionKey now — look up
-    // dimensions via RESOLUTION_META.
+    // state.resolution is a ResolutionKey — look up dimensions via
+    // RESOLUTION_META.
     const key = state.resolution;
     if (!key) return null;
     const meta = RESOLUTION_META[key as keyof typeof RESOLUTION_META];

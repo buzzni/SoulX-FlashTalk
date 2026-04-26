@@ -7,7 +7,7 @@
  * picker and voice clone uploader. Both sub-modes share the script
  * editor + speed + advanced + generate CTA.
  *
- * `voice.source` carries both decisions (Phase 2c.4 schema):
+ * `voice.source` carries both decisions:
  *   'tts'    → AI on, stock voice
  *   'clone'  → AI on, cloned voice
  *   'upload' → AI off, raw audio bypass
@@ -221,7 +221,9 @@ export default function Step3Audio({ state, update }: Step3AudioProps) {
     }
   };
 
-  const generating = tts.isLoading || cloner.isLoading || audioUpload.isLoading;
+  // audioUpload runs in upload-mode only, where the AI Generate CTA
+  // doesn't render; safe to scope `generating` to the AI hooks.
+  const generating = tts.isLoading || cloner.isLoading;
   const canGenerate = (() => {
     if (voice.source === 'upload') return false;
     if (!combinedScript) return false;

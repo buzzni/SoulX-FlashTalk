@@ -12,27 +12,18 @@
  */
 
 import { API_BASE, getAuthHeaders, parseResponse } from './http';
-import { stringifyResolution } from './mapping';
+import { paragraphsToScript, stringifyResolution } from './mapping';
 import type { Background, Composition, Host, ResolutionKey, Voice } from '../wizard/schema';
 import { RESOLUTION_META } from '../wizard/schema';
 import { isServerAsset } from '../wizard/normalizers';
 
 export interface GenerateVideoInput {
   state: {
-    /** Schema-typed (Phase 2b). Provenance is built via
-     * `hostProvenance` below. */
     host?: Host | null;
-    /** Schema-typed (Phase 2c). Provenance built via
-     * `compositionProvenance` below. */
     composition?: Composition | null;
     products?: Array<{ name?: string; path?: string; url?: string }>;
-    /** Schema-typed (Phase 2a) — see wizard/schema.ts Background.
-     * Provenance snapshot is built via `backgroundProvenance` below. */
     background?: Background | null;
-    /** Schema-typed (Phase 2c.4). Tagged union over source. */
     voice?: Voice | null;
-    /** Schema-typed (Phase 2c). Just the key — meta lookup via
-     * RESOLUTION_META[resKey]. */
     resolution: ResolutionKey | null;
     imageQuality?: string;
     playlist_id?: string | null;
@@ -55,15 +46,12 @@ export async function generateVideo(
   // host_image_path here is the FINAL composite frame (Step 2 selection) — that's
   // the single frame FlashTalk animates. The Step 1 host-only image is not sent.
   const body = new FormData();
-  // Phase 2b: host is schema-typed (selectedPath lives on
-  // generation.selected when state === 'ready'). Composite path
-  // remains legacy until Phase 2c.
+  // Selected path lives on `generation.selected` for both host and
+  // composition when state === 'ready'.
   const hostSelectedPath =
     state.host?.generation?.state === 'ready'
       ? state.host.generation.selected?.path ?? null
       : null;
-  // Phase 2c: composition is schema-typed (selected lives on
-  // generation.selected when state === 'ready').
   const compositeSelectedPath =
     state.composition?.generation?.state === 'ready'
       ? state.composition.generation.selected?.path ?? null
@@ -72,8 +60,6 @@ export async function generateVideo(
   if (composite) body.append('host_image_path', composite);
   body.append('audio_path', audio.audio_path);
   body.append('audio_source', 'upload');
-  // Phase 2c: resolution is just a ResolutionKey now — pull
-  // width/height from the canonical meta table.
   const resKey = (state.resolution ?? '448p') as ResolutionKey;
   body.append('resolution', stringifyResolution(RESOLUTION_META[resKey]));
   // Playlist assignment (per docs/playlist-feature-plan.md decision #3).
@@ -255,12 +241,13 @@ function voiceProvenance(v: unknown): {
       stability: null, style: null, similarity: null, speed: null,
     };
   }
-  // Script is the breath-joined paragraphs string the backend expects
-  // — same convention paragraphsToScript uses for /api/elevenlabs/generate.
-  const script = voice.script.paragraphs
-    .map((p) => p.trim())
-    .filter((p) => p.length > 0)
-    .join(' [breath] ');
+  // Provenance can outrun the 5000-char TTS limit (a long script is
+  // legal in upload mode), so use a generous cap rather than the
+  // default that throws.
+  const script = paragraphsToScript(voice.script.paragraphs, {
+    source: voice.source === 'upload' ? 'upload' : 'tts',
+    maxChars: Number.MAX_SAFE_INTEGER,
+  });
   switch (voice.source) {
     case 'tts':
       return {
@@ -289,14 +276,7 @@ function voiceProvenance(v: unknown): {
         source: 'upload',
         voiceId: null,
         voiceName: null,
-        // upload-mode `script` is subtitle text — same string format
-        // (paragraphs joined) but no [breath] tags since there's no
-        // TTS run. paragraphsToScript with `source: 'upload'` would
-        // use \n\n — keeping that for the on-screen subtitle line.
-        script: voice.script.paragraphs
-          .map((p) => p.trim())
-          .filter((p) => p.length > 0)
-          .join('\n\n'),
+        script,
         stability: null,
         style: null,
         similarity: null,
