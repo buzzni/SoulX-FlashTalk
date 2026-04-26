@@ -63,11 +63,11 @@ interface Step3AudioState {
   resolution: ResolutionKey;
   host?: Host | null;
   composition?: Composition | null;
-  playlist_id?: string | null;
+  playlistId?: string | null;
 }
 
 export interface Step3AudioProps {
-  state: Step3AudioState & Record<string, unknown>;
+  state: Step3AudioState;
   update: UpdateFn;
 }
 
@@ -411,9 +411,9 @@ export default function Step3Audio({ state, update }: Step3AudioProps) {
 
         <Card title="플레이리스트" subtitle="만들어진 영상을 묶어두는 폴더예요. 비워두면 미지정에 저장됩니다.">
           <PlaylistPicker
-            selected={state.playlist_id ?? null}
+            selected={state.playlistId ?? null}
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            onChange={(pid) => update((s: any) => ({ ...s, playlist_id: pid }))}
+            onChange={(pid) => update((s: any) => ({ ...s, playlistId: pid }))}
           />
         </Card>
       </div>
@@ -432,7 +432,7 @@ export default function Step3Audio({ state, update }: Step3AudioProps) {
 }
 
 interface RenderBoothProps {
-  state: Step3AudioState & Record<string, unknown>;
+  state: Step3AudioState;
   estDuration: number;
 }
 

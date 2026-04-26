@@ -43,9 +43,16 @@ import {
 } from '../wizard/normalizers';
 
 // ────────────────────────────────────────────────────────────────────
-// Wizard state shape — every slice is schema-typed. Adding a field
-// requires updating schema.ts, normalizers (migrate + persist), and
-// api-mappers.
+// Wizard state shape — every slice is schema-typed. The store mirrors
+// `WizardStateSchema` from wizard/schema.ts; adding a field requires
+// updating both, plus normalizers (migrate + persist) and api-mappers.
+//
+// Lane B.5 (D11): retired the dead top-level `script: string` (voice
+// already owns the script via `voice.script`), retired the
+// `[k: string]: unknown` escape hatch, and added top-level
+// `playlistId: string | null` to match the schema. Lane C bumps the
+// persist envelope to v8 so `safeParse` can run on hydrate without
+// rejecting every existing user blob.
 // ────────────────────────────────────────────────────────────────────
 
 export interface WizardState {
@@ -54,16 +61,16 @@ export interface WizardState {
   background: Background;
   composition: Composition;
   voice: Voice;
-  script: string;
   /** Just the key — full meta (width/height/size/speed/label) is
    * derived via `resolutionMeta` from wizard/schema. */
   resolution: ResolutionKey;
   imageQuality: string;
+  /** Optional playlist to bundle the resulting video into. Null = 미지정. */
+  playlistId: string | null;
   /** Bumped on every `reset()`. Step pages use this as a React key so
    * "처음부터 다시" forces a remount, clearing hook-local state (variants,
    * prevSelected, etc.) without requiring a page refresh. */
   wizardEpoch: number;
-  [k: string]: unknown;
 }
 
 // ────────────────────────────────────────────────────────────────────
@@ -78,9 +85,9 @@ export const INITIAL_WIZARD_STATE: WizardState = {
   background: INITIAL_BACKGROUND,
   composition: INITIAL_COMPOSITION,
   voice: INITIAL_VOICE,
-  script: '',
   resolution: '448p',
   imageQuality: '1K',
+  playlistId: null,
   wizardEpoch: 0,
 };
 
@@ -96,9 +103,9 @@ export interface WizardActions {
   setBackground: (next: Background | ((prev: Background) => Background)) => void;
   setComposition: (next: Composition | ((prev: Composition) => Composition)) => void;
   setVoice: (next: Voice | ((prev: Voice) => Voice)) => void;
-  setScript: (s: string) => void;
   setResolution: (r: ResolutionKey) => void;
   setImageQuality: (q: string) => void;
+  setPlaylistId: (id: string | null) => void;
   /** Whole-tree replace-or-patch. Used by step pages still on the
    * legacy `{state, update}` props pattern. To be replaced by per-slice
    * selectors when Phase 3 lands. */
@@ -128,6 +135,12 @@ function migrateLegacyStateOnce(): void {
 
     // Each slice runs through migrateLegacyToSchema, which translates
     // its bag of optional flat fields into the right tagged-union shape.
+    const playlistRaw =
+      typeof legacy.playlist_id === 'string'
+        ? legacy.playlist_id
+        : typeof legacy.playlistId === 'string'
+          ? legacy.playlistId
+          : null;
     const merged: WizardState = {
       ...INITIAL_WIZARD_STATE,
       host: migrateLegacyToSchema({ host: legacy.host }).host,
@@ -135,10 +148,10 @@ function migrateLegacyStateOnce(): void {
       background: migrateLegacyToSchema({ background: legacy.background }).background,
       composition: migrateLegacyToSchema({ composition: legacy.composition }).composition,
       voice: migrateLegacyToSchema({ voice: legacy.voice }).voice,
-      script: typeof legacy.script === 'string' ? legacy.script : '',
       resolution: migrateLegacyToSchema({ resolution: legacy.resolution }).resolution,
       imageQuality:
         (typeof legacy.imageQuality === 'string' ? legacy.imageQuality : INITIAL_WIZARD_STATE.imageQuality),
+      playlistId: playlistRaw,
     };
 
     // Write to the new key using Zustand's persist envelope shape so
@@ -214,6 +227,57 @@ function partializeForPersist(s: WizardState): WizardState {
 }
 
 // ────────────────────────────────────────────────────────────────────
+// Persist envelope migrate fn — exported for tests so we can drive
+// shape changes through it directly without a persist round-trip.
+//
+// Versioned migrations stack: each `if (fromVersion < N)` block lifts
+// the blob one schema generation. The final cast is `as unknown as
+// WizardState` because TypeScript can't statically verify that the
+// staged mutations fully shaped the object — it has, but TS doesn't
+// follow side-effects through unknown index access.
+// ────────────────────────────────────────────────────────────────────
+
+export function migrateWizardEnvelope(
+  persisted: unknown,
+  fromVersion: number,
+): WizardState {
+  if (!persisted || typeof persisted !== 'object') {
+    return persisted as WizardState;
+  }
+  const p = persisted as Record<string, unknown>;
+  if (fromVersion < 2) {
+    p.background = migrateLegacyToSchema({ background: p.background }).background;
+  }
+  if (fromVersion < 3) {
+    p.host = migrateLegacyToSchema({ host: p.host }).host;
+  }
+  if (fromVersion < 4) {
+    p.resolution = migrateLegacyToSchema({ resolution: p.resolution }).resolution;
+  }
+  if (fromVersion < 5) {
+    p.products = migrateLegacyToSchema({ products: p.products }).products;
+  }
+  if (fromVersion < 6) {
+    p.composition = migrateLegacyToSchema({ composition: p.composition }).composition;
+  }
+  if (fromVersion < 7) {
+    p.voice = migrateLegacyToSchema({ voice: p.voice }).voice;
+  }
+  if (fromVersion < 8) {
+    // Hoist any stray `playlist_id` (snake_case) into the typed
+    // top-level field. Prefer an existing camelCase value if both keys
+    // happen to coexist. Drop the now-dead top-level `script: string`
+    // (voice owns the script via voice.script.paragraphs[]).
+    if (typeof p.playlist_id === 'string' && typeof p.playlistId !== 'string') {
+      p.playlistId = p.playlist_id;
+    }
+    delete p.playlist_id;
+    delete p.script;
+  }
+  return p as unknown as WizardState;
+}
+
+// ────────────────────────────────────────────────────────────────────
 // Fire the migration exactly once per page load, BEFORE Zustand's
 // persist middleware reads storage.
 // ────────────────────────────────────────────────────────────────────
@@ -254,9 +318,9 @@ export const useWizardStore = create<WizardStore>()(
         set((s) => ({
           voice: typeof next === 'function' ? next(s.voice) : next,
         })),
-      setScript: (script) => set({ script }),
       setResolution: (resolution) => set({ resolution }),
       setImageQuality: (imageQuality) => set({ imageQuality }),
+      setPlaylistId: (playlistId) => set({ playlistId }),
 
       updateState: (updater) =>
         set((s) => {
@@ -294,30 +358,14 @@ export const useWizardStore = create<WizardStore>()(
       //       state machine. Was a flat object with `generated`,
       //       `generatedAudioPath/Url`, `cloneSample`, `uploadedAudio`,
       //       `paragraphs`, `script`, plus advanced sliders.
-      version: 7,
-      migrate: (persisted, fromVersion) => {
-        if (!persisted || typeof persisted !== 'object') return persisted as WizardState;
-        const p = persisted as Record<string, unknown>;
-        if (fromVersion < 2) {
-          p.background = migrateLegacyToSchema({ background: p.background }).background;
-        }
-        if (fromVersion < 3) {
-          p.host = migrateLegacyToSchema({ host: p.host }).host;
-        }
-        if (fromVersion < 4) {
-          p.resolution = migrateLegacyToSchema({ resolution: p.resolution }).resolution;
-        }
-        if (fromVersion < 5) {
-          p.products = migrateLegacyToSchema({ products: p.products }).products;
-        }
-        if (fromVersion < 6) {
-          p.composition = migrateLegacyToSchema({ composition: p.composition }).composition;
-        }
-        if (fromVersion < 7) {
-          p.voice = migrateLegacyToSchema({ voice: p.voice }).voice;
-        }
-        return p as WizardState;
-      },
+      //   v8: WizardState shape reconciled (Lane B.5 / D11). Top-level
+      //       `script: string` retired (voice already owns it via
+      //       `voice.script`); top-level `playlistId: string | null`
+      //       hoisted from a stray `playlist_id` written via the now-
+      //       removed `[k:string]: unknown` escape hatch. Lane C adds
+      //       `safeParse`-on-hydrate hardening on top.
+      version: 8,
+      migrate: (persisted, fromVersion) => migrateWizardEnvelope(persisted, fromVersion),
     },
   ),
 );
