@@ -76,7 +76,9 @@ function persistAsset(a: ServerAsset | LocalAsset | null | undefined): ServerAss
   return null;
 }
 
-function persistHost(host: Host): Host {
+/** Drop transient-only fields from a Host. Exported for per-slice
+ * persisters (wizardStore.ts) — Phase 2b. */
+export function persistHost(host: Host): Host {
   // Drop transient input refs (File-typed); keep the schema input shape.
   const input: HostInput =
     host.input.kind === 'text'
@@ -207,14 +209,26 @@ function migrateHostVariants(raw: unknown): HostVariant[] {
     .map((v) => {
       const o = asObject(v);
       const seed = asNumber(o.seed, NaN);
-      const imageId = asString(o.imageId);
       const url = asString(o.url);
       const path = asString(o.path);
+      // Legacy variants didn't carry imageId — derive from path
+      // (filename stem without extension) to match the server-side
+      // identifier scheme.
+      const imageId = asString(o.imageId) || imageIdFromPath(path);
       // Drop placeholders / errors / transient URLs.
       if (o.placeholder || o.error || !url || !path || !imageId || isTransientUrl(url)) return null;
       return { seed, imageId, url, path } as HostVariant;
     })
     .filter((v): v is HostVariant => v !== null);
+}
+
+/** Filename stem (no extension) from a server path. Mirrors
+ * `api/mapping.imageIdFromPath` — duplicated here so wizard/* has no
+ * upstream import on api/*. */
+function imageIdFromPath(path: string): string {
+  const name = path.split('/').pop() || '';
+  if (!name) return '';
+  return name.endsWith('.png') ? name.slice(0, -4) : name;
 }
 
 function migrateHost(raw: unknown): Host {
@@ -241,18 +255,18 @@ function migrateHost(raw: unknown): Host {
 
   const variants = migrateHostVariants(r.variants);
   const generation: HostGeneration = (() => {
-    // Legacy `generated: true` + `selectedSeed`/`selectedImageId` → ready.
-    const generated = r.generated === true;
-    if (generated && variants.length > 0) {
-      const selectedImageId = asString(r.selectedImageId) || asString(r.selectedPath).split('/').pop()?.replace(/\.[^.]+$/, '');
-      const selected = variants.find((v) => v.imageId === selectedImageId) ?? null;
-      return { state: 'ready', batchId: null, variants, selected, prevSelected: null };
-    }
-    if (variants.length > 0) {
-      // Variants persist but no selection committed.
-      return { state: 'ready', batchId: null, variants, selected: null, prevSelected: null };
-    }
-    return { state: 'idle' };
+    if (variants.length === 0) return { state: 'idle' };
+    // Legacy "user picked one" signal — `generated: true` OR
+    // `selectedSeed`/`selectedImageId`/`selectedPath` present.
+    const selectedImageId =
+      asString(r.selectedImageId) ||
+      (asString(r.selectedPath) ? imageIdFromPath(asString(r.selectedPath)) : '');
+    const selectedSeed = asNumber(r.selectedSeed, NaN);
+    const selected =
+      variants.find((v) => v.imageId === selectedImageId) ??
+      variants.find((v) => v.seed === selectedSeed) ??
+      null;
+    return { state: 'ready', batchId: null, variants, selected, prevSelected: null };
   })();
 
   return {

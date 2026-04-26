@@ -459,10 +459,29 @@ describe('api.js — generateVideo attaches full provenance meta', () => {
   it('includes host, composition, products, background, voice, imageQuality in meta blob', async () => {
     const { generateVideo } = await import('../api.js');
     const state = {
+      // Phase 2b: schema-shaped host. input is a tagged union;
+      // generation is a state machine with `selected` carrying the
+      // committed pick.
       host: {
-        mode: 'image', selectedSeed: 42, selectedPath: '/srv/host_42.png', imageUrl: '/api/files/host_42.png',
-        faceRefPath: '/srv/face.png', outfitRefPath: null, outfitText: '베이지 니트',
-        faceStrength: 0.7, outfitStrength: 0.5, temperature: 1.0,
+        input: {
+          kind: 'image',
+          faceRef: { path: '/srv/face.png' },
+          outfitRef: null,
+          outfitText: '베이지 니트',
+          extraPrompt: '',
+          faceStrength: 0.7,
+          outfitStrength: 0.5,
+        },
+        temperature: 1.0,
+        generation: {
+          state: 'ready',
+          batchId: null,
+          variants: [
+            { seed: 42, imageId: 'host_42', url: '/api/files/host_42.png', path: '/srv/host_42.png' },
+          ],
+          selected: { seed: 42, imageId: 'host_42', url: '/api/files/host_42.png', path: '/srv/host_42.png' },
+          prevSelected: null,
+        },
       },
       composition: {
         selectedSeed: 77, selectedPath: '/srv/c_77.png', selectedUrl: '/api/files/c_77.png',

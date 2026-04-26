@@ -1,16 +1,17 @@
 /**
  * Step1Host — wizard Step 1 container.
  *
- * Post-Phase-4a decomposition: this file is the orchestrator. The
- * 4 sub-components handle their own UI; the container handles
- * (a) wiring them to the wizardStore, (b) running the host
- * generation stream via useHostGeneration, (c) selecting a variant
- * on click.
+ * Phase 2b: schema-typed. The host slice in the store is now
+ *   { input: HostInput (text | image union), temperature, generation }
  *
- * Kept byte-compatible with the legacy `{state, update}` prop
- * interface so HostStudio.jsx doesn't need to change this phase —
- * Phase 5 will drop props entirely as steps move to URL-scoped
- * routes and subscribe to the store directly.
+ * This file orchestrates the typed input editors (HostTextForm /
+ * HostReferenceUploader) and the streaming hook. It wires user edits
+ * back to the store via replace-style `setHost`. Selection of a
+ * candidate is also a store write — moves `generation.selected`.
+ *
+ * Kept on the legacy `{state, update}` prop interface for now —
+ * Phase 3 introduces per-slice selectors (useHostSlice +
+ * useWizardActions) and drops the shared `update` callback.
  */
 
 import { useRef } from 'react';
@@ -21,20 +22,21 @@ import { WizardCard as Card } from '@/components/wizard-card';
 import { Segmented } from '@/components/segmented';
 import { StepHeading } from '@/routes/StepHeading';
 import { useHostGeneration, type HostVariant } from '../../hooks/useHostGeneration';
-import { imageIdFromPath, makeRandomSeeds } from '../../api/mapping';
+import { makeRandomSeeds } from '../../api/mapping';
 import { selectHost, type HostGenerateInput } from '../../api/host';
 import type { UploadResult } from '../../api/upload';
+import { useWizardStore } from '../../stores/wizardStore';
+import type { Host, HostInput, ServerAsset, LocalAsset } from '@/wizard/schema';
+import { isServerAsset } from '@/wizard/normalizers';
 import { HostTextForm } from './HostTextForm';
 import { HostReferenceUploader, type RefFile } from './HostReferenceUploader';
 import { HostControls } from './HostControls';
 import { HostVariantGrid } from './HostVariantGrid';
 
-// Default seeds used for the first press — two users with the same
-// input see the same 4 outputs. Retries use fresh randoms.
 const DEFAULT_SEEDS = [10, 42, 77, 128];
 
-// Thin update type matching the legacy HostStudio contract.
-type UpdateFn = (updater: (state: unknown) => unknown) => void;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type UpdateFn = (updater: (state: any) => any) => void;
 
 export interface Step1HostProps {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -42,119 +44,169 @@ export interface Step1HostProps {
   update: UpdateFn;
 }
 
+/** Convert schema asset to the legacy RefFile shape for sub-components
+ * still on the legacy prop API. Sub-components migrate one at a time. */
+function assetToRefFile(asset: ServerAsset | LocalAsset | null): RefFile | null {
+  if (!asset) return null;
+  if (isServerAsset(asset)) {
+    return { name: asset.name, url: asset.url, size: undefined, type: undefined };
+  }
+  // LocalAsset
+  return { name: asset.name, url: asset.previewUrl, size: asset.file.size, type: asset.file.type };
+}
+
 export default function Step1Host({ state, update }: Step1HostProps) {
-  const host = state.host as {
-    mode: 'text' | 'image';
-    prompt?: string;
-    negativePrompt?: string;
-    builder?: Record<string, string>;
-    faceRef?: RefFile | null;
-    outfitRef?: RefFile | null;
-    faceRefPath?: string | null;
-    outfitRefPath?: string | null;
-    outfitText?: string;
-    extraPrompt?: string;
-    faceStrength?: number;
-    outfitStrength?: number;
-    temperature?: number;
-    generated?: boolean;
-    selectedSeed?: number | null;
-    variants?: HostVariant[];
-  };
+  const host = state.host as Host;
+  const setHost = useWizardStore((s) => s.setHost);
 
   const gen = useHostGeneration();
 
   // Counts every "쇼호스트 만들기" press (incl. 다시 만들기). Attempt 0
-  // uses DEFAULT_SEEDS; attempt 1+ uses fresh randoms. Persisted
-  // variants from a previous session start at 1.
-  const attemptsRef = useRef<number>((host.variants ?? []).length > 0 ? 1 : 0);
+  // uses DEFAULT_SEEDS; attempt 1+ uses fresh randoms.
+  const attemptsRef = useRef<number>(host.generation.state === 'ready' ? 1 : 0);
 
-  const setField = <K extends keyof typeof host>(k: K, v: (typeof host)[K]) =>
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    update((s: any) => ({ ...s, host: { ...s.host, [k]: v } }));
+  const setInput = (next: HostInput | ((prev: HostInput) => HostInput)) =>
+    setHost((prev) => ({
+      ...prev,
+      input: typeof next === 'function' ? next(prev.input) : next,
+    }));
 
-  const faceReady = !!host.faceRef;
-  const promptReady = host.mode === 'text' ? (host.prompt?.length ?? 0) >= 15 : faceReady;
+  const setTemperature = (t: number) => setHost((prev) => ({ ...prev, temperature: t }));
+
+  const switchMode = (mode: 'text' | 'image') => {
+    if (host.input.kind === mode) return;
+    if (mode === 'text') {
+      setInput({
+        kind: 'text',
+        prompt: '',
+        builder: {},
+        negativePrompt: '',
+        extraPrompt: '',
+      });
+    } else {
+      setInput({
+        kind: 'image',
+        faceRef: null,
+        outfitRef: null,
+        outfitText: '',
+        extraPrompt: '',
+        faceStrength: 0.7,
+        outfitStrength: 0.5,
+      });
+    }
+  };
+
+  // Readiness — text mode: 15+ char prompt. Image mode: face ref present.
+  const promptReady =
+    host.input.kind === 'text'
+      ? host.input.prompt.length >= 15
+      : host.input.faceRef !== null;
 
   const handleGenerate = async () => {
     const attempt = attemptsRef.current;
     const seeds = attempt === 0 ? DEFAULT_SEEDS : makeRandomSeeds(4);
     attemptsRef.current = attempt + 1;
 
-    const input: HostGenerateInput & { imageSize?: '1K' | '2K' | '4K' } = {
-      ...(host as HostGenerateInput),
-      imageSize: (state.imageQuality as '1K' | '2K' | '4K') || '1K',
-    };
-    // Seeds param on retry only — first call lets the backend's
-    // deterministic default win ("two users see the same set").
-    await gen.regenerate(input, attempt === 0 ? undefined : seeds);
-    // If the backend used its default, the hook's `regenerate` will
-    // pass seeds=undefined which falls back to evt.seeds from the
-    // init frame — we don't need to wire it locally.
-    void seeds;
+    // Schema → backend HostGenerateInput. Inline mapper (will move to
+    // wizard/api-mappers when more slices migrate).
+    const apiInput: HostGenerateInput & { imageSize?: '1K' | '2K' | '4K' } = (() => {
+      const base = {
+        temperature: host.temperature,
+        imageSize: (state.imageQuality as '1K' | '2K' | '4K') || '1K',
+      } as HostGenerateInput & { imageSize: '1K' | '2K' | '4K' };
+      if (host.input.kind === 'text') {
+        return {
+          ...base,
+          mode: 'text',
+          prompt: host.input.prompt,
+          builder: Object.keys(host.input.builder).length > 0 ? host.input.builder : null,
+          negativePrompt: host.input.negativePrompt,
+          extraPrompt: host.input.extraPrompt,
+        };
+      }
+      // image mode — pass server paths only
+      const facePath = isServerAsset(host.input.faceRef) ? host.input.faceRef.path : null;
+      const outfitPath = isServerAsset(host.input.outfitRef) ? host.input.outfitRef.path : null;
+      const mode: HostGenerateInput['mode'] =
+        facePath && outfitPath ? 'face-outfit' : facePath ? 'style-ref' : 'text';
+      return {
+        ...base,
+        mode,
+        faceRefPath: facePath,
+        outfitRefPath: outfitPath,
+        faceRef: host.input.faceRef ? {} : undefined,
+        outfitRef: host.input.outfitRef ? {} : undefined,
+        faceStrength: host.input.faceStrength,
+        outfitStrength: host.input.outfitStrength,
+        outfitText: host.input.outfitText,
+        extraPrompt: host.input.extraPrompt,
+      };
+    })();
+
+    await gen.regenerate(apiInput, attempt === 0 ? undefined : seeds);
   };
 
   const handleSelectVariant = (v: HostVariant) => {
-    const imageId = v.imageId ?? imageIdFromPath(v.path);
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    update((s: any) => ({
-      ...s,
-      host: {
-        ...s.host,
-        generated: true,
-        imageUrl: v.url ?? null,
-        selectedPath: v.path ?? null,
-        selectedSeed: v.seed,
-        selectedImageId: imageId,
-        _gradient: v._gradient ?? null,
-      },
-    }));
-    if (imageId) {
-      selectHost(imageId).catch((e) => {
-        // eslint-disable-next-line no-console
-        console.warn('host select sync failed (non-fatal):', e);
-      });
-    }
+    if (!v.url || !v.path || !v.imageId) return;
+    setHost((prev) => {
+      if (prev.generation.state !== 'ready' && prev.generation.state !== 'streaming') return prev;
+      const variants = prev.generation.state === 'ready' ? prev.generation.variants : [];
+      const prevSelected = prev.generation.state === 'ready' ? prev.generation.prevSelected : null;
+      return {
+        ...prev,
+        generation: {
+          state: 'ready',
+          batchId: prev.generation.state === 'ready' ? prev.generation.batchId : null,
+          variants,
+          selected: { seed: v.seed, imageId: v.imageId as string, url: v.url as string, path: v.path as string },
+          prevSelected,
+        },
+      };
+    });
+    selectHost(v.imageId).catch((e) => {
+      // eslint-disable-next-line no-console
+      console.warn('host select sync failed (non-fatal):', e);
+    });
   };
 
   const handleFaceSelected = (ref: RefFile | null, uploaded?: UploadResult) => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    update((s: any) => ({
-      ...s,
-      host: {
-        ...s.host,
-        faceRef: uploaded
-          ? { name: ref?.name, size: ref?.size, type: ref?.type, url: uploaded.url }
-          : ref,
-        faceRefPath: uploaded?.path ?? (ref == null ? null : s.host.faceRefPath),
-      },
-    }));
+    setInput((prev) => {
+      if (prev.kind !== 'image') return prev;
+      // Server upload completed — store as ServerAsset.
+      if (uploaded?.path) {
+        return {
+          ...prev,
+          faceRef: { path: uploaded.path, url: uploaded.url, name: ref?.name },
+        };
+      }
+      // No upload result — clear ref or leave as-is depending on ref.
+      return { ...prev, faceRef: ref ? prev.faceRef : null };
+    });
   };
+
   const handleOutfitSelected = (ref: RefFile | null, uploaded?: UploadResult) => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    update((s: any) => ({
-      ...s,
-      host: {
-        ...s.host,
-        outfitRef: uploaded
-          ? { name: ref?.name, size: ref?.size, type: ref?.type, url: uploaded.url }
-          : ref,
-        outfitRefPath: uploaded?.path ?? (ref == null ? null : s.host.outfitRefPath),
-      },
-    }));
+    setInput((prev) => {
+      if (prev.kind !== 'image') return prev;
+      if (uploaded?.path) {
+        return {
+          ...prev,
+          outfitRef: { path: uploaded.path, url: uploaded.url, name: ref?.name },
+        };
+      }
+      return { ...prev, outfitRef: ref ? prev.outfitRef : null };
+    });
   };
 
   const variants = gen.variants;
   const prevSelected = gen.prevSelected;
   const selectedImageId =
-    (host as { selectedImageId?: string | null }).selectedImageId ??
-    imageIdFromPath((host as { selectedPath?: string | null }).selectedPath);
+    host.generation.state === 'ready' && host.generation.selected
+      ? host.generation.selected.imageId
+      : null;
+  const generated = host.generation.state === 'ready' && host.generation.selected !== null;
 
   return (
     <div className="step-page-split step-page-split--40-60">
-      {/* LEFT — casting brief: form for prompt/builder OR reference uploads.
-       * Step heading sits at the top of the left column so the
-       * audition gallery on the right starts flush at the top edge. */}
       <div className="step-page-form">
         <StepHeading
           step={1}
@@ -166,36 +218,8 @@ export default function Step1Host({ state, update }: Step1HostProps) {
         <Card>
           <div className="flex justify-between items-center">
             <Segmented
-              value={host.mode}
-              onChange={(v: 'text' | 'image') => {
-                // Mode switch must clear the OTHER mode's inputs so the
-                // backend doesn't get a stale faceRef/outfitRef/etc when
-                // the user picked "설명으로 만들기" — see backend defense
-                // in modules/host_generator.py _sanitize_refs_by_mode.
-                // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                update((s: any) => ({
-                  ...s,
-                  host:
-                    v === 'text'
-                      ? {
-                          ...s.host,
-                          mode: 'text',
-                          faceRef: null,
-                          faceRefPath: null,
-                          outfitRef: null,
-                          outfitRefPath: null,
-                          outfitText: '',
-                          extraPrompt: '',
-                        }
-                      : {
-                          ...s.host,
-                          mode: 'image',
-                          prompt: '',
-                          negativePrompt: '',
-                          builder: {},
-                        },
-                }));
-              }}
+              value={host.input.kind}
+              onChange={switchMode}
               options={[
                 { value: 'text', label: '설명으로 만들기', icon: 'wand' },
                 { value: 'image', label: '사진으로 만들기', icon: 'image' },
@@ -206,39 +230,57 @@ export default function Step1Host({ state, update }: Step1HostProps) {
             </Badge>
           </div>
 
-          {host.mode === 'text' ? (
+          {host.input.kind === 'text' ? (
             <HostTextForm
-              prompt={host.prompt ?? ''}
-              negativePrompt={host.negativePrompt ?? ''}
-              builder={host.builder ?? {}}
-              onPromptChange={(s) => setField('prompt', s)}
-              onNegativePromptChange={(s) => setField('negativePrompt', s)}
-              onBuilderChange={(b) => setField('builder', b)}
+              prompt={host.input.prompt}
+              negativePrompt={host.input.negativePrompt}
+              builder={host.input.builder}
+              onPromptChange={(s) =>
+                setInput((prev) => (prev.kind === 'text' ? { ...prev, prompt: s } : prev))
+              }
+              onNegativePromptChange={(s) =>
+                setInput((prev) =>
+                  prev.kind === 'text' ? { ...prev, negativePrompt: s } : prev,
+                )
+              }
+              onBuilderChange={(b) =>
+                setInput((prev) => (prev.kind === 'text' ? { ...prev, builder: b } : prev))
+              }
             />
           ) : (
             <HostReferenceUploader
-              faceRef={host.faceRef ?? null}
-              outfitRef={host.outfitRef ?? null}
-              outfitText={host.outfitText ?? ''}
-              extraPrompt={host.extraPrompt ?? ''}
-              faceStrength={host.faceStrength ?? 0.7}
-              outfitStrength={host.outfitStrength ?? 0.5}
+              faceRef={assetToRefFile(host.input.faceRef)}
+              outfitRef={assetToRefFile(host.input.outfitRef)}
+              outfitText={host.input.outfitText}
+              extraPrompt={host.input.extraPrompt}
+              faceStrength={host.input.faceStrength}
+              outfitStrength={host.input.outfitStrength}
               onFaceSelected={handleFaceSelected}
               onOutfitSelected={handleOutfitSelected}
-              onOutfitTextChange={(s) => setField('outfitText', s)}
-              onExtraPromptChange={(s) => setField('extraPrompt', s)}
-              onFaceStrengthChange={(v) => setField('faceStrength', v)}
-              onOutfitStrengthChange={(v) => setField('outfitStrength', v)}
+              onOutfitTextChange={(s) =>
+                setInput((prev) => (prev.kind === 'image' ? { ...prev, outfitText: s } : prev))
+              }
+              onExtraPromptChange={(s) =>
+                setInput((prev) => (prev.kind === 'image' ? { ...prev, extraPrompt: s } : prev))
+              }
+              onFaceStrengthChange={(v) =>
+                setInput((prev) => (prev.kind === 'image' ? { ...prev, faceStrength: v } : prev))
+              }
+              onOutfitStrengthChange={(v) =>
+                setInput((prev) =>
+                  prev.kind === 'image' ? { ...prev, outfitStrength: v } : prev,
+                )
+              }
             />
           )}
 
           <HostControls
-            temperature={host.temperature ?? 0.7}
+            temperature={host.temperature}
             imageQuality={(state.imageQuality as '1K' | '2K' | '4K') || '1K'}
             errorMsg={gen.error}
             generating={gen.isLoading}
             canGenerate={promptReady}
-            onTemperatureChange={(v) => setField('temperature', v)}
+            onTemperatureChange={setTemperature}
             onImageQualityChange={(v) =>
               // eslint-disable-next-line @typescript-eslint/no-explicit-any
               update((s: any) => ({ ...s, imageQuality: v }))
@@ -248,17 +290,14 @@ export default function Step1Host({ state, update }: Step1HostProps) {
         </Card>
       </div>
 
-      {/* RIGHT — audition gallery. Codex framing: candidates feel
-       * "auditioned, not generated". Empty / loading / picked states
-       * live in AuditionGallery. */}
       <div className="step-page-canvas">
         <AuditionGallery
-          mode={host.mode}
+          mode={host.input.kind}
           variants={variants}
           prevSelected={prevSelected}
           selectedImageId={selectedImageId}
           isLoading={gen.isLoading}
-          generated={!!host.generated}
+          generated={generated}
           onSelect={handleSelectVariant}
           onRegenerate={handleGenerate}
         />

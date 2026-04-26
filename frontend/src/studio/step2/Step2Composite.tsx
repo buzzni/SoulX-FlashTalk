@@ -118,9 +118,16 @@ export default function Step2Composite({ state, update }: Step2CompositeProps) {
       }
     }
 
+    // Phase 2b: host is schema-typed. selectedPath comes from
+    // generation.selected when state === 'ready'.
+    const hostSelectedPath =
+      state.host?.generation?.state === 'ready'
+        ? state.host.generation.selected?.path ?? null
+        : null;
+
     await gen.regenerate(
       {
-        host: { selectedPath: state.host?.selectedPath ?? null },
+        host: { selectedPath: hostSelectedPath },
         products: uploaded.filter((p) => p.path) as CompositeInputProducts,
         background: backgroundToLegacyApi(bg),
         composition: composition as unknown as CompositeInputComp,

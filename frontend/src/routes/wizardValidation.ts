@@ -23,7 +23,11 @@ export interface WizardValidity {
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export function computeValidity(state: any): WizardValidity {
   const v: WizardValidity = { 1: false, 2: false, 3: false };
-  v[1] = !!(state?.host?.generated || state?.host?.imageUrl);
+  // Phase 2b: host is schema-typed. Step 1 is satisfied iff a candidate
+  // has been picked (generation.state === 'ready' && selected !== null).
+  v[1] =
+    state?.host?.generation?.state === 'ready' &&
+    state?.host?.generation?.selected != null;
   v[2] = v[1] && !!state?.composition?.generated;
   v[3] =
     v[2] &&

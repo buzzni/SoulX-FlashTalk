@@ -13,25 +13,14 @@
 
 import { API_BASE, getAuthHeaders, parseResponse } from './http';
 import { stringifyResolution } from './mapping';
-import type { Background } from '../wizard/schema';
+import type { Background, Host } from '../wizard/schema';
 import { isServerAsset } from '../wizard/normalizers';
 
 export interface GenerateVideoInput {
   state: {
-    host?: {
-      mode?: string;
-      selectedSeed?: number | null;
-      selectedPath?: string | null;
-      imageUrl?: string | null;
-      prompt?: string;
-      negativePrompt?: string;
-      faceRefPath?: string | null;
-      outfitRefPath?: string | null;
-      outfitText?: string;
-      faceStrength?: number | null;
-      outfitStrength?: number | null;
-      temperature?: number | null;
-    } | null;
+    /** Schema-typed (Phase 2b). Provenance is built via
+     * `hostProvenance` below. */
+    host?: Host | null;
     composition?: {
       selectedSeed?: number | null;
       selectedPath?: string | null;
@@ -77,7 +66,14 @@ export async function generateVideo(
   // host_image_path here is the FINAL composite frame (Step 2 selection) — that's
   // the single frame FlashTalk animates. The Step 1 host-only image is not sent.
   const body = new FormData();
-  const composite = state.composition?.selectedPath || state.host?.selectedPath;
+  // Phase 2b: host is schema-typed (selectedPath lives on
+  // generation.selected when state === 'ready'). Composite path
+  // remains legacy until Phase 2c.
+  const hostSelectedPath =
+    state.host?.generation?.state === 'ready'
+      ? state.host.generation.selected?.path ?? null
+      : null;
+  const composite = state.composition?.selectedPath || hostSelectedPath;
   if (composite) body.append('host_image_path', composite);
   body.append('audio_path', audio.audio_path);
   body.append('audio_source', 'upload');
@@ -90,20 +86,7 @@ export async function generateVideo(
   // so the queue entry + manifest shape doesn't change between refactor
   // phases (frontend ProvenanceCard / backend _synthesize_result rely on it).
   const meta = {
-    host: {
-      mode: state.host?.mode ?? 'text',
-      selectedSeed: state.host?.selectedSeed ?? null,
-      selectedPath: state.host?.selectedPath ?? null,
-      imageUrl: state.host?.imageUrl ?? null,
-      prompt: state.host?.prompt ?? '',
-      negativePrompt: state.host?.negativePrompt ?? '',
-      faceRefPath: state.host?.faceRefPath ?? null,
-      outfitRefPath: state.host?.outfitRefPath ?? null,
-      outfitText: state.host?.outfitText ?? '',
-      faceStrength: state.host?.faceStrength ?? null,
-      outfitStrength: state.host?.outfitStrength ?? null,
-      temperature: state.host?.temperature ?? null,
-    },
+    host: hostProvenance(state.host),
     composition: {
       selectedSeed: state.composition?.selectedSeed ?? null,
       selectedPath: state.composition?.selectedPath ?? null,
@@ -156,6 +139,51 @@ export async function generateVideo(
     signal,
   });
   return parseResponse(res, '영상 생성');
+}
+
+/** Schema-typed `Host` → the legacy provenance shape (`mode`,
+ * `selectedSeed`, `selectedPath`, `imageUrl`, plus per-mode fields).
+ * Keeps the manifest + ProvenanceCard wire format stable. */
+function hostProvenance(h: unknown): {
+  mode: string;
+  selectedSeed: number | null;
+  selectedPath: string | null;
+  imageUrl: string | null;
+  prompt: string;
+  negativePrompt: string;
+  faceRefPath: string | null;
+  outfitRefPath: string | null;
+  outfitText: string;
+  faceStrength: number | null;
+  outfitStrength: number | null;
+  temperature: number | null;
+} {
+  const host = (h ?? null) as Host | null;
+  if (!host || typeof host !== 'object' || !('input' in host) || !('generation' in host)) {
+    return {
+      mode: 'text', selectedSeed: null, selectedPath: null, imageUrl: null,
+      prompt: '', negativePrompt: '', faceRefPath: null, outfitRefPath: null,
+      outfitText: '', faceStrength: null, outfitStrength: null, temperature: null,
+    };
+  }
+  const selected =
+    host.generation.state === 'ready' ? host.generation.selected : null;
+  const text = host.input.kind === 'text' ? host.input : null;
+  const image = host.input.kind === 'image' ? host.input : null;
+  return {
+    mode: host.input.kind === 'image' ? 'image' : 'text',
+    selectedSeed: selected?.seed ?? null,
+    selectedPath: selected?.path ?? null,
+    imageUrl: selected?.url ?? null,
+    prompt: text?.prompt ?? '',
+    negativePrompt: text?.negativePrompt ?? '',
+    faceRefPath: image && isServerAsset(image.faceRef) ? image.faceRef.path : null,
+    outfitRefPath: image && isServerAsset(image.outfitRef) ? image.outfitRef.path : null,
+    outfitText: image?.outfitText ?? '',
+    faceStrength: image?.faceStrength ?? null,
+    outfitStrength: image?.outfitStrength ?? null,
+    temperature: host.temperature,
+  };
 }
 
 /** Schema-typed `Background` (from wizard/schema) → the legacy
