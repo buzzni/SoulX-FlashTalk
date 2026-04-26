@@ -1,0 +1,295 @@
+/**
+ * Normalizer + schema tests.
+ *
+ * Critical path: legacy persisted state (the shape that lived in
+ * wizardStore.ts INITIAL_WIZARD_STATE before Phase 1) must migrate
+ * into a valid schema state, with no `any` escape hatches.
+ *
+ * Persistence round-trip: toPersistable must drop File handles + blob
+ * URLs but keep server paths. migrateLegacy → toPersistable should
+ * be idempotent on the schema-shaped output.
+ */
+
+import { describe, expect, it } from 'vitest';
+import {
+  isBackgroundReady,
+  isHostReady,
+  isProductReady,
+  isVoiceReady,
+} from '../schema';
+import { migrateLegacy, toPersistable } from '../normalizers';
+
+describe('migrateLegacy', () => {
+  it('returns INITIAL_WIZARD_STATE for null/undefined/garbage', () => {
+    const a = migrateLegacy(null);
+    const b = migrateLegacy(undefined);
+    const c = migrateLegacy('a string');
+    expect(a.host.input.kind).toBe('text');
+    expect(a.background.kind).toBe('preset');
+    expect(b.host.input.kind).toBe('text');
+    expect(c.background.kind).toBe('preset');
+  });
+
+  it('migrates legacy text-mode host with prompt + builder + variants', () => {
+    const legacy = {
+      host: {
+        mode: 'text',
+        prompt: '30대 여성, 밝게 웃고 있음',
+        builder: { 성별: 'female', 연령대: '30s' },
+        negativePrompt: '',
+        temperature: 0.65,
+        generated: true,
+        selectedSeed: 42,
+        selectedImageId: 'host_abc_s42',
+        variants: [
+          { seed: 10, id: 'v10', imageId: 'host_abc_s10', url: 'https://x/10.png', path: 'h/10.png' },
+          { seed: 42, id: 'v42', imageId: 'host_abc_s42', url: 'https://x/42.png', path: 'h/42.png' },
+        ],
+      },
+    };
+    const out = migrateLegacy(legacy);
+    expect(out.host.input.kind).toBe('text');
+    if (out.host.input.kind !== 'text') throw new Error('narrowing');
+    expect(out.host.input.prompt).toBe('30대 여성, 밝게 웃고 있음');
+    expect(out.host.input.builder['성별']).toBe('female');
+    expect(out.host.temperature).toBe(0.65);
+    expect(out.host.generation.state).toBe('ready');
+    if (out.host.generation.state === 'ready') {
+      expect(out.host.generation.variants).toHaveLength(2);
+      expect(out.host.generation.selected?.imageId).toBe('host_abc_s42');
+    }
+  });
+
+  it('migrates background by source discriminator', () => {
+    expect(migrateLegacy({ background: { source: 'preset', preset: 'studio_white' } }).background).toEqual({
+      kind: 'preset',
+      presetId: 'studio_white',
+    });
+    expect(migrateLegacy({ background: { source: 'url', url: 'https://x/y.png' } }).background).toEqual({
+      kind: 'url',
+      url: 'https://x/y.png',
+    });
+    expect(migrateLegacy({ background: { source: 'prompt', prompt: '아늑한 거실' } }).background).toEqual({
+      kind: 'prompt',
+      prompt: '아늑한 거실',
+    });
+    const upload = migrateLegacy({
+      background: { source: 'upload', uploadPath: 'bg/foo.png', imageUrl: 'https://x/foo.png', serverFilename: 'foo.png' },
+    }).background;
+    expect(upload).toEqual({
+      kind: 'upload',
+      asset: { path: 'bg/foo.png', url: 'https://x/foo.png', name: 'foo.png' },
+    });
+  });
+
+  it('drops blob: / data: urls during migration (transient)', () => {
+    const out = migrateLegacy({
+      background: { source: 'upload', uploadPath: 'bg/foo.png', imageUrl: 'blob:http://localhost/xxx' },
+    });
+    if (out.background.kind === 'upload' && out.background.asset && 'path' in out.background.asset) {
+      expect(out.background.asset.url).toBeUndefined();
+      expect(out.background.asset.path).toBe('bg/foo.png');
+    } else {
+      throw new Error('expected uploaded server asset');
+    }
+  });
+
+  it('drops legacy _gradient and _file fields (no longer in schema)', () => {
+    const out = migrateLegacy({
+      background: { source: 'preset', preset: 'living_cozy', _gradient: 'linear-gradient(...)', _file: { fake: 'thing' } },
+    });
+    expect(out.background).toEqual({ kind: 'preset', presetId: 'living_cozy' });
+  });
+
+  it('migrates voice tts source with cloned audio result', () => {
+    const out = migrateLegacy({
+      voice: {
+        source: 'tts',
+        voiceId: 'v_minji',
+        voiceName: '민지',
+        paragraphs: ['안녕하세요'],
+        script: '안녕하세요',
+        stability: 0.5,
+        style: 0.3,
+        similarity: 0.75,
+        speed: 1.1,
+        generated: true,
+        generatedAudioPath: 'audio/abc.mp3',
+        generatedAudioUrl: 'https://x/abc.mp3',
+      },
+    });
+    expect(out.voice.source).toBe('tts');
+    if (out.voice.source !== 'tts') throw new Error('narrowing');
+    expect(out.voice.voiceId).toBe('v_minji');
+    expect(out.voice.script.paragraphs).toEqual(['안녕하세요']);
+    expect(out.voice.advanced.speed).toBe(1.1);
+    expect(out.voice.generation.state).toBe('ready');
+  });
+
+  it('migrates voice clone source with cloneSample.voiceId', () => {
+    const out = migrateLegacy({
+      voice: {
+        source: 'clone',
+        cloneSample: { voiceId: 'cloned_xyz', name: '내 목소리' },
+        paragraphs: ['hi'],
+      },
+    });
+    expect(out.voice.source).toBe('clone');
+    if (out.voice.source !== 'clone') throw new Error('narrowing');
+    expect(out.voice.sample.state).toBe('cloned');
+    if (out.voice.sample.state === 'cloned') {
+      expect(out.voice.sample.voiceId).toBe('cloned_xyz');
+    }
+  });
+
+  it('migrates voice upload source with uploadedAudio path', () => {
+    const out = migrateLegacy({
+      voice: {
+        source: 'upload',
+        uploadedAudio: { path: 'audio/upload/foo.mp3', name: 'foo.mp3' },
+        script: 'subtitle line',
+      },
+    });
+    expect(out.voice.source).toBe('upload');
+    if (out.voice.source !== 'upload') throw new Error('narrowing');
+    expect(out.voice.audio).toEqual({ path: 'audio/upload/foo.mp3', name: 'foo.mp3' });
+  });
+
+  it('falls back to default resolution + imageQuality when missing', () => {
+    const out = migrateLegacy({});
+    expect(out.resolution).toBe('448p');
+    expect(out.imageQuality).toBe('1K');
+  });
+
+  it('preserves valid resolution key', () => {
+    expect(migrateLegacy({ resolution: { key: '720p' } }).resolution).toBe('720p');
+    expect(migrateLegacy({ resolution: { key: '1080p' } }).resolution).toBe('1080p');
+    // invalid → default
+    expect(migrateLegacy({ resolution: { key: 'foo' } }).resolution).toBe('448p');
+  });
+});
+
+describe('toPersistable', () => {
+  it('strips local file pending products to empty', () => {
+    const out = toPersistable({
+      ...migrateLegacy({}),
+      products: [
+        {
+          id: 'p1',
+          source: {
+            kind: 'localFile',
+            asset: {
+              file: new File(['a'], 'a.png'),
+              previewUrl: 'blob:http://localhost/x',
+              name: 'a.png',
+            },
+          },
+        },
+        { id: 'p2', source: { kind: 'uploaded', asset: { path: 'p/2.png' } } },
+      ],
+    });
+    expect(out.products[0]?.source.kind).toBe('empty');
+    expect(out.products[1]?.source.kind).toBe('uploaded');
+  });
+
+  it('strips streaming/failed generation states to idle', () => {
+    const out = toPersistable({
+      ...migrateLegacy({}),
+      host: {
+        ...migrateLegacy({}).host,
+        generation: { state: 'streaming', batchId: null, variants: [] },
+      },
+    });
+    expect(out.host.generation.state).toBe('idle');
+  });
+
+  it('keeps ready generation state', () => {
+    const ready = {
+      seed: 1,
+      imageId: 'host_x_s1',
+      url: 'https://x/1.png',
+      path: 'h/1.png',
+    };
+    const out = toPersistable({
+      ...migrateLegacy({}),
+      host: {
+        ...migrateLegacy({}).host,
+        generation: {
+          state: 'ready',
+          batchId: null,
+          variants: [ready],
+          selected: ready,
+          prevSelected: null,
+        },
+      },
+    });
+    expect(out.host.generation.state).toBe('ready');
+  });
+});
+
+describe('readiness predicates', () => {
+  it('isBackgroundReady covers all 4 sub-modes', () => {
+    expect(isBackgroundReady({ kind: 'preset', presetId: null })).toBe(false);
+    expect(isBackgroundReady({ kind: 'preset', presetId: 'studio_white' })).toBe(true);
+    expect(isBackgroundReady({ kind: 'upload', asset: null })).toBe(false);
+    expect(isBackgroundReady({ kind: 'upload', asset: { path: 'a' } })).toBe(true);
+    expect(isBackgroundReady({ kind: 'url', url: '' })).toBe(false);
+    expect(isBackgroundReady({ kind: 'url', url: 'https://x' })).toBe(true);
+    expect(isBackgroundReady({ kind: 'prompt', prompt: '' })).toBe(false);
+    expect(isBackgroundReady({ kind: 'prompt', prompt: 'cozy' })).toBe(true);
+  });
+
+  it('isProductReady is false for empty, true for any other source', () => {
+    expect(isProductReady({ id: 'a', source: { kind: 'empty' } })).toBe(false);
+    expect(isProductReady({ id: 'a', source: { kind: 'uploaded', asset: { path: 'p' } } })).toBe(true);
+    expect(isProductReady({ id: 'a', source: { kind: 'url', url: 'https://x', urlInput: 'x' } })).toBe(true);
+  });
+
+  it('isHostReady requires ready state with non-null selected', () => {
+    const v = { seed: 1, imageId: 'a', url: 'https://x', path: 'h/a' };
+    expect(
+      isHostReady({
+        input: { kind: 'text', prompt: '', builder: {}, negativePrompt: '', extraPrompt: '' },
+        temperature: 0.7,
+        generation: { state: 'idle' },
+      }),
+    ).toBe(false);
+    expect(
+      isHostReady({
+        input: { kind: 'text', prompt: '', builder: {}, negativePrompt: '', extraPrompt: '' },
+        temperature: 0.7,
+        generation: { state: 'ready', batchId: null, variants: [v], selected: null, prevSelected: null },
+      }),
+    ).toBe(false);
+    expect(
+      isHostReady({
+        input: { kind: 'text', prompt: '', builder: {}, negativePrompt: '', extraPrompt: '' },
+        temperature: 0.7,
+        generation: { state: 'ready', batchId: null, variants: [v], selected: v, prevSelected: null },
+      }),
+    ).toBe(true);
+  });
+
+  it('isVoiceReady tts requires voiceId + script + ready generation', () => {
+    expect(
+      isVoiceReady({
+        source: 'tts',
+        voiceId: null,
+        voiceName: null,
+        advanced: { speed: 1, stability: 0.5, style: 0.3, similarity: 0.75 },
+        script: { paragraphs: ['hi'] },
+        generation: { state: 'idle' },
+      }),
+    ).toBe(false);
+    expect(
+      isVoiceReady({
+        source: 'tts',
+        voiceId: 'v',
+        voiceName: 'V',
+        advanced: { speed: 1, stability: 0.5, style: 0.3, similarity: 0.75 },
+        script: { paragraphs: ['hi'] },
+        generation: { state: 'ready', audio: { path: 'a/b' } },
+      }),
+    ).toBe(true);
+  });
+});
