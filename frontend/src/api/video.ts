@@ -13,7 +13,7 @@
 
 import { API_BASE, getAuthHeaders, parseResponse } from './http';
 import { stringifyResolution } from './mapping';
-import type { Background, Host, ResolutionKey } from '../wizard/schema';
+import type { Background, Composition, Host, ResolutionKey } from '../wizard/schema';
 import { RESOLUTION_META } from '../wizard/schema';
 import { isServerAsset } from '../wizard/normalizers';
 
@@ -22,15 +22,9 @@ export interface GenerateVideoInput {
     /** Schema-typed (Phase 2b). Provenance is built via
      * `hostProvenance` below. */
     host?: Host | null;
-    composition?: {
-      selectedSeed?: number | null;
-      selectedPath?: string | null;
-      selectedUrl?: string | null;
-      direction?: string;
-      shot?: string | null;
-      angle?: string | null;
-      temperature?: number | null;
-    } | null;
+    /** Schema-typed (Phase 2c). Provenance built via
+     * `compositionProvenance` below. */
+    composition?: Composition | null;
     products?: Array<{ name?: string; path?: string; url?: string }>;
     /** Schema-typed (Phase 2a) — see wizard/schema.ts Background.
      * Provenance snapshot is built via `backgroundProvenance` below. */
@@ -76,7 +70,13 @@ export async function generateVideo(
     state.host?.generation?.state === 'ready'
       ? state.host.generation.selected?.path ?? null
       : null;
-  const composite = state.composition?.selectedPath || hostSelectedPath;
+  // Phase 2c: composition is schema-typed (selected lives on
+  // generation.selected when state === 'ready').
+  const compositeSelectedPath =
+    state.composition?.generation?.state === 'ready'
+      ? state.composition.generation.selected?.path ?? null
+      : null;
+  const composite = compositeSelectedPath || hostSelectedPath;
   if (composite) body.append('host_image_path', composite);
   body.append('audio_path', audio.audio_path);
   body.append('audio_source', 'upload');
@@ -93,15 +93,7 @@ export async function generateVideo(
   // phases (frontend ProvenanceCard / backend _synthesize_result rely on it).
   const meta = {
     host: hostProvenance(state.host),
-    composition: {
-      selectedSeed: state.composition?.selectedSeed ?? null,
-      selectedPath: state.composition?.selectedPath ?? null,
-      selectedUrl: state.composition?.selectedUrl ?? null,
-      direction: state.composition?.direction ?? '',
-      shot: state.composition?.shot ?? null,
-      angle: state.composition?.angle ?? null,
-      temperature: state.composition?.temperature ?? null,
-    },
+    composition: compositionProvenance(state.composition),
     products: (state.products || []).map((p) => ({
       name: p.name || '',
       path: p.path || '',
@@ -189,6 +181,36 @@ function hostProvenance(h: unknown): {
     faceStrength: image?.faceStrength ?? null,
     outfitStrength: image?.outfitStrength ?? null,
     temperature: host.temperature,
+  };
+}
+
+/** Schema-typed Composition → legacy provenance shape. */
+function compositionProvenance(c: unknown): {
+  selectedSeed: number | null;
+  selectedPath: string | null;
+  selectedUrl: string | null;
+  direction: string;
+  shot: string | null;
+  angle: string | null;
+  temperature: number | null;
+} {
+  const comp = (c ?? null) as Composition | null;
+  if (!comp || !comp.settings || !comp.generation) {
+    return {
+      selectedSeed: null, selectedPath: null, selectedUrl: null,
+      direction: '', shot: null, angle: null, temperature: null,
+    };
+  }
+  const selected =
+    comp.generation.state === 'ready' ? comp.generation.selected : null;
+  return {
+    selectedSeed: selected?.seed ?? null,
+    selectedPath: selected?.path ?? null,
+    selectedUrl: selected?.url ?? null,
+    direction: comp.settings.direction,
+    shot: comp.settings.shot,
+    angle: comp.settings.angle,
+    temperature: comp.settings.temperature,
   };
 }
 

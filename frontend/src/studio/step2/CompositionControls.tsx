@@ -16,30 +16,28 @@ import { Chip } from '@/components/chip';
 import { Field } from '@/components/field';
 import { Segmented } from '@/components/segmented';
 import type { Product } from './ProductList';
-
-export interface Composition {
-  direction?: string;
-  shot?: 'closeup' | 'bust' | 'medium' | 'full';
-  angle?: 'eye' | 'low' | 'high';
-  temperature?: number;
-}
+import type { CompositionSettings } from '@/wizard/schema';
 
 export interface CompositionControlsProps {
-  composition: Composition;
+  settings: CompositionSettings;
   products: Product[];
   generating: boolean;
   errorMsg: string | null;
   canGenerate: boolean;
   missingReason: string | null;
-  onCompositionChange: (patch: Partial<Composition>) => void;
+  onSettingsChange: (patch: Partial<CompositionSettings>) => void;
   onGenerate: () => void;
 }
 
+// Phase 2c: schema's CompositionShot is just close|medium|far
+// (mapped to closeup|bust|medium|full historically). Keep the four
+// historical options visible — they collapse internally to the
+// schema's three values via the mapping below if needed.
 const SHOT_OPTS = [
-  { v: 'closeup' as const, label: '클로즈업' },
-  { v: 'bust' as const, label: '상반신' },
+  { v: 'close' as const, label: '클로즈업' },
+  { v: 'medium' as const, label: '상반신' },
   { v: 'medium' as const, label: '미디엄' },
-  { v: 'full' as const, label: '풀샷' },
+  { v: 'far' as const, label: '풀샷' },
 ];
 const ANGLE_OPTS = [
   { v: 'eye' as const, label: '정면' },
@@ -57,13 +55,13 @@ const DIRECTION_EXAMPLES = [
 ];
 
 export function CompositionControls({
-  composition,
+  settings,
   products,
   generating,
   errorMsg,
   canGenerate,
   missingReason,
-  onCompositionChange,
+  onSettingsChange,
   onGenerate,
 }: CompositionControlsProps) {
   const directionRef = useRef<HTMLTextAreaElement | null>(null);
@@ -71,9 +69,9 @@ export function CompositionControls({
   const insertProductRef = (idx: number) => {
     const ref = `${idx + 1}번`;
     const ta = directionRef.current;
-    const cur = composition.direction || '';
+    const cur = settings.direction || '';
     if (!ta) {
-      onCompositionChange({
+      onSettingsChange({
         direction: cur + (cur && !cur.endsWith(' ') ? ' ' : '') + ref + ' ',
       });
       return;
@@ -82,7 +80,7 @@ export function CompositionControls({
     const e = ta.selectionEnd ?? cur.length;
     const insert = ref + ' ';
     const next = cur.slice(0, s) + insert + cur.slice(e);
-    onCompositionChange({ direction: next });
+    onSettingsChange({ direction: next });
     requestAnimationFrame(() => {
       if (!directionRef.current) return;
       const pos = s + insert.length;
@@ -97,7 +95,7 @@ export function CompositionControls({
         <div className="hl-textarea">
           <div className="hl-textarea__mirror" aria-hidden>
             {(() => {
-              const text = composition.direction || '';
+              const text = settings.direction || '';
               if (!text) return ' ';
               const parts = text.split(/(\d+번)/);
               return parts.map((chunk, i) => {
@@ -122,8 +120,8 @@ export function CompositionControls({
             className="textarea hl-textarea__input"
             rows={3}
             placeholder="예) 소파에 앉아 1번은 손에 들고, 2번은 옆 테이블 위에 놓기"
-            value={composition.direction || ''}
-            onChange={(e) => onCompositionChange({ direction: e.target.value })}
+            value={settings.direction || ''}
+            onChange={(e) => onSettingsChange({ direction: e.target.value })}
             onScroll={(e) => {
               const mirror = (e.target as HTMLTextAreaElement)
                 .previousSibling as HTMLElement | null;
@@ -186,7 +184,7 @@ export function CompositionControls({
       </div>
       <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
         {DIRECTION_EXAMPLES.map((ex) => (
-          <Chip key={ex} onClick={() => onCompositionChange({ direction: ex })}>
+          <Chip key={ex} onClick={() => onSettingsChange({ direction: ex })}>
             {ex}
           </Chip>
         ))}
@@ -200,8 +198,8 @@ export function CompositionControls({
             {SHOT_OPTS.map((o) => (
               <Chip
                 key={o.v}
-                on={composition.shot === o.v}
-                onClick={() => onCompositionChange({ shot: o.v })}
+                on={settings.shot === o.v}
+                onClick={() => onSettingsChange({ shot: o.v })}
               >
                 {o.label}
               </Chip>
@@ -213,8 +211,8 @@ export function CompositionControls({
             {ANGLE_OPTS.map((o) => (
               <Chip
                 key={o.v}
-                on={composition.angle === o.v}
-                onClick={() => onCompositionChange({ angle: o.v })}
+                on={settings.angle === o.v}
+                onClick={() => onSettingsChange({ angle: o.v })}
               >
                 {o.label}
               </Chip>
@@ -230,8 +228,8 @@ export function CompositionControls({
         hint="같은 입력으로도 결과를 얼마나 다양하게 뽑을지 — 안정적이면 4장이 비슷, 창의적이면 제각각"
       >
         <Segmented
-          value={composition.temperature ?? 0.7}
-          onChange={(v: number) => onCompositionChange({ temperature: v })}
+          value={settings.temperature ?? 0.7}
+          onChange={(v: number) => onSettingsChange({ temperature: v })}
           options={[
             { value: 0.4, label: '안정적' },
             { value: 0.7, label: '보통' },

@@ -483,11 +483,30 @@ describe('api.js — generateVideo attaches full provenance meta', () => {
           prevSelected: null,
         },
       },
+      // Phase 2c: schema-shaped composition (settings + generation).
       composition: {
-        selectedSeed: 77, selectedPath: '/srv/c_77.png', selectedUrl: '/api/files/c_77.png',
-        direction: '소파에 앉아 1번 들기', shot: 'medium', angle: 'eye', temperature: 0.4,
+        settings: {
+          direction: '소파에 앉아 1번 들기',
+          shot: 'medium',
+          angle: 'eye',
+          temperature: 0.4,
+          rembg: true,
+        },
+        generation: {
+          state: 'ready',
+          batchId: null,
+          variants: [
+            { seed: 77, imageId: 'c_77', url: '/api/files/c_77.png', path: '/srv/c_77.png' },
+          ],
+          selected: { seed: 77, imageId: 'c_77', url: '/api/files/c_77.png', path: '/srv/c_77.png' },
+          prevSelected: null,
+        },
       },
-      products: [{ name: '쿠션', path: '/srv/cushion.png' }, { name: '소파', path: '/srv/sofa.png' }],
+      // Phase 2c: schema-shaped products (tagged source).
+      products: [
+        { id: 'p1', name: '쿠션', source: { kind: 'uploaded', asset: { path: '/srv/cushion.png' } } },
+        { id: 'p2', name: '소파', source: { kind: 'uploaded', asset: { path: '/srv/sofa.png' } } },
+      ],
       // Phase 2a: schema-shaped tagged union. presetLabel is dropped
       // from the schema (it's a derived UI field, looked up from
       // BG_PRESETS) so the provenance carries presetId only.

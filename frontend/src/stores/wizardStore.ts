@@ -24,11 +24,22 @@
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import { storageKey } from './storageKey';
-import type { Background, Host, Product, ResolutionKey } from '../wizard/schema';
-import { INITIAL_BACKGROUND, INITIAL_HOST } from '../wizard/schema';
+import type {
+  Background,
+  Composition,
+  Host,
+  Product,
+  ResolutionKey,
+} from '../wizard/schema';
+import {
+  INITIAL_BACKGROUND,
+  INITIAL_COMPOSITION,
+  INITIAL_HOST,
+} from '../wizard/schema';
 import {
   migrateLegacy as migrateLegacyToSchema,
   persistBackground,
+  persistComposition,
   persistHost,
 } from '../wizard/normalizers';
 
@@ -60,7 +71,10 @@ export interface WizardState {
   /** Schema-typed (Phase 2a). Tagged union — kind = preset | upload |
    * url | prompt. */
   background: Background;
-  composition: WizardSlice;
+  /** Schema-typed (Phase 2c). settings (direction, shot, angle,
+   * temperature, rembg) + generation (state machine: idle |
+   * streaming | ready | failed). */
+  composition: Composition;
   voice: WizardSlice;
   script: string;
   /** Schema-typed (Phase 2c). Just the key — full meta
@@ -85,15 +99,7 @@ export const INITIAL_WIZARD_STATE: WizardState = {
   host: INITIAL_HOST,
   products: [],
   background: INITIAL_BACKGROUND,
-  composition: {
-    direction: '',
-    shot: 'medium',
-    angle: 'eye',
-    generated: false,
-    selectedSeed: null,
-    temperature: 0.7,
-    variants: [],
-  },
+  composition: INITIAL_COMPOSITION,
   voice: {
     source: 'tts',
     voiceId: null,
@@ -128,7 +134,9 @@ export interface WizardActions {
    * full Background or a function that derives it from the previous
    * value. No partial-patch — tagged unions don't compose with `Partial`. */
   setBackground: (next: Background | ((prev: Background) => Background)) => void;
-  setComposition: (patch: WizardSlice) => void;
+  /** Schema-typed (Phase 2c). Replace-style — settings + generation
+   * are tagged unions, no Partial composition. */
+  setComposition: (next: Composition | ((prev: Composition) => Composition)) => void;
   setVoice: (patch: WizardSlice) => void;
   setScript: (s: string) => void;
   /** Schema-typed (Phase 2c). Pass only the key — full meta is
@@ -179,10 +187,9 @@ function migrateLegacyStateOnce(): void {
        // the schema migrator on the legacy raw value rather than spreading
        // optional fields into a Background that wouldn't satisfy any kind.
       background: migrateLegacyToSchema({ background: legacy.background }).background,
-      composition: {
-        ...INITIAL_WIZARD_STATE.composition,
-        ...(legacy.composition as Record<string, unknown> | undefined),
-      },
+      // Phase 2c: composition is schema-typed (settings + generation
+      // state machine).
+      composition: migrateLegacyToSchema({ composition: legacy.composition }).composition,
       voice: {
         ...INITIAL_WIZARD_STATE.voice,
         ...(legacy.voice as Record<string, unknown> | undefined),
@@ -200,7 +207,7 @@ function migrateLegacyStateOnce(): void {
     // schema-shaped (host + background through migrateLegacyToSchema),
     // so we tag it with the current persist version (3) — Zustand's
     // own migrate() then sees a matching version and skips re-migration.
-    const envelope = { state: partializeForPersist(merged), version: 5 };
+    const envelope = { state: partializeForPersist(merged), version: 6 };
     localStorage.setItem(storageKey('wizard'), JSON.stringify(envelope));
 
     // Preserve the step the user was on. Without this, a user upgrading
@@ -270,18 +277,14 @@ function dropTransient(u: unknown): unknown {
 }
 
 function partializeForPersist(s: WizardState): WizardState {
-  const composition = s.composition ?? {};
   const voice = s.voice ?? {};
 
   // Phase 2b: host uses schema-typed persist — drops mid-stream
   // generation states (streaming/failed → idle), strips LocalAsset
   // refs from image-mode input.
   const cleanHost: Host = persistHost(s.host);
-  const cleanComposition: WizardSlice = {
-    ...composition,
-    variants: cleanVariantsList(composition.variants),
-    selectedUrl: dropTransient(composition.selectedUrl),
-  };
+  // Phase 2c: composition uses same pattern.
+  const cleanComposition: Composition = persistComposition(s.composition);
   // Phase 2a: background uses schema-typed persist — drops LocalAsset
   // (File handle + blob URL) but keeps ServerAsset.
   const cleanBackground: Background = persistBackground(s.background);
@@ -367,8 +370,10 @@ export const useWizardStore = create<WizardStore>()(
         set((s) => ({
           background: typeof next === 'function' ? next(s.background) : next,
         })),
-      setComposition: (patch) =>
-        set((s) => ({ composition: { ...s.composition, ...patch } })),
+      setComposition: (next) =>
+        set((s) => ({
+          composition: typeof next === 'function' ? next(s.composition) : next,
+        })),
       setVoice: (patch) =>
         set((s) => ({ voice: { ...s.voice, ...patch } })),
       setScript: (script) => set({ script }),
@@ -403,7 +408,10 @@ export const useWizardStore = create<WizardStore>()(
       //   v5: products → tagged-union source (empty | localFile |
       //       uploaded | url). Was a flat object with optional
       //       url/_file/path/source/urlInput fields.
-      version: 5,
+      //   v6: composition → schema {settings, generation} state
+      //       machine. Was flat {direction, shot, angle, temperature,
+      //       generated, selectedSeed/Path/Url/ImageId, variants}.
+      version: 6,
       migrate: (persisted, fromVersion) => {
         if (!persisted || typeof persisted !== 'object') return persisted as WizardState;
         const p = persisted as Record<string, unknown>;
@@ -418,6 +426,9 @@ export const useWizardStore = create<WizardStore>()(
         }
         if (fromVersion < 5) {
           p.products = migrateLegacyToSchema({ products: p.products }).products;
+        }
+        if (fromVersion < 6) {
+          p.composition = migrateLegacyToSchema({ composition: p.composition }).composition;
         }
         return p as WizardState;
       },

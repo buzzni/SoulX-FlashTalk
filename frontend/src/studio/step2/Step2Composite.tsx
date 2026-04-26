@@ -27,10 +27,15 @@ import { selectComposite as selectCompositeApi, type CompositeInput } from '../.
 import { imageIdFromPath, makeRandomSeeds } from '../../api/mapping';
 import { ProductList, type Product } from './ProductList';
 import { BackgroundPicker } from './BackgroundPicker';
-import { CompositionControls, type Composition } from './CompositionControls';
+import { CompositionControls } from './CompositionControls';
 import { CompositionVariants } from './CompositionVariants';
 import { StepHeading } from '@/routes/StepHeading';
-import type { Background } from '@/wizard/schema';
+import type {
+  Background,
+  Composition,
+  CompositionSettings,
+  CompositionVariant as SchemaCompositionVariant,
+} from '@/wizard/schema';
 import { isBackgroundReady } from '@/wizard/schema';
 import { isLocalAsset, isServerAsset } from '@/wizard/normalizers';
 
@@ -48,17 +53,12 @@ export interface Step2CompositeProps {
 export default function Step2Composite({ state, update }: Step2CompositeProps) {
   const products = (state.products ?? []) as Product[];
   const background = (state.background ?? { kind: 'preset', presetId: null }) as Background;
-  const composition = (state.composition ?? {}) as Composition & {
-    variants?: CompositionVariant[];
-    generated?: boolean;
-    selectedSeed?: number | null;
-    rembg?: boolean;
-  };
+  const composition = state.composition as Composition;
 
   const gen = useCompositeGeneration();
   const productUpload = useUploadReferenceImage(uploadReferenceImage);
   const backgroundUpload = useUploadReferenceImage(uploadBackgroundImage);
-  const attemptsRef = useRef<number>((composition.variants ?? []).length > 0 ? 1 : 0);
+  const attemptsRef = useRef<number>(composition.generation.state === 'ready' ? 1 : 0);
   const [pickerFor, setPickerFor] = useState<'products' | 'bg' | null>(null);
 
   const setProducts: ProductListProps['onProductsChange'] = (next) =>
@@ -66,16 +66,21 @@ export default function Step2Composite({ state, update }: Step2CompositeProps) {
       ...s,
       products: typeof next === 'function' ? next(s.products ?? []) : next,
     }));
-  /** Schema-typed replace-style. Tagged unions don't compose with
-   * Partial — callers either hand the next full Background or a
-   * function deriving it from the previous slice. */
   const setBg = (next: Background | ((prev: Background) => Background)) =>
     update((s) => ({
       ...s,
       background: typeof next === 'function' ? next(s.background) : next,
     }));
-  const setComp = (patch: Partial<Composition>) =>
-    update((s) => ({ ...s, composition: { ...(s.composition ?? {}), ...patch } }));
+  /** Schema-typed: replace just the settings sub-slice. Generation is
+   * managed separately by useCompositeGeneration. */
+  const setSettings = (patch: Partial<CompositionSettings>) =>
+    update((s) => ({
+      ...s,
+      composition: {
+        ...(s.composition as Composition),
+        settings: { ...(s.composition as Composition).settings, ...patch },
+      },
+    }));
 
   const bgReady = isBackgroundReady(background);
   const productsReady =
@@ -145,11 +150,16 @@ export default function Step2Composite({ state, update }: Step2CompositeProps) {
         host: { selectedPath: hostSelectedPath },
         products: apiProducts,
         background: backgroundToLegacyApi(bg),
-        composition: composition as unknown as CompositeInputComp,
+        composition: {
+          direction: composition.settings.direction,
+          shot: composition.settings.shot,
+          angle: composition.settings.angle,
+          temperature: composition.settings.temperature,
+        },
         imageSize: (state.imageQuality as '1K' | '2K' | '4K') ?? '1K',
       },
       seeds,
-      { rembg: composition.rembg !== false },
+      { rembg: composition.settings.rembg },
     );
   };
 
@@ -174,24 +184,39 @@ export default function Step2Composite({ state, update }: Step2CompositeProps) {
   }
 
   const selectComposite = (v: CompositionVariant) => {
-    const imageId = v.imageId ?? imageIdFromPath(v.path);
-    update((s) => ({
-      ...s,
-      composition: {
-        ...(s.composition ?? {}),
-        generated: true,
-        selectedSeed: v.seed,
-        selectedPath: v.path ?? null,
-        selectedUrl: v.url ?? null,
-        selectedImageId: imageId,
-      },
-    }));
-    if (imageId) {
-      selectCompositeApi(imageId).catch((e) => {
-        // eslint-disable-next-line no-console
-        console.warn('composite select sync failed (non-fatal):', e);
-      });
-    }
+    if (!v.url || !v.path || !v.imageId) return;
+    const imageId = v.imageId;
+    update((s) => {
+      const prev = s.composition as Composition;
+      if (prev.generation.state !== 'ready' && prev.generation.state !== 'streaming') {
+        return s;
+      }
+      const variants = prev.generation.state === 'ready' ? prev.generation.variants : [];
+      const prevSelected = prev.generation.state === 'ready' ? prev.generation.prevSelected : null;
+      const selected: SchemaCompositionVariant = {
+        seed: v.seed,
+        imageId,
+        url: v.url as string,
+        path: v.path as string,
+      };
+      return {
+        ...s,
+        composition: {
+          ...prev,
+          generation: {
+            state: 'ready',
+            batchId: prev.generation.state === 'ready' ? prev.generation.batchId : null,
+            variants,
+            selected,
+            prevSelected,
+          },
+        },
+      };
+    });
+    selectCompositeApi(imageId).catch((e) => {
+      // eslint-disable-next-line no-console
+      console.warn('composite select sync failed (non-fatal):', e);
+    });
   };
 
   const handlePickedServerFile = (f: unknown) => {
@@ -210,8 +235,9 @@ export default function Step2Composite({ state, update }: Step2CompositeProps) {
   };
 
   const selectedImageId =
-    (composition as { selectedImageId?: string | null }).selectedImageId ??
-    imageIdFromPath((composition as { selectedPath?: string | null }).selectedPath);
+    composition.generation.state === 'ready' && composition.generation.selected
+      ? composition.generation.selected.imageId
+      : null;
 
   return (
     <div className="step-page-split step-page-split--50-50">
@@ -249,9 +275,9 @@ export default function Step2Composite({ state, update }: Step2CompositeProps) {
       >
         <ProductList
           products={products}
-          rembgKeep={composition.rembg === false}
+          rembgKeep={!composition.settings.rembg}
           onProductsChange={setProducts}
-          onRembgChange={(remove) => setComp({ rembg: remove } as Composition)}
+          onRembgChange={(remove) => setSettings({ rembg: remove })}
           onPickServerFile={() => setPickerFor('products')}
         />
       </Card>
@@ -269,13 +295,13 @@ export default function Step2Composite({ state, update }: Step2CompositeProps) {
         subtitle="쇼호스트 자세·제품 위치를 자유롭게 적어주세요. 배경에 있는 가구·공간에 맞춰 합성돼요."
       >
         <CompositionControls
-          composition={composition}
+          settings={composition.settings}
           products={products}
           generating={gen.isLoading}
           errorMsg={gen.error}
           canGenerate={canGenerate}
           missingReason={missingReason}
-          onCompositionChange={setComp}
+          onSettingsChange={setSettings}
           onGenerate={generate}
         />
       </Card>
@@ -331,8 +357,14 @@ function CompositeCanvas({
   onRegenerate,
   canRegenerate,
 }: CompositeCanvasProps) {
-  const empty = !isLoading && variants.length === 0 && !composition.generated;
-  const heroUrl = composition.selectedUrl;
+  // Phase 2c: composition is schema-shaped. Selection commitment lives
+  // on generation.selected; ready-with-no-selection state still
+  // counts as "user has variants but hasn't picked yet".
+  const selected =
+    composition.generation.state === 'ready' ? composition.generation.selected : null;
+  const hasSelection = selected !== null;
+  const empty = !isLoading && variants.length === 0 && !hasSelection;
+  const heroUrl = selected ? selected.url : null;
 
   return (
     <section className="composite-canvas">
@@ -343,7 +375,7 @@ function CompositeCanvas({
             ? '합성한 결과가 여기 나와요'
             : isLoading && variants.length === 0
               ? '배경·제품·쇼호스트를 합성하는 중이에요'
-              : composition.generated
+              : hasSelection
                 ? '선택한 결과 · 다른 후보를 골라도 돼요'
                 : '마음에 드는 후보를 클릭해주세요'}
         </h2>
@@ -373,7 +405,7 @@ function CompositeCanvas({
         </div>
       )}
 
-      {composition.generated && (
+      {hasSelection && (
         <footer className="composite-canvas__footer">
           <Badge variant="success" icon="check_circle">
             합성 완료 · 다음 단계로
@@ -386,12 +418,5 @@ function CompositeCanvas({
     </section>
   );
 }
-
-// Local-only type alias used by the regenerate() call above —
-// composition is the only remaining slice that hasn't fully migrated
-// to schema yet (Phase 2c.3).
-type CompositeInputComp = React.ComponentProps<
-  typeof CompositionControls
->['composition'];
 
 type ProductListProps = React.ComponentProps<typeof ProductList>;

@@ -28,7 +28,12 @@ export function computeValidity(state: any): WizardValidity {
   v[1] =
     state?.host?.generation?.state === 'ready' &&
     state?.host?.generation?.selected != null;
-  v[2] = v[1] && !!state?.composition?.generated;
+  // Phase 2c: composition is schema-typed. Step 2 done iff a composite
+  // has been picked (generation.state === 'ready' && selected != null).
+  v[2] =
+    v[1] &&
+    state?.composition?.generation?.state === 'ready' &&
+    state?.composition?.generation?.selected != null;
   // Phase 2c: resolution is a ResolutionKey string now (was object).
   v[3] =
     v[2] &&

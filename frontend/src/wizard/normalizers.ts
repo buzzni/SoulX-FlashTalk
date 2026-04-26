@@ -117,7 +117,10 @@ export function persistBackground(bg: Background): Background {
   return bg;
 }
 
-function persistComposition(comp: Composition): Composition {
+/** Drop transient generation states (streaming/failed → idle) on
+ * persist. Exported for per-slice persisters in wizardStore — Phase
+ * 2c.3. */
+export function persistComposition(comp: Composition): Composition {
   const generation: CompositionGeneration =
     comp.generation.state === 'streaming' || comp.generation.state === 'failed'
       ? { state: 'idle' }
