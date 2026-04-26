@@ -9,6 +9,21 @@ on:
 jobs:
   python:
     runs-on: ubuntu-latest
+    services:
+      # tests/conftest.py + every studio_*_repo test connects to
+      # mongodb://localhost:27017 at fixture setup. Without a service
+      # container, motor's AsyncIOMotorClient hangs (the async connect
+      # bypasses serverSelectionTimeoutMS in some paths) and pytest
+      # never returns. mongo:7 matches the dev MongoDB version.
+      mongodb:
+        image: mongo:7
+        ports:
+          - 27017:27017
+        options: >-
+          --health-cmd "mongosh --quiet --eval 'db.runCommand({ping:1}).ok' | grep -q 1"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
