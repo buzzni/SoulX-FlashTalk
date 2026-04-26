@@ -10,9 +10,9 @@
  */
 
 import Icon from '../Icon.jsx';
-import { WizardButton as Button } from '@/components/wizard-button';
 import { Field } from '@/components/field';
 import { Segmented } from '@/components/segmented';
+import { Sparkles } from 'lucide-react';
 export interface HostControlsProps {
   temperature: number;
   imageQuality: '1K' | '2K' | '4K';
@@ -84,24 +84,28 @@ export function HostControls({
         </div>
       )}
 
-      <div className="flex justify-between items-center">
-        <div className="text-xs text-tertiary">
+      <div className="flex justify-between items-center gap-3 pt-1">
+        <div className="text-[12.5px] text-muted-foreground">
           버튼을 누르면 아래에 4개의 후보가 나타나요. 마음에 드는 걸 하나 고르세요.
         </div>
-        <Button
-          variant="primary"
-          icon={generating ? undefined : 'sparkles'}
+        <button
+          type="button"
           onClick={onGenerate}
           disabled={generating || !canGenerate}
+          className="inline-flex items-center gap-2 h-10 px-5 rounded-md bg-primary text-primary-foreground text-[13.5px] font-bold hover:bg-[var(--primary-hover)] disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer transition-colors"
         >
           {generating ? (
             <>
-              <span className="spinner" /> 만드는 중…
+              <span className="spinner" /> 만드는 중
             </>
           ) : (
-            '쇼호스트 만들기'
+            <>
+              <Sparkles className="size-4" />
+              <span>쇼호스트 만들기</span>
+              <span className="text-[11px] font-medium opacity-70 tabular-nums">~15초</span>
+            </>
           )}
-        </Button>
+        </button>
       </div>
     </>
   );

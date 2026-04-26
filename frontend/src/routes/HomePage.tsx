@@ -1,86 +1,335 @@
 /**
- * / — minimal home with two actions: make a new video, or browse past
- * results. Card density and shape match the wizard's .card primitive
- * (--r-lg radius, --pad-card padding, --shadow-xs) so the whole product
- * reads as one space.
+ * / — HostStudio 홈.
+ *
+ * Greeting + 2 quickstart cards (다크 anchor + 라이트 secondary) + 통계
+ * (sparkline 포함) + 최근 작업 그리드 + 활동 피드. 사이드바는 AppLayout.
+ *
+ * Title 추출은 lib/format.videoTitle, 로딩은 Spinner, 빈 상태는
+ * EmptyState로 통일.
  */
-import { useNavigate } from 'react-router-dom';
-import { useSyncExternalStore } from 'react';
-import Icon from '../studio/Icon.jsx';
-import { AppHeader } from './AppHeader';
+import { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
+import { ArrowRight, Clock, Film, Play } from 'lucide-react';
+import { AppLayout } from './AppLayout';
+import { fetchJSON } from '../api/http';
 import { getUser, subscribe } from '../stores/authStore';
+import { Spinner } from '../components/spinner';
+import { EmptyState } from '../components/empty-state';
+import { Sparkline } from '../components/sparkline';
+import {
+  formatCompactDate,
+  formatDuration,
+  videoTitle,
+} from '../lib/format';
+
+interface HistoryItem {
+  task_id: string;
+  timestamp?: string;
+  script_text?: string;
+  host_image?: string;
+  output_path?: string;
+  video_url?: string;
+  generation_time?: number;
+}
+
+interface HistoryResponse {
+  total: number;
+  videos: HistoryItem[];
+}
 
 export function HomePage() {
   const navigate = useNavigate();
   const user = useSyncExternalStore(subscribe, getUser, getUser);
-  const greeting = user?.display_name || user?.user_id || '';
+  const display = user?.display_name || user?.user_id || '';
+  const clock = useClock();
+
+  const [history, setHistory] = useState<HistoryItem[] | null>(null);
+  const [historyTotal, setHistoryTotal] = useState<number | null>(null);
+
+  useEffect(() => {
+    const ctl = new AbortController();
+    fetchJSON<HistoryResponse>('/api/history?limit=8', {
+      signal: ctl.signal,
+      label: '최근 작업',
+    })
+      .then((r) => {
+        setHistory(r.videos);
+        setHistoryTotal(r.total);
+      })
+      .catch(() => {});
+    return () => ctl.abort();
+  }, []);
+
+  // Stats
+  const weekItems = useMemo(() => {
+    if (!history) return [];
+    const cutoff = Date.now() - 7 * 86400_000;
+    return history.filter((h) => {
+      if (!h.timestamp) return false;
+      const t = new Date(h.timestamp).getTime();
+      return Number.isFinite(t) && t >= cutoff;
+    });
+  }, [history]);
+
+  const weekCount = weekItems.length;
+
+  // Average gen time, sanitized — guard against the dev data bug where
+  // generation_time was sometimes seconds * something_else (we saw 3299s
+  // for a normal-looking video). Cap at 600s (10min, way above realistic).
+  const avgSec = useMemo(() => {
+    if (!history) return null;
+    const valid = history
+      .map((h) => h.generation_time)
+      .filter((s): s is number => typeof s === 'number' && s > 0 && s < 600);
+    if (!valid.length) return null;
+    return Math.round(valid.reduce((a, b) => a + b, 0) / valid.length);
+  }, [history]);
+
+  // Sparkline data — bucket items per day for the last 7 days
+  const weekTrend = useMemo(() => {
+    const buckets = new Array(7).fill(0);
+    if (!history) return buckets;
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    history.forEach((h) => {
+      if (!h.timestamp) return;
+      const t = new Date(h.timestamp);
+      t.setHours(0, 0, 0, 0);
+      const days = Math.round((today.getTime() - t.getTime()) / 86400_000);
+      if (days >= 0 && days < 7) buckets[6 - days] += 1;
+    });
+    return buckets;
+  }, [history]);
+
+  const durationTrend = useMemo(() => {
+    if (!history) return [];
+    return history
+      .slice(0, 8)
+      .map((h) => h.generation_time)
+      .filter((s): s is number => typeof s === 'number' && s > 0 && s < 600)
+      .reverse();
+  }, [history]);
 
   return (
-    <div className="min-h-screen flex flex-col bg-secondary">
-      <AppHeader />
-      <main className="flex-1 flex justify-center items-start px-4 md:px-6 pt-10 md:pt-16 pb-10">
-        <div className="w-full max-w-2xl surface-base p-5 md:p-6 animate-fade-in">
-          <h1 className="text-xl font-semibold tracking-tight leading-tight">
-            {greeting ? `${greeting}님, ` : ''}무엇을 만들어볼까요?
+    <AppLayout active="home">
+      <div className="px-6 md:px-12 pt-12 md:pt-16 pb-16 max-w-[960px] animate-rise">
+        {/* Greeting */}
+        <div className="mb-9">
+          <div className="text-[13px] text-muted-foreground mb-2 inline-flex items-center gap-2">
+            <span className="signal-dot" aria-hidden />
+            지금 {clock} · 모든 작업 저장됨
+          </div>
+          <h1 className="headline-hero m-0">
+            {display ? `${display} 님,` : '안녕하세요,'}
+            <br />
+            오늘은 어떤 영상 만들어볼까요?
           </h1>
-          <p className="mt-1 mb-5 text-[13px] text-muted-foreground">
-            호스트 영상부터 결과 관리까지 한 곳에서.
+          <p className="m-0 mt-2 text-[15px] text-ink-2">
+            호스트와 제품을 정하면 3단계로 영상이 완성돼요.
           </p>
-          <div className="grid gap-3 sm:grid-cols-2">
-            <ActionButton
-              variant="primary"
-              iconName="plus"
-              title="영상 만들기"
-              subtitle="호스트부터 영상까지 3단계"
-              onClick={() => navigate('/step/1')}
-            />
-            <ActionButton
-              variant="secondary"
-              iconName="folder"
-              title="내 영상들"
-              subtitle="지금까지 만든 결과 보기"
-              onClick={() => navigate('/results')}
+        </div>
+
+        {/* Quickstart cards */}
+        <div className="grid grid-cols-1 md:grid-cols-[1.3fr_1fr] gap-3.5 mb-8">
+          <button
+            type="button"
+            onClick={() => navigate('/step/1')}
+            className="group surface-card-dark text-left p-6 cursor-pointer transition-all hover:translate-y-[-1px] hover:shadow-[var(--shadow-2)]"
+          >
+            <span className="inline-block px-2.5 py-1 rounded-full bg-white/15 text-[#b9d3ff] text-[11px] font-semibold mb-4">
+              3단계 위저드
+            </span>
+            <h3 className="headline-card m-0">새 영상 만들기</h3>
+            <p className="m-0 mt-1.5 mb-4 text-[13.5px] text-white/75 leading-[1.55]">
+              마음에 드는 호스트를 만들고 — 제품·배경을 합성하고 — 목소리·대본까지 한 자리에서.
+            </p>
+            <div className="flex items-center justify-between mt-auto">
+              <span className="text-[12px] text-white/55 inline-flex items-center gap-1.5">
+                <Clock className="size-3" /> 약 2-4분 소요
+              </span>
+              <span className="grid place-items-center w-8 h-8 rounded-full bg-primary text-primary-foreground transition-colors group-hover:bg-[var(--primary-hover)]">
+                <ArrowRight className="size-4" />
+              </span>
+            </div>
+          </button>
+
+          <Link
+            to="/results"
+            className="group surface-card text-left p-6 no-underline text-foreground cursor-pointer transition-all hover:translate-y-[-1px] hover:shadow-[var(--shadow-1)] hover:border-rule-strong flex flex-col"
+          >
+            <span className="self-start px-2.5 py-1 rounded-full bg-secondary text-ink-2 text-[11px] font-semibold mb-4">
+              라이브러리
+            </span>
+            <h3 className="headline-card m-0">내 영상들</h3>
+            <p className="m-0 mt-1.5 mb-4 text-[13.5px] text-muted-foreground leading-[1.55]">
+              지금까지 만든 결과를 보고 플레이리스트로 정리하세요.
+            </p>
+            <div className="flex items-center justify-between mt-auto">
+              <span className="text-[12px] text-muted-foreground inline-flex items-center gap-1.5">
+                <Film className="size-3" />
+                {historyTotal !== null ? `${historyTotal}개의 영상` : '영상 둘러보기'}
+              </span>
+              <span className="grid place-items-center w-8 h-8 rounded-full bg-secondary text-foreground transition-colors group-hover:bg-foreground group-hover:text-background">
+                <ArrowRight className="size-4" />
+              </span>
+            </div>
+          </Link>
+        </div>
+
+        {/* Stats */}
+        <div className="grid grid-cols-2 md:grid-cols-3 gap-3 mb-9">
+          <Stat
+            label="이번 주 만든 영상"
+            value={`${weekCount}`}
+            unit="개"
+            trend={weekCount > 0 ? `최근 7일` : '— 첫 영상이 기다려요'}
+            trendOk={weekCount > 0}
+            sparkData={weekTrend}
+            sparkKind="bars"
+          />
+          <Stat
+            label="평균 생성 시간"
+            value={avgSec ? `${avgSec}` : '—'}
+            unit={avgSec ? '초' : ''}
+            trend={avgSec ? '최근 8개 추세' : '아직 측정 전'}
+            trendOk={Boolean(avgSec)}
+            sparkData={durationTrend}
+            sparkKind="line"
+          />
+          <Stat
+            label="총 영상"
+            value={historyTotal !== null ? `${historyTotal}` : '—'}
+            unit={historyTotal !== null ? '개' : ''}
+            trend={historyTotal && historyTotal > 0 ? '저장 완료' : '— 새 영상이 처음이에요'}
+            trendOk={Boolean(historyTotal)}
+            icon={<Film className="size-3.5 text-muted-foreground" />}
+          />
+        </div>
+
+        {/* Recent works */}
+        {history === null && (
+          <div className="surface-card p-8 flex justify-center">
+            <Spinner size="md" label="최근 작업 불러오는 중" />
+          </div>
+        )}
+
+        {history && history.length > 0 && (
+          <section className="mb-10">
+            <div className="flex items-baseline justify-between mb-3.5">
+              <h2 className="headline-section m-0">최근 작업</h2>
+              <Link
+                to="/results"
+                className="text-primary text-[13px] font-semibold no-underline hover:underline"
+              >
+                전체 보기 →
+              </Link>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              {history.slice(0, 4).map((it) => (
+                <RecentRow key={it.task_id} item={it} />
+              ))}
+            </div>
+          </section>
+        )}
+
+        {history && history.length === 0 && (
+          <div className="surface-card">
+            <EmptyState
+              kind="no-videos"
+              title="아직 만든 영상이 없어요"
+              description="첫 영상을 만들어 라이브러리를 채워보세요."
+              action={
+                <button
+                  type="button"
+                  onClick={() => navigate('/step/1')}
+                  className="inline-flex items-center gap-1.5 px-4 py-2 bg-primary text-primary-foreground rounded-md text-[13px] font-semibold hover:bg-[var(--primary-hover)] transition-colors cursor-pointer"
+                >
+                  지금 만들기 <ArrowRight className="size-3.5" />
+                </button>
+              }
             />
           </div>
-        </div>
-      </main>
+        )}
+      </div>
+    </AppLayout>
+  );
+}
+
+interface StatProps {
+  label: string;
+  value: string;
+  unit?: string;
+  trend?: string;
+  trendOk?: boolean;
+  sparkData?: number[];
+  sparkKind?: 'line' | 'bars' | 'area';
+  icon?: React.ReactNode;
+}
+
+function Stat({ label, value, unit, trend, trendOk, sparkData, sparkKind, icon }: StatProps) {
+  return (
+    <div className="surface-card p-4 px-5">
+      <div className="text-[12px] text-muted-foreground mb-1.5 inline-flex items-center gap-1.5">
+        {icon}
+        {label}
+      </div>
+      <div className="font-bold tracking-[-0.024em] tabular-nums leading-none">
+        <span className="text-[26px]">{value}</span>
+        {unit && <span className="text-[14px] text-ink-2 font-medium ml-1">{unit}</span>}
+      </div>
+      <div className="mt-2 flex items-end justify-between gap-2">
+        {trend && (
+          <div className={`text-[11px] font-semibold ${trendOk ? 'text-success-on-soft' : 'text-muted-foreground'}`}>
+            {trend}
+          </div>
+        )}
+        {sparkData && sparkData.length > 1 && (
+          <div className={trendOk ? 'text-primary' : 'text-muted-foreground'}>
+            <Sparkline data={sparkData} kind={sparkKind ?? 'line'} width={64} height={20} highlightLast />
+          </div>
+        )}
+      </div>
     </div>
   );
 }
 
-interface ActionButtonProps {
-  variant: 'primary' | 'secondary';
-  iconName: string;
-  title: string;
-  subtitle: string;
-  onClick: () => void;
-}
-
-function ActionButton({ variant, iconName, title, subtitle, onClick }: ActionButtonProps) {
-  // Action tiles, not form buttons — bigger than a wizard .btn but still
-  // restrained. 16px corner radius, 16px padding, no decorative drop shadow.
-  const base =
-    'flex items-center gap-3 px-4 py-4 rounded-md text-left cursor-pointer transition-colors';
-  const variantClass =
-    variant === 'primary'
-      ? 'bg-primary text-primary-foreground hover:bg-[var(--color-brand-primary-hover)]'
-      : 'bg-secondary text-foreground border border-border hover:bg-muted';
-  const iconBg =
-    variant === 'primary'
-      ? 'bg-white/15 text-primary-foreground'
-      : 'bg-card text-primary border border-border';
+function RecentRow({ item }: { item: HistoryItem }) {
+  const videoUrl = item.video_url || `/api/videos/${item.task_id}`;
+  const title = videoTitle(item);
+  const ts = formatCompactDate(item.timestamp);
+  const dur = formatDuration(item.generation_time);
 
   return (
-    <button type="button" onClick={onClick} className={`${base} ${variantClass}`}>
-      <div className={`grid place-items-center w-10 h-10 rounded-md shrink-0 ${iconBg}`}>
-        <Icon name={iconName} size={18} />
+    <Link
+      to={`/result/${item.task_id}`}
+      className="group surface-card p-3.5 grid grid-cols-[80px_1fr] gap-3.5 no-underline text-foreground transition-colors hover:border-rule-strong relative"
+    >
+      <div className="relative w-20 h-[60px] rounded-md overflow-hidden bg-foreground">
+        <video src={videoUrl} preload="metadata" muted className="block w-full h-full object-cover" />
+        <span className="absolute inset-0 grid place-items-center bg-foreground/0 group-hover:bg-foreground/30 transition-colors">
+          <Play className="size-4 text-background opacity-0 group-hover:opacity-100 transition-opacity" fill="currentColor" />
+        </span>
       </div>
-      <div className="min-w-0">
-        <div className="text-[14px] font-semibold mb-0.5 truncate">{title}</div>
-        <div className={`text-[12px] truncate ${variant === 'primary' ? 'opacity-85' : 'text-muted-foreground'}`}>
-          {subtitle}
+      <div className="flex flex-col gap-1 min-w-0">
+        <div className="font-semibold text-[14px] tracking-[-0.014em] truncate" title={title}>
+          {title}
+        </div>
+        <span className="pill-success self-start">완료</span>
+        <div className="text-[11.5px] text-muted-foreground tabular-nums">
+          {ts}{ts && dur !== '—' && ` · ${dur}`}
         </div>
       </div>
-    </button>
+    </Link>
   );
+}
+
+function useClock(): string {
+  const [now, setNow] = useState(() => new Date());
+  useEffect(() => {
+    const id = setInterval(() => setNow(new Date()), 30_000);
+    return () => clearInterval(id);
+  }, []);
+  const hh = String(now.getHours()).padStart(2, '0');
+  const mm = String(now.getMinutes()).padStart(2, '0');
+  return `${hh}:${mm}`;
 }

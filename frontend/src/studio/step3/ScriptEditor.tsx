@@ -91,16 +91,35 @@ export function ScriptEditor({ paragraphs, onParagraphsChange }: ScriptEditorPro
             <div className="script-paragraph">
               <div className="script-paragraph__header">
                 <span className="script-paragraph__label">문단 {idx + 1}</span>
-                {idx !== 0 && (
-                  <button
-                    type="button"
-                    className="paragraph-delete-btn inline-flex items-center gap-1 h-7 px-2.5 rounded-md text-[12px] font-medium text-muted-foreground hover:bg-secondary hover:text-foreground transition-colors"
-                    onClick={() => removeParagraph(idx)}
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                  <span
+                    style={{
+                      fontFamily: 'var(--font-mono)',
+                      fontSize: 10.5,
+                      color:
+                        (p || '').length > 800
+                          ? 'var(--danger)'
+                          : (p || '').length > 500
+                            ? 'var(--warn)'
+                            : 'var(--text-tertiary)',
+                      letterSpacing: '0.02em',
+                      fontVariantNumeric: 'tabular-nums',
+                    }}
+                    title="문단별 글자수"
                   >
-                    <Icon name="trash" size={11} />
-                    삭제
-                  </button>
-                )}
+                    {(p || '').length.toLocaleString()}자
+                  </span>
+                  {idx !== 0 && (
+                    <button
+                      type="button"
+                      className="paragraph-delete-btn inline-flex items-center gap-1 h-7 px-2.5 rounded-md text-[12px] font-medium text-muted-foreground hover:bg-secondary hover:text-foreground transition-colors"
+                      onClick={() => removeParagraph(idx)}
+                    >
+                      <Icon name="trash" size={11} />
+                      삭제
+                    </button>
+                  )}
+                </span>
               </div>
               <textarea
                 className="textarea"

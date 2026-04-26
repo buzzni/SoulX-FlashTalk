@@ -119,7 +119,7 @@ export default function ServerFilePicker({ open, onClose, onSelect, kind = 'imag
           )}
 
           {error && (
-            <div className="px-3 py-2 rounded-md border bg-[hsl(0_90%_96%)] text-destructive border-destructive/30 text-[13px] flex items-center gap-2">
+            <div className="px-3 py-2 rounded-md border bg-destructive-soft text-destructive border-destructive/30 text-[13px] flex items-center gap-2">
               <Icon name="alert_circle" size={13} />
               {error}
             </div>
@@ -149,7 +149,7 @@ export default function ServerFilePicker({ open, onClose, onSelect, kind = 'imag
                     onSelect(f);
                     onClose();
                   }}
-                  className="flex flex-col text-left rounded-md overflow-hidden border border-border bg-card cursor-pointer transition-all hover:border-primary hover:shadow-[0_0_0_2px_hsl(218_100%_50%/0.15)]"
+                  className="flex flex-col text-left rounded-md overflow-hidden border border-border bg-card cursor-pointer transition-all hover:border-primary hover:shadow-[0_0_0_3px_color-mix(in_oklch,var(--primary)_18%,transparent)]"
                 >
                   <div className="aspect-square bg-foreground overflow-hidden relative">
                     {kind === 'image' ? (

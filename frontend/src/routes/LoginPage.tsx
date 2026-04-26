@@ -1,10 +1,8 @@
 /**
- * /login — minimal credential page (PR2).
+ * /login — credential page.
  *
- * Separate route (not a modal) so the auth boundary is unambiguous: any
- * unauthenticated request bounces here, the URL says /login, and refresh
- * doesn't lose state. After a successful login we redirect to the
- * `?next=` query param, defaulting to `/`.
+ * Korean Productivity 결: 워크스페이스 마크 + 큰 Pretendard 700 헤딩
+ * + 부드러운 카드. AppLayout 안 씀 (사이드바 X — 로그인 전 상태).
  */
 import { FormEvent, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
@@ -40,61 +38,102 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-secondary px-4">
-      <form
-        onSubmit={onSubmit}
-        aria-labelledby="login-heading"
-        className="w-full max-w-sm flex flex-col gap-3 p-6 surface-base animate-fade-in"
-      >
-        <div className="flex flex-col gap-0.5 mb-1">
-          <h1 id="login-heading" className="text-lg font-semibold tracking-tight">
-            SoulX-FlashTalk Studio
-          </h1>
-          <p className="text-[13px] text-muted-foreground">로그인이 필요합니다</p>
+    <div className="min-h-screen flex items-center justify-center bg-background px-5 py-10">
+      <div className="w-full max-w-sm animate-rise">
+        {/* Workspace mark */}
+        <div className="flex items-center gap-3 mb-7">
+          <span
+            aria-hidden
+            className="grid place-items-center w-9 h-9 rounded-md bg-foreground text-background font-bold text-[15px]"
+          >
+            F
+          </span>
+          <div className="flex flex-col">
+            <span className="font-bold text-[15px] tracking-[-0.018em]">
+              FlashTalk
+            </span>
+            <span className="text-[11.5px] text-muted-foreground">
+              AI 쇼호스트 영상 작업실
+            </span>
+          </div>
         </div>
 
-        <label className="flex flex-col gap-1.5 text-[12px] font-medium text-[hsl(214_8%_35%)]">
-          <span>아이디</span>
-          <input
-            type="text"
-            autoComplete="username"
-            autoFocus
-            value={userId}
-            onChange={(e) => setUserId(e.target.value)}
-            disabled={busy}
-            className="h-9 px-3 text-[13px] rounded-md border border-input bg-card disabled:opacity-60 transition-colors focus:border-primary"
-          />
-        </label>
+        <h1 id="login-heading" className="headline-section m-0 mb-1.5">
+          다시 만나요.
+        </h1>
+        <p className="m-0 mb-7 text-[14px] text-ink-2">
+          작업실에 들어오려면 로그인이 필요해요.
+        </p>
 
-        <label className="flex flex-col gap-1.5 text-[12px] font-medium text-[hsl(214_8%_35%)]">
-          <span>비밀번호</span>
-          <input
-            type="password"
-            autoComplete="current-password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            disabled={busy}
-            className="h-9 px-3 text-[13px] rounded-md border border-input bg-card disabled:opacity-60 transition-colors focus:border-primary"
-          />
-        </label>
-
-        {error && (
-          <div
-            role="alert"
-            className="px-3 py-2 text-[12px] rounded-md border bg-[hsl(0_90%_96%)] text-destructive border-destructive/30"
-          >
-            {error}
-          </div>
-        )}
-
-        <button
-          type="submit"
-          disabled={busy}
-          className="h-10 px-4 text-[13px] font-semibold rounded-md bg-primary text-primary-foreground transition-colors hover:bg-[var(--color-brand-primary-hover)] disabled:opacity-60 disabled:cursor-not-allowed mt-1"
+        <form
+          onSubmit={onSubmit}
+          aria-labelledby="login-heading"
+          className="surface-card p-5 flex flex-col gap-4"
         >
-          {busy ? '확인 중…' : '로그인'}
-        </button>
-      </form>
+          <Field label="아이디" htmlFor="login-userid">
+            <input
+              id="login-userid"
+              type="text"
+              autoComplete="username"
+              autoFocus
+              value={userId}
+              onChange={(e) => setUserId(e.target.value)}
+              disabled={busy}
+              className="h-10 px-3 text-[14px] rounded-md border border-input bg-background disabled:opacity-60 transition-[border-color,box-shadow] focus:border-primary focus:outline-none focus:shadow-[0_0_0_3px_var(--primary-soft)]"
+            />
+          </Field>
+
+          <Field label="비밀번호" htmlFor="login-password">
+            <input
+              id="login-password"
+              type="password"
+              autoComplete="current-password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              disabled={busy}
+              className="h-10 px-3 text-[14px] rounded-md border border-input bg-background disabled:opacity-60 transition-[border-color,box-shadow] focus:border-primary focus:outline-none focus:shadow-[0_0_0_3px_var(--primary-soft)]"
+            />
+          </Field>
+
+          {error && (
+            <div
+              role="alert"
+              className="px-3 py-2 text-[12.5px] rounded-md border bg-destructive-soft text-destructive border-destructive/30"
+            >
+              {error}
+            </div>
+          )}
+
+          <button
+            type="submit"
+            disabled={busy}
+            className="h-11 px-4 text-[14px] font-bold rounded-md bg-primary text-primary-foreground hover:bg-[var(--primary-hover)] disabled:opacity-60 disabled:cursor-not-allowed transition-colors mt-1"
+          >
+            {busy ? '확인 중…' : '들어가기'}
+          </button>
+        </form>
+
+        <p className="mt-5 text-[12px] text-muted-foreground text-center">
+          처음 오셨나요? 관리자에게 계정을 요청하세요.
+        </p>
+      </div>
     </div>
+  );
+}
+
+function Field({
+  label,
+  htmlFor,
+  children,
+}: {
+  label: string;
+  htmlFor: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <label htmlFor={htmlFor} className="flex flex-col gap-1.5">
+      <span className="text-[12.5px] font-semibold text-foreground">{label}</span>
+      {children}
+    </label>
   );
 }

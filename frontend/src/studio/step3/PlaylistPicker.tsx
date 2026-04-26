@@ -93,7 +93,7 @@ export function PlaylistPicker({ selected, onChange }: PlaylistPickerProps) {
   // Graceful degradation — playlist list unreachable. User can still ship.
   if (loadError) {
     return (
-      <div className="flex items-center gap-2 px-3 py-2 text-xs rounded-md border border-[hsl(38_92%_50%/0.4)] bg-[hsl(38_92%_96%)] text-[hsl(38_92%_30%)]">
+      <div className="flex items-center gap-2 px-3 py-2 text-xs rounded-md border border-amber/40 bg-amber-soft text-amber-on-soft">
         <AlertCircle className="size-3.5 shrink-0" />
         <span className="flex-1">
           플레이리스트 목록을 못 불러왔어요 · 이번 영상은 미지정으로 저장됩니다

@@ -1,0 +1,70 @@
+/**
+ * StepHeading — visual hero for each wizard step.
+ *
+ * Big "01"/"02"/"03" badge on left + headline + caption on right + small
+ * "3단계 중 N" indicator. Replaces the plain `<div className="step-heading">
+ * <h1>1단계 · 쇼호스트 만들기</h1></div>` pattern that gave the wizard pages
+ * weak visual entry points. Comes with optional `eyebrow` for status pills
+ * (e.g. "수정 모드", "초안") and `aside` for top-right info pills.
+ */
+import * as React from 'react';
+
+export interface StepHeadingProps {
+  step: 1 | 2 | 3;
+  total?: number;
+  title: string;
+  description?: string;
+  eyebrow?: React.ReactNode;
+  aside?: React.ReactNode;
+}
+
+export function StepHeading({
+  step,
+  total = 3,
+  title,
+  description,
+  eyebrow,
+  aside,
+}: StepHeadingProps) {
+  return (
+    <div className="step-heading-hero">
+      <div className="grid items-center gap-4 md:gap-5" style={{ gridTemplateColumns: 'auto 1fr auto' }}>
+        <div
+          aria-hidden
+          className="grid place-items-center w-14 h-14 md:w-16 md:h-16 rounded-[12px] bg-foreground text-background font-bold tabular-nums"
+          style={{ fontSize: 28, letterSpacing: '-0.04em', lineHeight: 1 }}
+        >
+          {String(step).padStart(2, '0')}
+        </div>
+        <div className="min-w-0">
+          {eyebrow && (
+            <div className="text-[11.5px] font-semibold text-muted-foreground tracking-[0.005em] mb-0.5">
+              {eyebrow}
+            </div>
+          )}
+          <h1
+            className="m-0 text-foreground"
+            style={{
+              fontFamily: 'var(--font-sans)',
+              fontSize: 22,
+              fontWeight: 700,
+              letterSpacing: '-0.024em',
+              lineHeight: 1.25,
+            }}
+          >
+            {title}
+          </h1>
+          {description && (
+            <p className="m-0 mt-1 text-[13.5px] text-muted-foreground">{description}</p>
+          )}
+        </div>
+        <div className="hidden md:flex items-center gap-2">
+          <div className="text-[11px] text-muted-foreground tabular-nums whitespace-nowrap">
+            {total}단계 중 {step}
+          </div>
+          {aside}
+        </div>
+      </div>
+    </div>
+  );
+}

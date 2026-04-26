@@ -1,83 +1,82 @@
-/* ============ HostStudio design tokens ============
+/* ============ HostStudio (wizard) design tokens ============
  *
- * Bridged to the global Tailwind v4 system in `index.css`. Tokens defined here
- * are still scoped to .studio-root because the wizard's app.css consumes them
- * by name (`var(--bg)`, `var(--accent)`, ...). Pointing them at the global
- * `--background` / `--primary` / etc. swaps the wizard's palette over to the
- * new brand tone (#005DFF / #F0F7FF / #C0D8FF) without touching any
- * wizard component.
+ * Bridges to the global Korean Productivity system in `index.css`. The wizard's
+ * app.css consumes tokens by name (`--bg`, `--accent`, `--r-sm`, …) so we re-
+ * expose the new palette under the wizard's vocabulary without touching a
+ * single component class.
  *
- * Semantic colors (success/warn/danger) keep oklch values so the green/amber/
- * red distinctions stay coherent — the global system only ships --destructive.
+ * Three flattenings vs. the prior file:
+ *   1. Radii: `--r-xs/sm/md/lg/xl` collapse to one consistent ladder
+ *      (4 / 6 / 6 / 10 / 12) — no mid-radius slop, no graduated chaos.
+ *   2. Shadows: 4 tiers map onto the new soft layered drop (hairline + diffuse).
+ *   3. Wizard `--accent` = global primary, `--accent-soft` = primary-soft etc.
+ *      Aligned with the productivity palette (warm cream + signal blue).
  */
 .studio-root {
-  /* Neutrals — bridged to global HSL tokens */
   --bg: var(--background);
   --bg-elev: var(--card);
-  --bg-sunken: var(--muted);
-  --bg-subtle: var(--secondary);
-  --border: hsl(214 12% 91%);          /* matches global --border literal */
-  --border-strong: var(--input);
-  --text: var(--foreground);
-  --text-secondary: hsl(214 8% 35%);   /* between foreground and muted-foreground */
-  --text-tertiary: var(--muted-foreground);
-  --text-placeholder: hsl(214 6% 65%); /* lighter than muted-foreground */
+  --bg-sunken: var(--surface-2);
+  --bg-subtle: var(--surface-2);
+  --border: var(--rule);
+  --border-strong: var(--rule-strong);
+  --text: var(--ink);
+  --text-secondary: var(--ink-2);
+  --text-tertiary: var(--ink-3);
+  --text-placeholder: var(--ink-3);
+  --text-primary: var(--ink);
 
-  /* Accent — bridged to global brand */
-  --accent: var(--primary);                 /* #005DFF */
-  --accent-hover: hsl(218 100% 43%);        /* matches --color-brand-primary-hover */
-  --accent-soft: var(--secondary);          /* #F0F7FF */
-  --accent-soft-border: var(--accent);      /* #C0D8FF — global --accent token */
-  --accent-text: hsl(218 100% 38%);         /* deeper brand for on-soft text */
+  --accent: var(--primary);
+  --accent-hover: var(--primary-hover);
+  --accent-soft: var(--primary-soft);
+  --accent-soft-border: var(--primary-soft);
+  --accent-text: var(--primary-on-soft);
+  --accent-strong: var(--primary-hover);
 
-  /* Semantic — kept oklch for fine-tuned hue distinctions */
-  --success: oklch(0.6 0.14 160);
-  --success-soft: oklch(0.95 0.03 160);
-  --warn: oklch(0.7 0.14 75);
-  --warn-soft: oklch(0.96 0.04 75);
+  --success: var(--success);
+  --success-soft: var(--success-soft);
+  --warn: var(--amber);
+  --warn-soft: var(--amber-soft);
+  --warn-text: var(--amber-on-soft);
   --danger: var(--destructive);
-  --danger-soft: hsl(0 90% 96%);
+  --danger-soft: var(--destructive-soft);
 
-  /* Radii — match global --radius (0.375rem = 6px) family */
   --r-xs: 4px;
   --r-sm: 6px;
-  --r-md: 8px;
-  --r-lg: 12px;
-  --r-xl: 16px;
+  --r-md: 6px;
+  --r-lg: 10px;
+  --r-xl: 12px;
 
-  /* Shadow — kept; consistent fine-grain ladder */
-  --shadow-xs: 0 1px 0 rgba(20, 24, 32, 0.04);
-  --shadow-sm: 0 1px 2px rgba(20, 24, 32, 0.06), 0 1px 3px rgba(20, 24, 32, 0.04);
-  --shadow-md: 0 4px 10px rgba(20, 24, 32, 0.06), 0 2px 4px rgba(20, 24, 32, 0.04);
-  --shadow-lg: 0 20px 40px rgba(20, 24, 32, 0.08), 0 8px 16px rgba(20, 24, 32, 0.05);
+  --shadow-xs: var(--shadow-soft);
+  --shadow-sm: var(--shadow-1);
+  --shadow-md: var(--shadow-1);
+  --shadow-lg: var(--shadow-2);
 
-  /* Density — Comfortable (default) */
   --pad-card: 20px;
   --pad-field: 10px 12px;
   --gap-row: 14px;
   --gap-stack: 16px;
-  --row-h: 36px;
+  --row-h: 38px;
   --label-mt: 8px;
   --section-gap: 28px;
   --font-size-base: 14px;
   --font-size-label: 12px;
   --font-size-micro: 11px;
 
-  font-family: "Pretendard Variable", "Pretendard", -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Noto Sans KR", sans-serif;
+  font-family: var(--font-sans);
   font-size: var(--font-size-base);
   color: var(--text);
   background: var(--bg);
   -webkit-font-smoothing: antialiased;
-  line-height: 1.5;
-  letter-spacing: -0.01em;
+  line-height: 1.55;
+  letter-spacing: -0.012em;
 }
 
 .studio-root[data-density="compact"] {
   --pad-card: 14px;
-  --pad-field: 7px 10px;
+  --pad-field: 8px 10px;
   --gap-row: 10px;
   --gap-stack: 12px;
-  --row-h: 30px;
+  --row-h: 32px;
   --label-mt: 6px;
   --section-gap: 20px;
   --font-size-base: 13px;
@@ -89,27 +88,40 @@
 .studio-root *::before,
 .studio-root *::after { box-sizing: border-box; }
 
-.studio-root .mono { font-family: 'JetBrains Mono', 'SF Mono', Menlo, monospace; font-feature-settings: 'tnum'; }
+.studio-root .mono {
+  font-family: var(--font-mono);
+  font-feature-settings: 'tnum';
+}
 .studio-root .num { font-variant-numeric: tabular-nums; }
 
 .studio-root button { font-family: inherit; }
 .studio-root input,
 .studio-root textarea,
 .studio-root select { font-family: inherit; color: inherit; }
-.studio-root input:focus,
-.studio-root textarea:focus,
-.studio-root select:focus { outline: none; }
 
-/* Scrollbar — scoped to wizard. The global thin (4px) scrollbar
- * lives in index.css; the wizard keeps a slightly chunkier 10px
- * because its panels have a lot more vertical content. */
 .studio-root *::-webkit-scrollbar { width: 10px; height: 10px; }
 .studio-root *::-webkit-scrollbar-thumb {
-  background: var(--border);
-  border-radius: 99px;
+  background: var(--rule-strong);
+  border-radius: var(--radius);
   border: 2px solid var(--bg);
 }
 .studio-root *::-webkit-scrollbar-thumb:hover {
-  background: var(--muted-foreground);
+  background: var(--ink-3);
 }
 .studio-root *::-webkit-scrollbar-track { background: transparent; }
+
+/* Wizard handles its own focus styling on inputs (.input :focus uses
+ * box-shadow). Suppress global :focus-visible inside .studio-root to
+ * avoid double rings; non-input wizard buttons keep keyboard rings. */
+.studio-root *:focus-visible {
+  outline: none;
+}
+.studio-root .step-pill:focus-visible,
+.studio-root .file-btn:focus-visible,
+.studio-root .upload-tile:focus-visible,
+.studio-root .preset-tile:focus-visible,
+.studio-root .res-tile:focus-visible,
+.studio-root .voice-item:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}

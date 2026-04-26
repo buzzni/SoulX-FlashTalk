@@ -1,21 +1,18 @@
 /**
- * /results — grid of completed renders + playlist sidebar.
+ * /results — 완성된 영상 + 플레이리스트.
  *
- * Lane E of docs/playlist-feature-plan.md. Two-pane layout: sidebar with
- * 전체 / 미지정 / each playlist (alphabetical, plan decision #11), card
- * grid filters via /api/history?playlist_id=. Card [⋯] popover moves to
- * another playlist; sidebar item [⋯] renames/deletes. Cascade-on-delete
- * sends videos back to 미지정 (plan §5).
- *
- * Styling — Tailwind utility classes against the design tokens defined in
- * `frontend/src/index.css`. Sidebar uses `--color-sidebar-*`, popovers
- * use the `panel-glass` utility, rows use `panel-row`, surfaces use
- * `surface-base`. No inline hex colors.
+ * Korean Productivity 결: 페이지 헤딩 + 플레이리스트 chip 가로 스트립 +
+ * 영상 그리드. 메인 사이드바는 AppLayout, 플레이리스트 필터는 chip
+ * 가로 strip (이전엔 별도 사이드바였음 — 마스터 사이드바와 공간 충돌).
  */
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState, useRef } from 'react';
 import { Link } from 'react-router-dom';
-import { MoreHorizontal } from 'lucide-react';
-import { AppHeader } from './AppHeader';
+import { toast } from 'sonner';
+import { MoreHorizontal, Plus, Play } from 'lucide-react';
+import { AppLayout } from './AppLayout';
+import { Spinner } from '../components/spinner';
+import { EmptyState } from '../components/empty-state';
+import { videoTitle, formatCompactDate, formatDuration } from '../lib/format';
 import { fetchJSON, humanizeError } from '../api/http';
 import {
   createPlaylist,
@@ -31,7 +28,6 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuLabel,
-  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 
@@ -52,7 +48,7 @@ interface HistoryResponse {
   videos: HistoryItem[];
 }
 
-type Filter = 'all' | 'unassigned' | string; // string = playlist_id
+type Filter = 'all' | 'unassigned' | string;
 
 export function ResultsListPage() {
   const [filter, setFilter] = useState<Filter>('all');
@@ -64,7 +60,6 @@ export function ResultsListPage() {
   const [epoch, setEpoch] = useState(0);
   const refresh = useCallback(() => setEpoch((n) => n + 1), []);
 
-  // Load playlists.
   useEffect(() => {
     const ctl = new AbortController();
     setPlaylistsError(null);
@@ -82,7 +77,6 @@ export function ResultsListPage() {
     return () => ctl.abort();
   }, [epoch]);
 
-  // Load filtered history.
   useEffect(() => {
     const ctl = new AbortController();
     setItems(null);
@@ -101,9 +95,6 @@ export function ResultsListPage() {
     return () => ctl.abort();
   }, [filter, epoch]);
 
-  // If the currently-selected playlist gets deleted (this tab or another),
-  // fall back to "전체". Trigger only when `playlists` changes — adding
-  // `filter` to the deps would race the create-then-select flow.
   useEffect(() => {
     if (!playlists) return;
     if (filter === 'all' || filter === 'unassigned') return;
@@ -121,102 +112,120 @@ export function ResultsListPage() {
       ?? '내 영상들';
   }, [filter, playlists]);
 
+  const totalCount =
+    (playlists?.unassigned_count ?? 0) +
+    (playlists?.playlists ?? []).reduce((s, p) => s + p.video_count, 0);
+
   return (
-    <div className="min-h-screen flex flex-col bg-background">
-      <AppHeader />
-      <main className="flex-1 px-4 md:px-6 py-6 max-w-[1280px] w-full mx-auto">
-        <div className="grid gap-4 md:gap-6 items-start grid-cols-1 md:grid-cols-[minmax(220px,240px)_minmax(0,1fr)]">
-          <PlaylistSidebar
-            playlists={playlists}
-            error={playlistsError}
-            selected={filter}
-            onSelect={setFilter}
-            onChanged={refresh}
-            onCreated={(p) => {
-              refresh();
-              setFilter(p.playlist_id);
-            }}
-          />
-          <section className="min-w-0">
-            <div className="flex items-baseline gap-2.5 mb-3">
-              <h1 className="m-0 text-xl font-semibold tracking-tight">{filterTitle}</h1>
-              {items !== null && (
-                <span className="text-[13px] text-muted-foreground tabular-nums">
-                  {items.length}개
-                </span>
-              )}
-            </div>
-            {historyError && (
-              <div className="px-3 py-2 text-[13px] rounded-md bg-[hsl(0_90%_96%)] text-destructive border border-destructive/30">
-                {historyError}
-              </div>
-            )}
-            {!historyError && items === null && (
-              <div className="px-3 py-2 text-[13px] text-muted-foreground">불러오는 중…</div>
-            )}
-            {!historyError && items !== null && items.length === 0 && (
-              <div className="flex flex-col items-center gap-2.5 py-10 px-4 surface-base text-center animate-fade-in">
-                <p className="m-0 text-[13px] text-muted-foreground">
-                  {filter === 'all'
-                    ? '아직 만든 영상이 없어요.'
-                    : '이 플레이리스트는 비어있어요.'}
-                </p>
-                {filter === 'all' && (
+    <AppLayout active="results">
+      <div className="px-6 md:px-12 pt-12 md:pt-16 pb-16 max-w-[1280px] animate-rise">
+        {/* Page heading */}
+        <div className="mb-6">
+          <div className="text-[13px] text-muted-foreground mb-1.5">라이브러리</div>
+          <h1 className="headline-section m-0">{filterTitle}</h1>
+          {items !== null && (
+            <p className="m-0 mt-1 text-[13px] text-muted-foreground">
+              {items.length}개의 영상
+            </p>
+          )}
+        </div>
+
+        {/* Playlist filter strip */}
+        <PlaylistChips
+          playlists={playlists}
+          totalCount={totalCount}
+          selected={filter}
+          onSelect={setFilter}
+          onChanged={refresh}
+          onCreated={(p) => {
+            refresh();
+            setFilter(p.playlist_id);
+          }}
+          error={playlistsError}
+        />
+
+        {historyError && (
+          <div className="mt-4 px-4 py-3 text-[13px] bg-destructive-soft text-destructive border border-destructive/30 rounded-md">
+            {historyError}
+          </div>
+        )}
+
+        {!historyError && items === null && (
+          <div className="mt-8 flex items-center gap-2 text-[13px] text-muted-foreground">
+            <Spinner size="sm" /> 불러오는 중
+          </div>
+        )}
+
+        {!historyError && items !== null && items.length === 0 && (
+          <div className="mt-6 surface-card animate-fade-in">
+            <EmptyState
+              kind={filter === 'all' ? 'no-videos' : 'no-playlist-items'}
+              title={
+                filter === 'all'
+                  ? '아직 만든 영상이 없어요'
+                  : '이 플레이리스트는 비어있어요'
+              }
+              description={
+                filter === 'all'
+                  ? '첫 영상을 만들어 라이브러리를 채워보세요.'
+                  : '결과 카드의 ⋯ 메뉴에서 이 플레이리스트로 옮겨보세요.'
+              }
+              action={
+                filter === 'all' ? (
                   <Link
                     to="/step/1"
-                    className="text-[13px] font-semibold text-primary no-underline hover:underline"
+                    className="text-primary text-[13px] font-semibold no-underline hover:underline"
                   >
                     첫 영상 만들러 가기 →
                   </Link>
-                )}
-              </div>
-            )}
-            {!historyError && items !== null && items.length > 0 && (
-              <div className="grid gap-3 grid-cols-[repeat(auto-fill,minmax(220px,1fr))]">
-                {items.map((it) => (
-                  <ResultCard
-                    key={it.task_id}
-                    item={it}
-                    playlists={playlists?.playlists ?? []}
-                    onMoved={refresh}
-                  />
-                ))}
-              </div>
-            )}
-          </section>
-        </div>
-      </main>
-    </div>
+                ) : undefined
+              }
+            />
+          </div>
+        )}
+
+        {!historyError && items !== null && items.length > 0 && (
+          <div className="mt-6 grid gap-4 grid-cols-[repeat(auto-fill,minmax(240px,1fr))]">
+            {items.map((it) => (
+              <ResultCard
+                key={it.task_id}
+                item={it}
+                playlists={playlists?.playlists ?? []}
+                onMoved={refresh}
+              />
+            ))}
+          </div>
+        )}
+      </div>
+    </AppLayout>
   );
 }
 
-// ── Sidebar ──────────────────────────────────────────────────────────
+// ── Playlist chips strip ─────────────────────────────────────────────
 
-interface PlaylistSidebarProps {
+interface PlaylistChipsProps {
   playlists: PlaylistListResponse | null;
-  error: string | null;
+  totalCount: number;
   selected: Filter;
   onSelect: (f: Filter) => void;
   onChanged: () => void;
   onCreated: (p: Playlist) => void;
+  error: string | null;
 }
 
-function PlaylistSidebar({
+function PlaylistChips({
   playlists,
-  error,
+  totalCount,
   selected,
   onSelect,
   onChanged,
   onCreated,
-}: PlaylistSidebarProps) {
+  error,
+}: PlaylistChipsProps) {
   const [creating, setCreating] = useState(false);
   const [newName, setNewName] = useState('');
   const [createError, setCreateError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-
-  const totalCount =
-    (playlists?.unassigned_count ?? 0) +
-    (playlists?.playlists ?? []).reduce((s, p) => s + p.video_count, 0);
 
   const closeCreate = () => {
     setCreating(false);
@@ -232,6 +241,7 @@ function PlaylistSidebar({
     try {
       const p = await createPlaylist(n);
       closeCreate();
+      toast.success(`'${n}' 플레이리스트를 만들었어요`);
       onCreated(p);
     } catch (e) {
       setCreateError(humanizeError(e));
@@ -241,25 +251,27 @@ function PlaylistSidebar({
   };
 
   return (
-    <aside className="flex flex-col gap-0.5 p-2 rounded-xl bg-sidebar-background border border-sidebar-border md:sticky md:top-4">
+    <div className="flex flex-wrap items-center gap-2">
       {error && (
-        <div className="px-2 py-1.5 text-xs text-destructive">{error}</div>
+        <div className="text-[12px] text-destructive">{error}</div>
       )}
-      <SidebarRow
+      <FilterChip
         label="전체"
         count={totalCount}
         active={selected === 'all'}
         onClick={() => onSelect('all')}
       />
-      <SidebarRow
+      <FilterChip
         label="미지정"
         count={playlists?.unassigned_count ?? 0}
         active={selected === 'unassigned'}
         onClick={() => onSelect('unassigned')}
       />
-      <hr className="border-0 border-t border-sidebar-border my-2" />
+      {(playlists?.playlists ?? []).length > 0 && (
+        <span className="mx-1 w-px h-5 bg-border" aria-hidden />
+      )}
       {(playlists?.playlists ?? []).map((p) => (
-        <SidebarPlaylistRow
+        <PlaylistChip
           key={p.playlist_id}
           playlist={p}
           active={selected === p.playlist_id}
@@ -267,17 +279,17 @@ function PlaylistSidebar({
           onChanged={onChanged}
         />
       ))}
-      <hr className="border-0 border-t border-sidebar-border my-2" />
       {!creating ? (
         <button
           type="button"
           onClick={() => setCreating(true)}
-          className="flex items-center w-full text-left px-2.5 h-8 rounded-md text-[13px] font-medium text-primary transition-colors hover:bg-muted cursor-pointer"
+          className="inline-flex items-center gap-1 px-3 py-1.5 rounded-full border border-dashed border-rule-strong text-muted-foreground text-[12.5px] font-medium hover:border-primary hover:text-primary transition-colors cursor-pointer"
         >
-          + 새 플레이리스트
+          <Plus className="size-3.5" />
+          <span>새 플레이리스트</span>
         </button>
       ) : (
-        <div className="flex flex-col gap-1.5 px-1 py-1">
+        <div className="inline-flex items-center gap-1.5 px-2 py-1 rounded-full border border-primary bg-card">
           <input
             type="text"
             value={newName}
@@ -285,7 +297,7 @@ function PlaylistSidebar({
             placeholder="이름 (예: 신상품)"
             autoFocus
             disabled={busy}
-            className="h-8 px-2 text-[13px] rounded-md border border-input bg-card disabled:opacity-60 transition-colors focus:border-primary"
+            className="text-[12.5px] bg-transparent border-0 outline-none px-1 w-36 disabled:opacity-60"
             onKeyDown={(e) => {
               if (e.key === 'Enter') {
                 e.preventDefault();
@@ -296,72 +308,68 @@ function PlaylistSidebar({
               }
             }}
           />
-          <div className="flex gap-1.5">
-            <button
-              type="button"
-              onClick={submitCreate}
-              disabled={busy || !newName.trim()}
-              className="flex-1 h-7 px-2 text-[12px] font-medium rounded-md bg-primary text-primary-foreground transition-colors hover:bg-[var(--color-brand-primary-hover)] disabled:opacity-60 disabled:cursor-not-allowed cursor-pointer"
-            >
-              만들기
-            </button>
-            <button
-              type="button"
-              onClick={closeCreate}
-              disabled={busy}
-              className="flex-1 h-7 px-2 text-[12px] rounded-md border border-input bg-card text-muted-foreground transition-colors hover:bg-secondary disabled:opacity-60 cursor-pointer"
-            >
-              취소
-            </button>
-          </div>
-          {createError && (
-            <div className="text-[11px] text-destructive px-1">{createError}</div>
-          )}
+          <button
+            type="button"
+            onClick={submitCreate}
+            disabled={busy || !newName.trim()}
+            className="px-2.5 py-0.5 text-[11px] font-semibold rounded-full bg-primary text-primary-foreground disabled:opacity-50 cursor-pointer"
+          >
+            만들기
+          </button>
+          <button
+            type="button"
+            onClick={closeCreate}
+            disabled={busy}
+            className="px-2 py-0.5 text-[11px] text-muted-foreground hover:text-foreground cursor-pointer"
+          >
+            취소
+          </button>
         </div>
       )}
-    </aside>
+      {createError && (
+        <div className="w-full text-[11px] text-destructive mt-1">{createError}</div>
+      )}
+    </div>
   );
 }
 
-interface SidebarRowProps {
+interface FilterChipProps {
   label: string;
   count: number;
   active: boolean;
   onClick: () => void;
 }
 
-function SidebarRow({ label, count, active, onClick }: SidebarRowProps) {
-  const base =
-    'flex items-center justify-between w-full text-left px-2.5 h-8 rounded-md text-[13px] transition-colors cursor-pointer';
-  const variant = active
-    ? 'bg-sidebar-accent text-sidebar-accent-foreground font-medium'
-    : 'text-sidebar-foreground hover:bg-muted';
+function FilterChip({ label, count, active, onClick }: FilterChipProps) {
   return (
-    <button type="button" onClick={onClick} className={`${base} ${variant}`}>
-      <span className="truncate pr-2">{label}</span>
-      <span className="text-xs text-muted-foreground tabular-nums">{count}</span>
+    <button
+      type="button"
+      onClick={onClick}
+      className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[12.5px] font-medium transition-colors cursor-pointer ${
+        active
+          ? 'bg-foreground text-background'
+          : 'bg-card border border-border text-ink-2 hover:border-rule-strong hover:text-foreground'
+      }`}
+    >
+      <span>{label}</span>
+      <span className={`text-[11px] tabular-nums ${active ? 'text-background/70' : 'text-muted-foreground'}`}>
+        {count}
+      </span>
     </button>
   );
 }
 
-interface SidebarPlaylistRowProps {
+interface PlaylistChipProps {
   playlist: Playlist;
   active: boolean;
   onSelect: () => void;
   onChanged: () => void;
 }
 
-function SidebarPlaylistRow({
-  playlist,
-  active,
-  onSelect,
-  onChanged,
-}: SidebarPlaylistRowProps) {
-  const [hover, setHover] = useState(false);
+function PlaylistChip({ playlist, active, onSelect, onChanged }: PlaylistChipProps) {
   const [renaming, setRenaming] = useState(false);
   const [name, setName] = useState(playlist.name);
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
 
   const submitRename = async () => {
     const n = name.trim();
@@ -371,13 +379,15 @@ function SidebarPlaylistRow({
       return;
     }
     setBusy(true);
-    setError(null);
     try {
       await renamePlaylist(playlist.playlist_id, n);
       setRenaming(false);
+      toast.success(`이름을 '${n}' 으로 바꿨어요`);
       onChanged();
     } catch (e) {
-      setError(humanizeError(e));
+      setName(playlist.name);
+      setRenaming(false);
+      toast.error(humanizeError(e));
     } finally {
       setBusy(false);
     }
@@ -393,57 +403,47 @@ function SidebarPlaylistRow({
     setBusy(true);
     try {
       await deletePlaylist(playlist.playlist_id);
+      toast.success(`'${playlist.name}' 플레이리스트를 삭제했어요`);
       onChanged();
     } catch (e) {
-      setError(humanizeError(e));
+      toast.error(humanizeError(e));
       setBusy(false);
     }
   };
 
   if (renaming) {
     return (
-      <div className="px-1.5">
+      <div className="inline-flex items-center px-2 py-1 rounded-full border border-primary bg-card">
         <input
           type="text"
           value={name}
           onChange={(e) => setName(e.target.value)}
           autoFocus
           disabled={busy}
-          className="w-full px-2 py-1.5 text-[13px] rounded border border-primary bg-card disabled:opacity-60"
+          className="text-[12.5px] bg-transparent border-0 outline-none px-1 w-32"
           onKeyDown={(e) => {
-            if (e.key === 'Enter') {
-              e.preventDefault();
-              submitRename();
-            } else if (e.key === 'Escape') {
-              e.preventDefault();
-              setRenaming(false);
-              setName(playlist.name);
-            }
+            if (e.key === 'Enter') { e.preventDefault(); submitRename(); }
+            else if (e.key === 'Escape') { e.preventDefault(); setRenaming(false); setName(playlist.name); }
           }}
           onBlur={submitRename}
         />
-        {error && (
-          <div className="text-[11px] text-destructive px-1 pt-1">{error}</div>
-        )}
       </div>
     );
   }
 
-  const rowBase =
-    'flex items-center justify-between w-full text-left pl-2.5 pr-9 h-8 rounded-md text-[13px] transition-colors cursor-pointer';
-  const rowVariant = active
-    ? 'bg-sidebar-accent text-sidebar-accent-foreground font-medium'
-    : 'text-sidebar-foreground hover:bg-muted';
-
   return (
-    <div
-      className="relative"
-      onMouseEnter={() => setHover(true)}
-      onMouseLeave={() => setHover(false)}
-    >
-      <button type="button" onClick={onSelect} className={`${rowBase} ${rowVariant}`}>
-        <span className="truncate pr-2">{playlist.name}</span>
-        <span className="text-xs text-muted-foreground tabular-nums">
+    <div className="inline-flex items-center group">
+      <button
+        type="button"
+        onClick={onSelect}
+        className={`inline-flex items-center gap-1.5 pl-3 pr-2 py-1.5 rounded-l-full text-[12.5px] font-medium transition-colors cursor-pointer border ${
+          active
+            ? 'bg-foreground text-background border-foreground'
+            : 'bg-card border-border text-ink-2 hover:border-rule-strong hover:text-foreground'
+        }`}
+      >
+        <span>{playlist.name}</span>
+        <span className={`text-[11px] tabular-nums ${active ? 'text-background/70' : 'text-muted-foreground'}`}>
           {playlist.video_count}
         </span>
       </button>
@@ -451,9 +451,12 @@ function SidebarPlaylistRow({
         <DropdownMenuTrigger asChild>
           <button
             type="button"
-            aria-label="플레이리스트 옵션"
-            title="옵션"
-            className={`absolute right-1.5 top-1/2 -translate-y-1/2 grid place-items-center size-6 rounded text-muted-foreground bg-card/90 border border-border hover:bg-muted hover:text-foreground transition-colors cursor-pointer ${hover ? 'opacity-100' : 'opacity-0 data-[state=open]:opacity-100'}`}
+            aria-label={`${playlist.name} 옵션`}
+            className={`inline-flex items-center justify-center w-7 h-[30px] rounded-r-full border border-l-0 transition-colors cursor-pointer ${
+              active
+                ? 'bg-foreground text-background border-foreground hover:bg-foreground/85'
+                : 'bg-card border-border text-muted-foreground hover:text-foreground hover:border-rule-strong'
+            }`}
           >
             <MoreHorizontal className="size-3.5" />
           </button>
@@ -467,9 +470,6 @@ function SidebarPlaylistRow({
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
-      {error && !renaming && (
-        <div className="text-[11px] text-destructive px-2 pt-1">{error}</div>
-      )}
     </div>
   );
 }
@@ -484,40 +484,71 @@ interface ResultCardProps {
 
 function ResultCard({ item, playlists, onMoved }: ResultCardProps) {
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const videoRef = useRef<HTMLVideoElement>(null);
 
-  const move = async (playlistId: string | null) => {
+  const move = async (playlistId: string | null, playlistName: string) => {
     setBusy(true);
-    setError(null);
     try {
       await moveResultToPlaylist(item.task_id, playlistId);
+      toast.success(`'${playlistName}' 으로 옮겼어요`);
       onMoved();
     } catch (e) {
-      setError(humanizeError(e));
+      toast.error(humanizeError(e));
     } finally {
       setBusy(false);
     }
   };
 
+  // Hover preview — play muted video on hover, pause on leave.
+  const onMouseEnter = () => {
+    const v = videoRef.current;
+    if (!v) return;
+    v.currentTime = 0;
+    v.play().catch(() => {});
+  };
+  const onMouseLeave = () => {
+    const v = videoRef.current;
+    if (!v) return;
+    v.pause();
+    v.currentTime = 0;
+  };
+
   const videoUrl = item.video_url || `/api/videos/${item.task_id}`;
-  const ts = item.timestamp ? new Date(item.timestamp).toLocaleString('ko-KR') : '';
-  const dur = item.generation_time ? `${Math.round(item.generation_time)}s` : '';
-  const blurb = item.script_text || item.host_image || item.task_id.slice(0, 8);
+  const title = videoTitle(item);
+  const ts = formatCompactDate(item.timestamp);
+  const dur = formatDuration(item.generation_time);
 
   return (
     <div className="relative group">
       <Link
         to={`/result/${item.task_id}`}
-        className="flex flex-col surface-base overflow-hidden no-underline text-foreground transition-colors hover:border-input"
+        className="surface-card overflow-hidden no-underline text-foreground transition-all hover:translate-y-[-1px] hover:shadow-[var(--shadow-1)] hover:border-rule-strong block"
+        onMouseEnter={onMouseEnter}
+        onMouseLeave={onMouseLeave}
       >
-        <div className="w-full aspect-video bg-foreground overflow-hidden">
-          <video src={videoUrl} preload="metadata" muted className="block w-full h-full object-cover" />
+        <div className="relative w-full aspect-video bg-foreground overflow-hidden">
+          <video
+            ref={videoRef}
+            src={videoUrl}
+            preload="metadata"
+            muted
+            playsInline
+            loop
+            className="block w-full h-full object-cover"
+          />
+          <span className="absolute top-2 left-2 pill-success">완료</span>
+          <span className="absolute inset-0 grid place-items-center pointer-events-none opacity-0 group-hover:opacity-0 [&_.idle]:opacity-100 group-hover:[&_.idle]:opacity-0">
+            <span className="idle grid place-items-center size-10 rounded-full bg-background/85 text-foreground transition-opacity">
+              <Play className="size-4" fill="currentColor" />
+            </span>
+          </span>
         </div>
-        <div className="p-2.5">
-          <div className="text-[13px] font-medium mb-0.5 truncate" title={blurb}>{blurb}</div>
-          <div className="text-[11px] text-muted-foreground">
-            {ts}
-            {dur && ` · ${dur}`}
+        <div className="p-3.5">
+          <div className="font-semibold text-[14px] tracking-[-0.014em] line-clamp-1 mb-1" title={title}>
+            {title}
+          </div>
+          <div className="text-[11.5px] text-muted-foreground tabular-nums">
+            {ts}{ts && dur !== '—' && ' · '}{dur !== '—' ? dur : ''}
           </div>
         </div>
       </Link>
@@ -526,37 +557,32 @@ function ResultCard({ item, playlists, onMoved }: ResultCardProps) {
           <button
             type="button"
             aria-label="옵션"
-            title="옵션"
+            title="플레이리스트 이동, 옵션"
             onClick={(e) => {
               e.preventDefault();
               e.stopPropagation();
             }}
             disabled={busy}
-            className="absolute top-2 right-2 grid place-items-center size-7 rounded-md bg-foreground/55 text-card cursor-pointer transition-colors hover:bg-foreground/75 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+            className="absolute top-2 right-2 grid place-items-center size-7 rounded-md bg-foreground/65 text-background cursor-pointer transition-colors hover:bg-foreground/85 opacity-0 group-hover:opacity-100 data-[state=open]:opacity-100"
           >
             <MoreHorizontal className="size-4" />
           </button>
         </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" className="min-w-[160px] max-h-[320px] overflow-y-auto">
-          <DropdownMenuLabel className="text-[10px] uppercase tracking-widest text-muted-foreground font-semibold">
-            다른 플레이리스트로 이동
+        <DropdownMenuContent align="end" className="min-w-[180px] max-h-[320px] overflow-y-auto">
+          <DropdownMenuLabel className="text-[11px] font-semibold text-muted-foreground">
+            플레이리스트로 이동
           </DropdownMenuLabel>
-          <DropdownMenuItem onSelect={() => move(null)}>미지정</DropdownMenuItem>
+          <DropdownMenuItem onSelect={() => move(null, '미지정')}>미지정</DropdownMenuItem>
           {playlists.map((p) => (
             <DropdownMenuItem
               key={p.playlist_id}
-              onSelect={() => move(p.playlist_id)}
+              onSelect={() => move(p.playlist_id, p.name)}
             >
               {p.name}
             </DropdownMenuItem>
           ))}
         </DropdownMenuContent>
       </DropdownMenu>
-      {error && (
-        <div className="absolute top-12 right-2 text-[11px] text-destructive bg-card border border-border rounded px-2 py-1 shadow-sm">
-          {error}
-        </div>
-      )}
     </div>
   );
 }

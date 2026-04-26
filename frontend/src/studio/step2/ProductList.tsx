@@ -16,6 +16,7 @@ import Icon from '../Icon.jsx';
 import { Field } from '@/components/field';
 import { Segmented } from '@/components/segmented';
 import { UploadTile } from '@/components/upload-tile';
+import { OptionCard } from '@/components/option-card';
 export interface Product {
   id: string;
   source?: 'upload' | 'url';
@@ -181,17 +182,32 @@ export function ProductList({
 
       {products.length > 0 && (
         <Field
-          label="제품 배경 처리"
-          hint="화장품·패션처럼 제품만 보여주고 싶으면 '제거', 음식·가구처럼 배경까지 자연스러운 쪽이 나으면 '유지'"
+          label="제품 사진 배경 처리"
+          hint="합성할 때 제품 사진의 원래 배경을 어떻게 다룰지 정해요"
         >
-          <Segmented
-            value={rembgKeep ? 'keep' : 'remove'}
-            onChange={(v: 'keep' | 'remove') => onRembgChange(v === 'remove')}
-            options={[
-              { value: 'remove', label: '배경 제거 (기본)', icon: 'image' },
-              { value: 'keep', label: '배경 유지', icon: 'bg' },
-            ]}
-          />
+          <div className="grid grid-cols-2 gap-2">
+            <OptionCard
+              dense
+              active={!rembgKeep}
+              title={
+                <>
+                  자동으로 빼내기{' '}
+                  <span className="text-[10px] font-medium text-muted-foreground ml-1">
+                    (기본)
+                  </span>
+                </>
+              }
+              desc="화장품·패션·기기 등 깔끔한 컷에 — 배경 다 지우고 새 배경에 얹음"
+              onClick={() => onRembgChange(true)}
+            />
+            <OptionCard
+              dense
+              active={rembgKeep}
+              title="사진 그대로 쓰기"
+              desc="음식 플레이팅·가구 인테리어처럼 배경이 분위기에 도움 되는 사진에"
+              onClick={() => onRembgChange(false)}
+            />
+          </div>
         </Field>
       )}
 

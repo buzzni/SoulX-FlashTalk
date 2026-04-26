@@ -1,21 +1,24 @@
 /**
- * QueueStatus — queue badge in the header + expand-panel popover.
+ * QueueStatus — queue badge in the header + popover panel.
  *
  * Reads from queueStore (Phase 2a) — the store owns polling lifecycle
  * and refcount-gates subscribers, so this component stops driving
  * network traffic when unmounted without any Provider plumbing.
  *
+ * Built on shadcn `Popover` (Radix). Radix handles portal-to-body,
+ * anchor positioning, click-outside, escape, focus return — the whole
+ * surface that hand-rolling kept getting wrong (the topbar's
+ * `overflow-x: auto` clipped a hand-positioned absolute panel).
+ *
  * Navigation is self-contained via react-router:
  *   - running/pending → `/render/:taskId` (attach-mode dashboard)
- *   - completed → `/result/:taskId` (dedicated result page)
- *   - error/cancelled → no target (no video to show)
- *
- * Rendering is delegated to QueueTrigger + QueuePanel; cancel logic
- * lives in useQueueActions.
+ *   - completed → `/result/:taskId`
+ *   - error/cancelled → no target
  */
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQueue } from '../stores/queueStore';
+import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover';
 import { QueueTrigger } from './queue/QueueTrigger';
 import { QueuePanel } from './queue/QueuePanel';
 import { useQueueActions } from './queue/useQueueActions';
@@ -23,54 +26,52 @@ import { useQueueActions } from './queue/useQueueActions';
 export default function QueueStatus() {
   const navigate = useNavigate();
   const { data: queueData, error, refresh } = useQueue();
-  const [expanded, setExpanded] = useState(false);
+  const [open, setOpen] = useState(false);
   const { cancellingIds, cancelError, cancel } = useQueueActions(refresh);
 
-  // Queue snapshot not loaded yet — keep the button in place so the
-  // header layout doesn't shift, but disable interaction until we have
-  // data.
   const loading = !queueData;
-
   const totalActive = queueData
     ? (queueData.total_running || 0) + (queueData.total_pending || 0)
     : 0;
 
   const handleOpenLive = (taskId: string) => {
     if (!taskId) return;
-    setExpanded(false);
+    setOpen(false);
     navigate(`/render/${encodeURIComponent(taskId)}`);
   };
 
   const handleOpenRecent = (taskId: string, status: string) => {
     if (!taskId) return;
-    setExpanded(false);
+    setOpen(false);
     if (status === 'completed') {
       navigate(`/result/${encodeURIComponent(taskId)}`);
     }
-    // error/cancelled: no clickable target — RecentTaskRow renders a
-    // plain <div> in that case, so this branch shouldn't fire.
   };
 
   return (
-    <div style={{ position: 'relative', display: 'inline-block', zIndex: 45 }}>
-      <QueueTrigger
-        loading={loading}
-        totalActive={totalActive}
-        onClick={() => setExpanded((e) => !e)}
-      />
-      {expanded && queueData && (
-        <QueuePanel
-          queueData={queueData}
-          error={error}
-          cancellingIds={cancellingIds}
-          cancelError={cancelError}
-          totalActive={totalActive}
-          onClose={() => setExpanded(false)}
-          onOpenLive={handleOpenLive}
-          onOpenRecent={handleOpenRecent}
-          onCancel={cancel}
-        />
-      )}
-    </div>
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <QueueTrigger loading={loading} totalActive={totalActive} />
+      </PopoverTrigger>
+      <PopoverContent
+        align="end"
+        sideOffset={6}
+        className="w-[340px] p-3.5 max-h-[70vh] overflow-y-auto overflow-x-hidden"
+      >
+        {queueData && (
+          <QueuePanel
+            queueData={queueData}
+            error={error}
+            cancellingIds={cancellingIds}
+            cancelError={cancelError}
+            totalActive={totalActive}
+            onClose={() => setOpen(false)}
+            onOpenLive={handleOpenLive}
+            onOpenRecent={handleOpenRecent}
+            onCancel={cancel}
+          />
+        )}
+      </PopoverContent>
+    </Popover>
   );
 }

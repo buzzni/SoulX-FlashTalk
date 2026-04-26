@@ -9,6 +9,7 @@
  */
 
 import { useRef } from 'react';
+import { Sparkles as SparklesIcon } from 'lucide-react';
 import Icon from '../Icon.jsx';
 import { WizardButton as Button } from '@/components/wizard-button';
 import { Chip } from '@/components/chip';
@@ -244,24 +245,28 @@ export function CompositionControls({
         </div>
       )}
 
-      <div className="flex justify-between items-center">
-        <div className="text-xs text-tertiary">
+      <div className="flex justify-between items-center gap-3 pt-1">
+        <div className="text-[12.5px] text-muted-foreground">
           버튼을 누르면 아래에 4장의 합성 후보가 나타나요. 마음에 드는 걸 하나 고르세요.
         </div>
-        <Button
-          variant="primary"
-          icon={generating ? undefined : 'sparkles'}
+        <button
+          type="button"
           onClick={onGenerate}
           disabled={generating || !canGenerate}
+          className="inline-flex items-center gap-2 h-10 px-5 rounded-md bg-primary text-primary-foreground text-[13.5px] font-bold hover:bg-[var(--primary-hover)] disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer transition-colors"
         >
           {generating ? (
             <>
-              <span className="spinner" /> 합성 중…
+              <span className="spinner" /> 합성 중
             </>
           ) : (
-            '합성 이미지 만들기'
+            <>
+              <SparklesIcon className="size-4" />
+              <span>합성 이미지 만들기</span>
+              <span className="text-[11px] font-medium opacity-70 tabular-nums">~25초</span>
+            </>
           )}
-        </Button>
+        </button>
       </div>
       {!canGenerate && missingReason && (
         <div className="text-xs text-tertiary" style={{ marginTop: 6 }}>

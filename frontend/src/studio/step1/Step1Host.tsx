@@ -13,11 +13,13 @@
  * routes and subscribe to the store directly.
  */
 
-import { useEffect, useRef } from 'react';
+import { useRef } from 'react';
+import { ImageOff } from 'lucide-react';
 import { WizardBadge as Badge } from '@/components/wizard-badge';
 import { WizardButton as Button } from '@/components/wizard-button';
 import { WizardCard as Card } from '@/components/wizard-card';
 import { Segmented } from '@/components/segmented';
+import { StepHeading } from '@/routes/StepHeading';
 import { useHostGeneration, type HostVariant } from '../../hooks/useHostGeneration';
 import { imageIdFromPath, makeRandomSeeds } from '../../api/mapping';
 import { selectHost, type HostGenerateInput } from '../../api/host';
@@ -61,8 +63,6 @@ export default function Step1Host({ state, update }: Step1HostProps) {
   };
 
   const gen = useHostGeneration();
-  const variants = gen.variants;
-  const resultsRef = useRef<HTMLDivElement | null>(null);
 
   // Counts every "쇼호스트 만들기" press (incl. 다시 만들기). Attempt 0
   // uses DEFAULT_SEEDS; attempt 1+ uses fresh randoms. Persisted
@@ -72,19 +72,6 @@ export default function Step1Host({ state, update }: Step1HostProps) {
   const setField = <K extends keyof typeof host>(k: K, v: (typeof host)[K]) =>
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     update((s: any) => ({ ...s, host: { ...s.host, [k]: v } }));
-
-  // Auto-scroll to results when a stream starts or variants exist.
-  useEffect(() => {
-    if (!(gen.isLoading || variants.length > 0) || !resultsRef.current) return;
-    const scroller =
-      resultsRef.current.closest('.left-col') ||
-      document.scrollingElement ||
-      document.documentElement;
-    if (scroller && 'scrollTo' in scroller) {
-      const top = resultsRef.current.offsetTop - 80;
-      scroller.scrollTo({ top, behavior: 'smooth' });
-    }
-  }, [gen.isLoading, variants.length]);
 
   const faceReady = !!host.faceRef;
   const promptReady = host.mode === 'text' ? (host.prompt?.length ?? 0) >= 15 : faceReady;
@@ -108,8 +95,6 @@ export default function Step1Host({ state, update }: Step1HostProps) {
   };
 
   const handleSelectVariant = (v: HostVariant) => {
-    // Fall back to deriving imageId from path for variants rehydrated
-    // before the imageId field existed.
     const imageId = v.imageId ?? imageIdFromPath(v.path);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     update((s: any) => ({
@@ -124,7 +109,6 @@ export default function Step1Host({ state, update }: Step1HostProps) {
         _gradient: v._gradient ?? null,
       },
     }));
-    // Best-effort sync; backend cleanup tolerates a missed select call.
     if (imageId) {
       selectHost(imageId).catch((e) => {
         // eslint-disable-next-line no-console
@@ -160,132 +144,195 @@ export default function Step1Host({ state, update }: Step1HostProps) {
     }));
   };
 
+  const variants = gen.variants;
+  const prevSelected = gen.prevSelected;
+  const selectedImageId =
+    (host as { selectedImageId?: string | null }).selectedImageId ??
+    imageIdFromPath((host as { selectedPath?: string | null }).selectedPath);
+
   return (
-    <div className="step-page">
-      <div className="step-heading">
-        <h1>1단계 · 쇼호스트 만들기</h1>
-        <p>영상에 등장할 사람을 만들어요. 설명을 적거나 사진을 올려주세요.</p>
+    <div className="step-page-split step-page-split--40-60">
+      {/* LEFT — casting brief: form for prompt/builder OR reference uploads.
+       * Step heading sits at the top of the left column so the
+       * audition gallery on the right starts flush at the top edge. */}
+      <div className="step-page-form">
+        <StepHeading
+          step={1}
+          title="쇼호스트 만들기"
+          description="영상에 등장할 사람을 만들어요. 설명을 적거나 사진을 올려주세요."
+          eyebrow="영상 위저드"
+        />
+
+        <Card>
+          <div className="flex justify-between items-center">
+            <Segmented
+              value={host.mode}
+              onChange={(v: 'text' | 'image') => {
+                // Mode switch must clear the OTHER mode's inputs so the
+                // backend doesn't get a stale faceRef/outfitRef/etc when
+                // the user picked "설명으로 만들기" — see backend defense
+                // in modules/host_generator.py _sanitize_refs_by_mode.
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                update((s: any) => ({
+                  ...s,
+                  host:
+                    v === 'text'
+                      ? {
+                          ...s.host,
+                          mode: 'text',
+                          faceRef: null,
+                          faceRefPath: null,
+                          outfitRef: null,
+                          outfitRefPath: null,
+                          outfitText: '',
+                          extraPrompt: '',
+                        }
+                      : {
+                          ...s.host,
+                          mode: 'image',
+                          prompt: '',
+                          negativePrompt: '',
+                          builder: {},
+                        },
+                }));
+              }}
+              options={[
+                { value: 'text', label: '설명으로 만들기', icon: 'wand' },
+                { value: 'image', label: '사진으로 만들기', icon: 'image' },
+              ]}
+            />
+            <Badge variant="neutral" icon="info">
+              4장을 비교해서 골라요
+            </Badge>
+          </div>
+
+          {host.mode === 'text' ? (
+            <HostTextForm
+              prompt={host.prompt ?? ''}
+              negativePrompt={host.negativePrompt ?? ''}
+              builder={host.builder ?? {}}
+              onPromptChange={(s) => setField('prompt', s)}
+              onNegativePromptChange={(s) => setField('negativePrompt', s)}
+              onBuilderChange={(b) => setField('builder', b)}
+            />
+          ) : (
+            <HostReferenceUploader
+              faceRef={host.faceRef ?? null}
+              outfitRef={host.outfitRef ?? null}
+              outfitText={host.outfitText ?? ''}
+              extraPrompt={host.extraPrompt ?? ''}
+              faceStrength={host.faceStrength ?? 0.7}
+              outfitStrength={host.outfitStrength ?? 0.5}
+              onFaceSelected={handleFaceSelected}
+              onOutfitSelected={handleOutfitSelected}
+              onOutfitTextChange={(s) => setField('outfitText', s)}
+              onExtraPromptChange={(s) => setField('extraPrompt', s)}
+              onFaceStrengthChange={(v) => setField('faceStrength', v)}
+              onOutfitStrengthChange={(v) => setField('outfitStrength', v)}
+            />
+          )}
+
+          <HostControls
+            temperature={host.temperature ?? 0.7}
+            imageQuality={(state.imageQuality as '1K' | '2K' | '4K') || '1K'}
+            errorMsg={gen.error}
+            generating={gen.isLoading}
+            canGenerate={promptReady}
+            onTemperatureChange={(v) => setField('temperature', v)}
+            onImageQualityChange={(v) =>
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              update((s: any) => ({ ...s, imageQuality: v }))
+            }
+            onGenerate={handleGenerate}
+          />
+        </Card>
       </div>
 
-      <Card>
-        <div className="flex justify-between items-center">
-          <Segmented
-            value={host.mode}
-            onChange={(v: 'text' | 'image') => {
-              // Mode switch must clear the OTHER mode's inputs so the
-              // backend doesn't get a stale faceRef/outfitRef/etc when the
-              // user picked "설명으로 만들기" — see backend defense in
-              // modules/host_generator.py _sanitize_refs_by_mode.
-              // eslint-disable-next-line @typescript-eslint/no-explicit-any
-              update((s: any) => ({
-                ...s,
-                host:
-                  v === 'text'
-                    ? {
-                        ...s.host,
-                        mode: 'text',
-                        faceRef: null,
-                        faceRefPath: null,
-                        outfitRef: null,
-                        outfitRefPath: null,
-                        outfitText: '',
-                        extraPrompt: '',
-                      }
-                    : {
-                        ...s.host,
-                        mode: 'image',
-                        prompt: '',
-                        negativePrompt: '',
-                        builder: {},
-                      },
-              }));
-            }}
-            options={[
-              { value: 'text', label: '설명으로 만들기', icon: 'wand' },
-              { value: 'image', label: '사진으로 만들기', icon: 'image' },
-            ]}
-          />
-          <Badge variant="neutral" icon="info">
-            4장을 비교해서 골라요
-          </Badge>
-        </div>
-
-        {host.mode === 'text' ? (
-          <HostTextForm
-            prompt={host.prompt ?? ''}
-            negativePrompt={host.negativePrompt ?? ''}
-            builder={host.builder ?? {}}
-            onPromptChange={(s) => setField('prompt', s)}
-            onNegativePromptChange={(s) => setField('negativePrompt', s)}
-            onBuilderChange={(b) => setField('builder', b)}
-          />
-        ) : (
-          <HostReferenceUploader
-            faceRef={host.faceRef ?? null}
-            outfitRef={host.outfitRef ?? null}
-            outfitText={host.outfitText ?? ''}
-            extraPrompt={host.extraPrompt ?? ''}
-            faceStrength={host.faceStrength ?? 0.7}
-            outfitStrength={host.outfitStrength ?? 0.5}
-            onFaceSelected={handleFaceSelected}
-            onOutfitSelected={handleOutfitSelected}
-            onOutfitTextChange={(s) => setField('outfitText', s)}
-            onExtraPromptChange={(s) => setField('extraPrompt', s)}
-            onFaceStrengthChange={(v) => setField('faceStrength', v)}
-            onOutfitStrengthChange={(v) => setField('outfitStrength', v)}
-          />
-        )}
-
-        <HostControls
-          temperature={host.temperature ?? 0.7}
-          imageQuality={(state.imageQuality as '1K' | '2K' | '4K') || '1K'}
-          errorMsg={gen.error}
-          generating={gen.isLoading}
-          canGenerate={promptReady}
-          onTemperatureChange={(v) => setField('temperature', v)}
-          onImageQualityChange={(v) =>
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            update((s: any) => ({ ...s, imageQuality: v }))
-          }
-          onGenerate={handleGenerate}
+      {/* RIGHT — audition gallery. Codex framing: candidates feel
+       * "auditioned, not generated". Empty / loading / picked states
+       * live in AuditionGallery. */}
+      <div className="step-page-canvas">
+        <AuditionGallery
+          mode={host.mode}
+          variants={variants}
+          prevSelected={prevSelected}
+          selectedImageId={selectedImageId}
+          isLoading={gen.isLoading}
+          generated={!!host.generated}
+          onSelect={handleSelectVariant}
+          onRegenerate={handleGenerate}
         />
-      </Card>
+      </div>
+    </div>
+  );
+}
 
-      {(gen.isLoading || variants.length > 0 || host.generated) && (
-        <div ref={resultsRef}>
-          <Card
-            title="↓ 이 중에서 골라주세요"
-            subtitle={
-              gen.isLoading
-                ? '후보를 만드는 중이에요. 잠시면 나타나요.'
-                : '마음에 드는 후보를 클릭하면 선택돼요.'
-            }
-          >
+interface AuditionGalleryProps {
+  mode: 'text' | 'image';
+  variants: HostVariant[];
+  prevSelected: HostVariant | null;
+  selectedImageId: string | null;
+  isLoading: boolean;
+  generated: boolean;
+  onSelect: (v: HostVariant) => void;
+  onRegenerate: () => void;
+}
+
+function AuditionGallery({
+  mode,
+  variants,
+  prevSelected,
+  selectedImageId,
+  isLoading,
+  generated,
+  onSelect,
+  onRegenerate,
+}: AuditionGalleryProps) {
+  const empty = !isLoading && variants.length === 0;
+  return (
+    <section className="audition">
+      <header className="audition__header">
+        <span className="audition__eyebrow">오디션 결과</span>
+        <h2 className="audition__title">
+          {empty
+            ? '쇼호스트 후보가 여기 나와요'
+            : isLoading && variants.length === 0
+              ? '후보를 만드는 중이에요'
+              : `후보 ${variants.length}장 · 마음에 드는 한 명을 골라주세요`}
+        </h2>
+      </header>
+
+      {empty ? (
+        <div className="audition__empty">
+          <ImageOff className="size-6" strokeWidth={1.4} />
+          <p className="audition__empty-line">
+            {mode === 'text'
+              ? '왼쪽에 어떤 모습인지 적고\n쇼호스트 만들기를 눌러주세요'
+              : '왼쪽에 얼굴·옷차림 사진을 올리고\n쇼호스트 만들기를 눌러주세요'}
+          </p>
+        </div>
+      ) : (
+        <>
+          {variants.length > 0 && (
             <HostVariantGrid
               variants={variants}
-              // Step 1 has /api/hosts/save as the durable "keep this one"
-              // mechanism, so the lifecycle prev tile is redundant here.
-              // Step 2 still shows it (no save equivalent for composites).
-              prevSelected={null}
-              selectedImageId={
-                (host as { selectedImageId?: string | null }).selectedImageId ??
-                imageIdFromPath((host as { selectedPath?: string | null }).selectedPath)
-              }
-              onSelect={handleSelectVariant}
+              prevSelected={prevSelected}
+              selectedImageId={selectedImageId}
+              onSelect={onSelect}
             />
-            {host.generated && (
-              <div className="mt-3 flex justify-between items-center">
-                <Badge variant="success" icon="check_circle">
-                  선택 완료 · 다음 단계로 진행하세요
-                </Badge>
-                <Button size="sm" icon="refresh" onClick={handleGenerate}>
-                  다시 만들기
-                </Button>
-              </div>
-            )}
-          </Card>
-        </div>
+          )}
+          {generated && (
+            <footer className="audition__footer">
+              <Badge variant="success" icon="check_circle">
+                선택 완료 · 다음 단계로 넘어가세요
+              </Badge>
+              <Button size="sm" icon="refresh" onClick={onRegenerate}>
+                다시 만들기
+              </Button>
+            </footer>
+          )}
+        </>
       )}
-    </div>
+    </section>
   );
 }

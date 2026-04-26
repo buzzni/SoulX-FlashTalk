@@ -74,7 +74,7 @@ export function VoiceAdvancedSettings({
         <div className="field-row-3" style={{ marginTop: 10 }}>
           <Field
             label={`일정함 · ${Math.round(stability * 100)}`}
-            hint="높을수록 기복 적음"
+            hint="높을수록 톤 유지"
           >
             <Slider
               value={stability}
@@ -87,7 +87,7 @@ export function VoiceAdvancedSettings({
           </Field>
           <Field
             label={`말투 강조 · ${Math.round(style * 100)}`}
-            hint="높을수록 감정 표현"
+            hint="높을수록 감정 풍부"
           >
             <Slider
               value={style}
@@ -100,7 +100,7 @@ export function VoiceAdvancedSettings({
           </Field>
           <Field
             label={`원본 유사도 · ${Math.round(similarity * 100)}`}
-            hint="목소리 복제 시"
+            hint="복제 모드에서만 적용"
           >
             <Slider
               value={similarity}

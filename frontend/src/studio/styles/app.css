@@ -6,27 +6,65 @@
 .studio-root {
 .app-shell { display: flex; flex-direction: column; height: 100vh; background: var(--bg); }
 
-/* Top bar */
+/* Top bar — Korean Productivity chrome: workspace mark + name + step pills.
+ * Allow horizontal scroll at narrow widths so step pills + meta + profile
+ * don't collapse into each other. The brand wraps + the wizard becomes
+ * narrow but stays functional. */
 .topbar {
   display: flex; align-items: center; justify-content: space-between;
   min-height: 56px; padding: 0 20px; background: var(--bg-elev);
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.topbar::-webkit-scrollbar { display: none; }
+@media (max-width: 700px) {
+  .topbar { padding: 0 12px; min-height: 52px; gap: 8px; }
+  .topbar .brand-tag { display: none !important; }
+  .topbar .meta { display: none !important; }
 }
 .topbar .brand {
-  display: flex; align-items: center; gap: 10px; font-weight: 600; letter-spacing: -0.02em; font-size: 14px;
+  display: flex; align-items: center; gap: 10px;
+  white-space: nowrap;
 }
 .brand-mark {
-  width: 22px; height: 22px; border-radius: 6px; background: var(--text);
-  display: grid; place-items: center; color: var(--bg-elev); font-size: 11px; font-weight: 700;
-  position: relative;
+  width: 28px; height: 28px;
+  background: var(--text);
+  color: var(--bg);
+  display: grid; place-items: center;
+  border-radius: 6px;
+  font-weight: 700; font-size: 13px;
+  letter-spacing: -0.01em;
 }
-.brand-mark::after {
-  content: ''; position: absolute; right: -3px; bottom: -3px; width: 8px; height: 8px;
-  border-radius: 99px; background: var(--accent); border: 2px solid var(--bg-elev);
+.brand-mark::after { content: none; }
+.brand > span:not(.brand-tag) {
+  font-family: var(--font-sans);
+  font-size: 14px; font-weight: 700;
+  letter-spacing: -0.018em;
+  line-height: 1;
 }
-.topbar .meta { color: var(--text-tertiary); font-size: 12px; white-space: nowrap; }
-.topbar .brand { white-space: nowrap; }
+.brand .brand-tag {
+  font-family: var(--font-sans) !important;
+  font-size: 12px !important;
+  letter-spacing: -0.005em !important;
+  text-transform: none !important;
+  color: var(--text-tertiary) !important;
+  margin-left: 4px !important;
+  padding-left: 10px !important;
+  border-left: 1px solid var(--border) !important;
+  font-weight: 500 !important;
+}
+.topbar .meta {
+  color: var(--text-tertiary);
+  font-size: 12px; font-weight: 500;
+  white-space: nowrap;
+  display: inline-flex; align-items: center; gap: 6px;
+}
+.topbar .meta::before {
+  content: ""; width: 6px; height: 6px; border-radius: 99px;
+  background: var(--success);
+}
 .step-pill-label { white-space: nowrap; }
 .skeleton-shimmer {
   background: linear-gradient(90deg, var(--bg-sunken) 0%, var(--bg-subtle) 50%, var(--bg-sunken) 100%);
@@ -38,84 +76,422 @@
 @media (max-width: 1100px) { .brand-tag { display: none; } }
 .topbar-right { display: flex; gap: 8px; align-items: center; }
 
-/* Main split */
+/* Main split — desktop has form column + preview column. Below 1100px,
+ * shrink preview column. Below 900px, drop the preview entirely (it
+ * mirrors form state and the form is the primary work surface anyway). */
+/* Legacy grid layout kept for non-wizard pages (RenderDispatch etc.)
+ * that still rely on .left-col / .right-col semantics. Wizard pages
+ * use .wizard-main below — single column with each step page owning
+ * its own internal split layout. */
 .main {
-  flex: 1; display: grid; grid-template-columns: minmax(520px, 1fr) minmax(420px, 560px);
+  flex: 1; display: grid; grid-template-columns: minmax(520px, 1fr) minmax(380px, 480px);
   min-height: 0;
 }
+@media (max-width: 1100px) {
+  .main { grid-template-columns: minmax(420px, 1fr) minmax(320px, 380px); }
+}
+@media (max-width: 900px) {
+  .main { grid-template-columns: 1fr; }
+  .right-col { display: none !important; }
+}
 
-/* Left: form column */
+/* Wizard layout — collapses .main's grid to a single column. The step
+ * page inside .wizard-stage decides whether it wants a single-col form
+ * or an internal split (form + canvas, form + preview-dock, etc.). */
+.wizard-main {
+  display: flex; flex-direction: column;
+  grid-template-columns: none;
+}
+.wizard-stage {
+  flex: 1; min-height: 0; overflow-y: auto;
+}
+
+/* Left: form column (legacy, used by non-wizard layouts) */
 .left-col {
   overflow-y: auto; padding: 20px 24px 0;
   display: flex; flex-direction: column; gap: var(--section-gap);
   border-right: 1px solid var(--border);
 }
 
-/* Right: preview column */
+/* Right: preview column (legacy) */
 .right-col {
   background: var(--bg-sunken);
   display: flex; flex-direction: column; min-height: 0;
   position: relative;
 }
 
-/* Stepper */
+/* Stepper — pill steps with circular numbered dot */
 .stepper { display: flex; align-items: center; gap: 0; padding: 14px 0 10px; border-bottom: 1px solid var(--border); margin-bottom: 8px; }
 .step-pill {
   display: flex; align-items: center; gap: 8px; white-space: nowrap;
-  padding: 6px 10px; border-radius: var(--r-md); cursor: pointer;
+  padding: 6px 12px 6px 8px; border-radius: 99px; cursor: pointer;
   background: transparent; border: none;
   color: var(--text-tertiary); font-size: 13px; font-weight: 500;
   transition: color .12s, background .12s;
 }
-.step-pill:hover { color: var(--text-secondary); background: var(--bg-subtle); }
+.step-pill:hover { color: var(--text); background: var(--bg-sunken); }
 .step-pill .dot {
-  width: 20px; height: 20px; border-radius: 99px;
+  width: 22px; height: 22px;
+  border-radius: 99px;
   background: transparent;
   border: 1.5px solid var(--border-strong);
   display: grid; place-items: center;
-  font-size: 11px; font-weight: 600; color: var(--text-tertiary);
+  font-size: 11px; font-weight: 700;
+  color: var(--text-tertiary);
   transition: all .12s;
+  font-family: var(--font-sans);
+  letter-spacing: -0.01em;
 }
-.step-pill.active { color: var(--text); }
+.step-pill .step-pill-label {
+  font-size: 13px; font-weight: 500; letter-spacing: -0.014em;
+}
+.step-pill.active { color: var(--text); background: var(--accent-soft); }
 .step-pill.active .dot {
   background: var(--accent); border-color: var(--accent); color: #fff;
 }
+.step-pill.active .step-pill-label { font-weight: 700; }
 .step-pill.done { color: var(--text-secondary); }
 .step-pill.done .dot {
   background: var(--accent-soft);
   border-color: var(--accent);
   color: var(--accent);
 }
-.step-arrow { width: 16px; height: 1px; background: var(--border); margin: 0 2px; }
+.step-arrow {
+  width: 16px; height: 1px;
+  background: var(--border);
+  margin: 0 4px;
+  align-self: center;
+}
 
 /* Card / section */
-/* Step pages */
-.step-page { display: flex; flex-direction: column; gap: 16px; }
-.step-heading { display: flex; flex-direction: column; gap: 4px; margin-bottom: 4px; }
-.step-heading h1 { font-size: 20px; font-weight: 600; letter-spacing: -0.015em; margin: 0; }
-.step-heading p { color: var(--text-secondary); margin: 0; font-size: 13px; }
+/* Step pages — Pretendard 700 heading + ink-2 caption.
+ * Padding lives here now (was inherited from .left-col before the
+ * wizard layout refactor that gave each step page its own internal
+ * layout). */
+.step-page {
+  display: flex; flex-direction: column; gap: 18px;
+  padding: 20px 24px 0;
+}
+
+/* Step pages that own an internal split layout (form column +
+ * canvas/preview column). The wrapper takes the full wizard-stage
+ * width without padding so the canvas can extend cleanly to the right
+ * edge; child .step-page-form / .step-page-canvas handle their own
+ * padding. */
+.step-page-split {
+  display: grid;
+  min-height: 100%;
+  height: 100%;
+}
+.step-page-split--40-60 { grid-template-columns: minmax(420px, 1fr) minmax(560px, 1.5fr); }
+.step-page-split--50-50 { grid-template-columns: minmax(440px, 1fr) minmax(440px, 1fr); }
+.step-page-split--65-35 { grid-template-columns: minmax(560px, 1.85fr) minmax(300px, 1fr); }
+
+@media (max-width: 1100px) {
+  .step-page-split--40-60 { grid-template-columns: minmax(380px, 1fr) minmax(440px, 1.3fr); }
+  .step-page-split--50-50 { grid-template-columns: minmax(380px, 1fr) minmax(380px, 1fr); }
+  .step-page-split--65-35 { grid-template-columns: minmax(440px, 1.6fr) minmax(280px, 1fr); }
+}
+
+.step-page-form {
+  padding: 20px 22px 24px;
+  display: flex; flex-direction: column; gap: 18px;
+  overflow-y: auto;
+  border-right: 1px solid var(--border);
+  min-height: 0;
+}
+.step-page-canvas {
+  padding: 20px 22px 24px;
+  display: flex; flex-direction: column; gap: 14px;
+  overflow-y: auto;
+  background: var(--bg-sunken);
+  min-height: 0;
+}
+
+/* ── Step 1 audition gallery (right canvas) ────────────────────────
+ * Casting-board language: candidates are "auditioned" not "generated".
+ * Header uses an editorial eyebrow above the descriptive title. */
+.audition {
+  display: flex; flex-direction: column; gap: 14px;
+  height: 100%;
+}
+.audition__header {
+  display: flex; flex-direction: column; gap: 2px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border);
+}
+.audition__eyebrow {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+}
+.audition__title {
+  margin: 0;
+  font-family: var(--font-sans);
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: -0.018em;
+  color: var(--text);
+  line-height: 1.3;
+}
+.audition__empty {
+  flex: 1;
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  gap: 14px;
+  min-height: 320px;
+  padding: 32px 20px;
+  border: 1px dashed var(--border);
+  border-radius: var(--r-md);
+  background: var(--bg-elev);
+  color: var(--text-tertiary);
+  text-align: center;
+}
+.audition__empty-line {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.55;
+  letter-spacing: -0.005em;
+  white-space: pre-line;
+}
+.audition__footer {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 8px;
+  padding-top: 4px;
+}
+
+/* ── Step 2 composite canvas (right canvas) ────────────────────────
+ * Scene-staging language: composite is the apex, variants strip lets
+ * you switch among the just-generated batch. No bordered container —
+ * the image itself is the visual. Direct-manipulation chips
+ * ("배경 교체" etc) is a follow-up. */
+.composite-canvas {
+  display: flex; flex-direction: column; gap: 14px;
+  height: 100%;
+}
+.composite-canvas__header {
+  display: flex; flex-direction: column; gap: 2px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border);
+}
+.composite-canvas__eyebrow {
+  font-size: 10px; font-weight: 700;
+  letter-spacing: 0.08em; text-transform: uppercase;
+  color: var(--text-tertiary);
+}
+.composite-canvas__title {
+  margin: 0;
+  font-family: var(--font-sans);
+  font-size: 15px; font-weight: 700;
+  letter-spacing: -0.018em;
+  color: var(--text);
+  line-height: 1.3;
+}
+.composite-canvas__empty {
+  flex: 1;
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  gap: 14px;
+  min-height: 360px;
+  padding: 32px 20px;
+  border: 1px dashed var(--border);
+  border-radius: var(--r-md);
+  background: var(--bg-elev);
+  color: var(--text-tertiary);
+  text-align: center;
+}
+.composite-canvas__empty-line {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.55;
+  letter-spacing: -0.005em;
+  white-space: pre-line;
+}
+.composite-canvas__hero {
+  margin: 0;
+}
+.composite-canvas__img {
+  width: 100%;
+  aspect-ratio: 9 / 16;
+  max-height: 460px;
+  object-fit: cover;
+  display: block;
+  background: var(--bg-elev);
+  border-radius: var(--r-md);
+}
+.composite-canvas__variants {
+  /* Wrapper just provides spacing context — CompositionVariants
+   * handles its own grid. */
+}
+.composite-canvas__footer {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 8px;
+  padding-top: 4px;
+}
+
+/* ── Step 3 render booth (right canvas) ────────────────────────────
+ * Persistent preview dock + fact list + commit CTA. Codex framing:
+ * "pre-render review booth, not form completion". Composite is the
+ * visual confidence anchor at the top; voice/script/resolution
+ * collapse into a tight 3-row fact list; the big CTA lives here so
+ * the user commits without scrolling away from the preview. */
+.render-booth {
+  display: flex; flex-direction: column; gap: 14px;
+  height: 100%;
+}
+.render-booth__header {
+  display: flex; flex-direction: column; gap: 2px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border);
+}
+.render-booth__eyebrow {
+  font-size: 10px; font-weight: 700;
+  letter-spacing: 0.08em; text-transform: uppercase;
+  color: var(--text-tertiary);
+}
+.render-booth__title {
+  margin: 0;
+  font-family: var(--font-sans);
+  font-size: 15px; font-weight: 700;
+  letter-spacing: -0.018em;
+  color: var(--text);
+  line-height: 1.3;
+}
+.render-booth__hero {
+  margin: 0;
+  display: flex; flex-direction: column; gap: 6px;
+}
+.render-booth__img {
+  width: 100%;
+  aspect-ratio: 9 / 16;
+  max-height: 380px;
+  object-fit: cover;
+  display: block;
+  background: var(--bg-elev);
+  border-radius: var(--r-md);
+}
+.render-booth__hero-empty {
+  width: 100%;
+  aspect-ratio: 9 / 16;
+  max-height: 380px;
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  gap: 10px;
+  background: var(--bg-elev);
+  border: 1px dashed var(--border);
+  border-radius: var(--r-md);
+  color: var(--text-tertiary);
+  font-size: 12px;
+  letter-spacing: -0.005em;
+}
+.render-booth__caption {
+  font-size: 11px; font-weight: 600;
+  letter-spacing: 0.04em; text-transform: uppercase;
+  color: var(--text-tertiary);
+  padding: 0 2px;
+}
+.render-booth__facts {
+  margin: 0; padding: 0;
+  display: flex; flex-direction: column;
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+}
+.render-fact {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 4px;
+  padding: 10px 2px;
+  border-top: 1px solid var(--border);
+}
+.render-fact:first-child { border-top: none; }
+.render-fact dt {
+  display: inline-flex; align-items: center; gap: 6px;
+  margin: 0;
+  font-size: 10.5px; font-weight: 700;
+  letter-spacing: 0.04em; text-transform: uppercase;
+  color: var(--text-tertiary);
+}
+.render-fact dd {
+  margin: 0;
+  font-size: 13px; font-weight: 500;
+  letter-spacing: -0.012em;
+  color: var(--text);
+  line-height: 1.4;
+  word-break: break-word;
+}
+.render-booth__cta {
+  margin-top: 4px;
+  display: inline-flex; align-items: center; justify-content: center;
+  gap: 8px;
+  height: 48px;
+  padding: 0 20px;
+  border-radius: var(--r-md);
+  border: none;
+  background: var(--primary); color: var(--primary-foreground);
+  font-family: var(--font-sans);
+  font-size: 14px; font-weight: 700;
+  letter-spacing: -0.01em;
+  cursor: pointer;
+  transition: background-color 120ms ease;
+}
+.render-booth__cta:hover:not(:disabled) {
+  background: var(--primary-hover);
+}
+.render-booth__cta:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.render-booth__hint {
+  margin: 0;
+  font-size: 11.5px;
+  color: var(--text-tertiary);
+  text-align: center;
+  letter-spacing: -0.005em;
+}
+.step-heading { display: flex; flex-direction: column; gap: 6px; margin-bottom: 6px; }
+.step-heading h1 {
+  font-family: var(--font-sans);
+  font-size: 22px; font-weight: 700;
+  letter-spacing: -0.024em;
+  line-height: 1.25;
+  margin: 0;
+  color: var(--text);
+}
+.step-heading p {
+  color: var(--text-secondary);
+  margin: 0; font-size: 14px;
+  line-height: 1.55;
+}
 
 /* Segmented */
 /* Field */
-.field { display: flex; flex-direction: column; gap: 6px; }
+.field { display: flex; flex-direction: column; gap: 7px; }
 .field-row { display: grid; grid-template-columns: 1fr 1fr; gap: var(--gap-row); }
 .field-row-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: var(--gap-row); }
-.field label, .field-label { font-size: var(--font-size-label); color: var(--text-secondary); font-weight: 500; display: flex; align-items: center; justify-content: space-between; }
+.field label, .field-label {
+  font-size: 12.5px; color: var(--text);
+  font-weight: 600; letter-spacing: -0.012em;
+  display: flex; align-items: center; justify-content: space-between;
+}
 .field label .hint, .field-label .hint { color: var(--text-tertiary); font-weight: 400; }
 
 .input, .textarea, .select {
-  width: 100%; padding: var(--pad-field); border: 1px solid var(--border);
+  width: 100%; padding: 9px 12px; border: 1px solid var(--border);
   background: var(--bg-elev); border-radius: var(--r-sm);
-  font-size: 13px; color: var(--text); transition: border-color .12s, box-shadow .12s;
+  font-size: 14px; color: var(--text);
+  transition: border-color .12s, box-shadow .12s;
   min-height: var(--row-h);
+  letter-spacing: -0.012em;
 }
 .input::placeholder, .textarea::placeholder { color: var(--text-placeholder); }
 .input:focus, .textarea:focus, .select:focus {
   border-color: var(--accent);
-  box-shadow: 0 0 0 3px oklch(0.55 0.15 255 / 0.12);
+  box-shadow: 0 0 0 3px color-mix(in oklch, var(--accent) 16%, transparent);
 }
-.input.invalid, .textarea.invalid { border-color: var(--danger); }
-.textarea { min-height: 72px; resize: vertical; line-height: 1.5; }
+.input.invalid, .textarea.invalid { border-color: var(--danger); box-shadow: 0 0 0 3px color-mix(in oklch, var(--danger) 14%, transparent); }
+.textarea { min-height: 84px; resize: vertical; line-height: 1.5; }
 
 /* Highlight textarea — mirror div behind textarea for substring highlighting */
 .hl-textarea { position: relative; }
@@ -161,31 +537,40 @@
 .input-group .input.has-suffix { padding-right: 40px; }
 
 /* Buttons */
-/* Upload tile */
+/* Upload tile — soft dashed dropzone with comfort padding + lift hover */
 .upload-tile {
-  border: 1.5px dashed var(--border-strong); border-radius: var(--r-md);
-  background: var(--bg-sunken);
-  padding: 20px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px;
-  text-align: center; cursor: pointer; transition: all .12s; min-height: 100px;
+  border: 1.5px dashed var(--border-strong); border-radius: var(--r-lg);
+  background: var(--bg-elev);
+  padding: 28px 20px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px;
+  text-align: center; cursor: pointer;
+  transition: border-color .15s, background .15s, transform .15s;
+  min-height: 132px;
   color: var(--text-secondary);
 }
-.upload-tile:hover { border-color: var(--accent); background: var(--accent-soft); color: var(--accent-text); }
+.upload-tile:hover {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent-text);
+  transform: translateY(-1px);
+}
 .upload-tile.has-file {
   border-style: solid;
-  padding: 8px;
+  border-color: var(--border);
+  padding: 10px;
   background: var(--bg-elev);
   min-height: 0;
   display: grid;
   grid-template-columns: 56px 1fr auto;
   grid-template-rows: auto;
   align-items: center;
-  gap: 10px;
+  gap: 12px;
   cursor: default;
+  transform: none;
 }
-.upload-tile.has-file:hover { background: var(--bg-elev); border-color: var(--border-strong); color: inherit; }
+.upload-tile.has-file:hover { background: var(--bg-elev); border-color: var(--border-strong); color: inherit; transform: none; }
 .upload-tile .icon { width: 28px; height: 28px; color: var(--text-tertiary); }
-.upload-tile .label { font-size: 13px; font-weight: 500; }
-.upload-tile .sub { font-size: 11px; color: var(--text-tertiary); }
+.upload-tile .label { font-size: 14px; font-weight: 600; letter-spacing: -0.014em; color: inherit; }
+.upload-tile .sub { font-size: 12px; color: var(--text-tertiary); }
 
 .file-thumb {
   width: 56px; height: 56px;
@@ -199,14 +584,14 @@
 .file-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .file-meta {
   padding: 0;
-  font-size: 12px;
+  font-size: 13px;
   color: var(--text-primary);
   display: flex; flex-direction: column; gap: 2px;
   min-width: 0;
   border: 0;
 }
-.file-meta .truncate { font-weight: 500; }
-.file-meta .mono { color: var(--text-tertiary); font-size: 11px; }
+.file-meta .truncate { font-weight: 600; letter-spacing: -0.014em; }
+.file-meta .mono { color: var(--text-tertiary); font-size: 11px; font-family: var(--font-mono); }
 .file-remove {
   position: absolute; top: 6px; right: 6px; width: 24px; height: 24px;
   background: oklch(0 0 0 / 0.6); color: #fff; border-radius: 99px;
@@ -219,45 +604,139 @@
   border: 0;
 }
 .file-btn {
-  padding: 6px 10px;
+  padding: 7px 12px;
   border: 1px solid var(--border);
   border-radius: var(--r-sm);
   background: var(--bg-elev); color: var(--text-secondary);
-  font-size: 12px; font-weight: 500;
+  font-size: 12px; font-weight: 600;
   display: inline-flex; align-items: center; justify-content: center; gap: 5px;
   cursor: pointer;
-  transition: background .12s;
+  transition: background .12s, border-color .12s, color .12s;
 }
-.file-btn:hover { background: var(--bg-sunken); color: var(--text-primary); }
-.file-btn-danger:hover { background: oklch(0.95 0.04 25); color: oklch(0.5 0.22 25); }
+.file-btn:hover { background: var(--bg-sunken); color: var(--text-primary); border-color: var(--border-strong); }
+.file-btn-danger:hover { background: var(--danger-soft); color: var(--danger); border-color: var(--danger); }
 
 /* Slider */
-/* Chips / tag / preset */
-.preset-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+/* Preset tiles — soft cards with hover lift, active blue ring */
+.preset-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
 .preset-tile {
-  border: 1px solid var(--border); border-radius: var(--r-sm); padding: 0; cursor: pointer;
-  background: var(--bg-elev); overflow: hidden; transition: all .12s; position: relative;
+  border: 1px solid var(--border); border-radius: var(--r-md); padding: 0; cursor: pointer;
+  background: var(--bg-elev); overflow: hidden;
+  transition: border-color .15s, box-shadow .15s, transform .15s;
+  position: relative;
 }
-.preset-tile:hover { border-color: var(--border-strong); }
-.preset-tile.on { border-color: var(--accent); box-shadow: 0 0 0 2px oklch(0.55 0.15 255 / 0.18); }
+.preset-tile:hover {
+  border-color: var(--border-strong);
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-sm);
+}
+.preset-tile.on {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in oklch, var(--accent) 18%, transparent), var(--shadow-sm);
+  transform: translateY(-1px);
+}
 .preset-tile .swatch { aspect-ratio: 4/3; background: var(--bg-sunken); display: flex; align-items: center; justify-content: center; }
-.preset-tile .name { padding: 6px 8px; font-size: 11px; color: var(--text-secondary); text-align: left; border-top: 1px solid var(--border); }
-.preset-tile.on .name { color: var(--text); font-weight: 500; }
+.preset-tile .name {
+  padding: 8px 10px; font-size: 12px; font-weight: 500;
+  color: var(--text-secondary); text-align: left;
+  border-top: 1px solid var(--border);
+}
+.preset-tile.on .name { color: var(--text); font-weight: 700; background: var(--accent-soft); }
+
+/* Background preset tiles (Step 2 추천 장소). Distinct from .preset-tile
+ * (which is used by host/composite candidate grids that show real
+ * generated images): bg presets describe a *kind of place* the AI
+ * will create from scratch — there's no honest preview we can show,
+ * so the tile is icon + label, no fake gradient swatch. */
+.bg-preset-tile {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 8px;
+  padding: 12px 12px 11px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--bg-elev);
+  cursor: pointer;
+  text-align: left;
+  font-family: inherit;
+  transition: border-color .15s, background-color .15s, box-shadow .15s;
+}
+.bg-preset-tile:hover {
+  border-color: var(--border-strong);
+  background: var(--bg);
+}
+.bg-preset-tile--on,
+.bg-preset-tile--on:hover {
+  /* :hover branch needed because the BEM modifier `--on` is one class
+   * (specificity 0,1,0) but `.bg-preset-tile:hover` is class+pseudo
+   * (0,2,0) — hovering an active tile would otherwise revert to the
+   * unselected hover bg and look unselected. */
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  box-shadow: 0 0 0 3px color-mix(in oklch, var(--accent) 14%, transparent);
+}
+.bg-preset-tile__icon {
+  width: 18px; height: 18px;
+  color: var(--text-secondary);
+  flex-shrink: 0;
+}
+.bg-preset-tile--on .bg-preset-tile__icon {
+  color: var(--accent-text);
+}
+.bg-preset-tile__text {
+  display: flex; flex-direction: column; gap: 2px;
+}
+.bg-preset-tile__label {
+  font-size: 12.5px; font-weight: 700;
+  letter-spacing: -0.012em;
+  color: var(--text);
+  line-height: 1.3;
+}
+.bg-preset-tile--on .bg-preset-tile__label {
+  color: var(--accent-text);
+}
+.bg-preset-tile__desc {
+  font-size: 11px; font-weight: 500;
+  color: var(--text-tertiary);
+  letter-spacing: -0.005em;
+  line-height: 1.35;
+}
 
 /* Badge */
 /* Divider */
 .hr { height: 1px; background: var(--border); border: 0; margin: 8px 0; }
 
-/* Tabs (for voice source, etc) */
-/* Sticky footer in left-col */
+/* Sticky bottom navigation bar. Lives in .wizard-main directly (post-
+ * refactor: previously sat inside .left-col, which is why the original
+ * rule had `margin: 0 -24px` to bleed past the column padding — that's
+ * gone now, and the negative margin caused a 48px horizontal overflow). */
 .step-footer {
-  position: sticky; bottom: 0; background: linear-gradient(to bottom, oklch(0.985 0.003 95 / 0), var(--bg) 30%);
-  padding: 18px 0 20px; margin-top: auto;
-  display: flex; justify-content: space-between; gap: 8px;
+  background: var(--bg);
+  padding: 14px 24px;
+  border-top: 1px solid var(--border);
+  display: flex; align-items: center; gap: 12px;
+  /* Subtle inset shadow on the top so the bar feels lifted from content */
+  box-shadow: 0 -8px 16px -8px color-mix(in oklch, var(--text) 8%, transparent);
+  z-index: 5;
 }
 .step-footer .validation-msg {
-  display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-tertiary);
+  /* Legacy class — kept for any holdouts but the new StepFooter uses
+   * inline tailwind. */
+  display: flex; align-items: center; gap: 6px;
+  font-size: 13px; font-weight: 500;
+  color: var(--text-secondary);
+  letter-spacing: -0.012em;
 }
+
+/* ── Step heading hero (StepHeading.tsx component) ─────────────── */
+.step-heading-hero {
+  margin-bottom: 20px;
+}
+@media (max-width: 700px) {
+  .step-heading-hero { margin-bottom: 14px; }
+}
+
+/* (Old WizardSummary universal-right-rail styles removed — replaced
+ * by per-step canvas layouts: .audition (Step 1), .composite-canvas
+ * (Step 2), .render-booth (Step 3).) */
 
 /* ============ Preview panel (9:16) ============ */
 .preview-header {
@@ -272,16 +751,19 @@
   flex: 1; display: flex; align-items: center; justify-content: center;
   padding: 28px; overflow: auto; min-height: 0;
 }
+/* Preview canvas — clean 9:16 vertical preview container.
+ * No phone frame skeuomorphism. The aspect ratio alone conveys "vertical
+ * video for mobile" and the user-facing copy ("세로형 · 448p × 768") in
+ * the preview header makes that explicit. */
 .phone-frame {
-  width: min(100%, 300px); aspect-ratio: 9/16;
-  background: #0b0d12; border-radius: 28px; border: 8px solid #141821;
-  box-shadow: 0 20px 50px oklch(0.22 0.01 260 / 0.2), 0 4px 12px oklch(0.22 0.01 260 / 0.08);
+  width: min(100%, 280px); aspect-ratio: 9/16;
+  background: #1a1d25;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-1);
   position: relative; overflow: hidden;
 }
-.phone-frame::before {
-  content: ''; position: absolute; top: 10px; left: 50%; transform: translateX(-50%);
-  width: 80px; height: 20px; background: #0b0d12; border-radius: 99px; z-index: 3;
-}
+.phone-frame::before { content: none; }
 .phone-content { width: 100%; height: 100%; position: relative; background: #1a1d25; overflow: hidden; }
 
 /* Stacked layers (host + product + bg) */
@@ -364,44 +846,74 @@
 }
 .progress-bar { height: 100%; background: var(--accent); border-radius: 99px; transition: width .4s; }
 
-/* Resolution tiles */
+/* Resolution tiles — soft cards with hover lift, active fills with soft accent */
 .res-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
 .res-tile {
-  position: relative; padding: 14px 12px; border: 1px solid var(--border); border-radius: var(--r-md);
+  position: relative; padding: 16px 14px;
+  border: 1px solid var(--border); border-radius: var(--r-md);
   background: var(--bg-elev); cursor: pointer; text-align: left;
-  transition: all .12s;
+  transition: border-color .15s, box-shadow .15s, transform .15s, background .15s;
 }
-.res-tile:hover { border-color: var(--border-strong); }
-.res-tile.on { border-color: var(--accent); box-shadow: 0 0 0 2px oklch(0.55 0.15 255 / 0.15); }
-.res-tile .res-label { font-size: 14px; font-weight: 600; letter-spacing: -0.01em; }
-.res-tile .res-dim { font-size: 11px; color: var(--text-tertiary); margin-top: 2px; font-family: 'JetBrains Mono', monospace; }
-.res-tile .res-meta { font-size: 10px; color: var(--text-tertiary); margin-top: 10px; display: flex; justify-content: space-between; }
+.res-tile:hover {
+  border-color: var(--border-strong);
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-sm);
+}
+.res-tile.on {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  box-shadow: 0 0 0 3px color-mix(in oklch, var(--accent) 16%, transparent);
+  transform: translateY(-1px);
+}
+.res-tile .res-label { font-size: 14px; font-weight: 700; letter-spacing: -0.018em; }
+.res-tile .res-dim { font-size: 11px; color: var(--text-tertiary); margin-top: 3px; font-family: var(--font-mono); }
+.res-tile .res-meta { font-size: 10.5px; color: var(--text-tertiary); margin-top: 12px; display: flex; justify-content: space-between; }
 .res-tile.on .res-label { color: var(--accent-text); }
+.res-tile.on .res-dim { color: var(--accent-text); opacity: 0.75; }
 
-/* Voice card list — capped at ~6 items tall, scroll inside the field */
+/* Voice list — soft rows with hover, generous padding for tactile feel */
 .voice-list {
-  display: flex; flex-direction: column; gap: 4px;
-  max-height: 280px;
+  display: flex; flex-direction: column; gap: 6px;
+  max-height: 320px;
   overflow-y: auto;
-  padding-right: 4px; /* room for scrollbar so it doesn't overlap content */
+  padding-right: 4px;
 }
 .voice-item {
-  display: flex; align-items: center; gap: 8px; padding: 6px 8px;
-  border: 1px solid var(--border); border-radius: var(--r-sm);
-  cursor: pointer; background: var(--bg-elev); transition: all .12s;
+  display: flex; align-items: center; gap: 10px; padding: 10px 12px;
+  border: 1px solid var(--border); border-radius: var(--r-md);
+  cursor: pointer; background: var(--bg-elev);
+  transition: border-color .15s, background .15s, box-shadow .15s;
 }
-.voice-item:hover { border-color: var(--border-strong); }
-.voice-item.on { border-color: var(--accent); background: var(--accent-soft); }
+.voice-item:hover {
+  border-color: var(--border-strong);
+  background: var(--bg-sunken);
+}
+.voice-item.on {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  box-shadow: 0 0 0 3px color-mix(in oklch, var(--accent) 14%, transparent);
+}
 .voice-item--skeleton { cursor: default; pointer-events: none; }
-.voice-item--skeleton:hover { border-color: var(--border); }
+.voice-item--skeleton:hover { border-color: var(--border); background: var(--bg-elev); }
 .voice-avatar {
-  width: 26px; height: 26px; border-radius: 99px; flex-shrink: 0;
-  background: linear-gradient(135deg, oklch(0.75 0.1 30), oklch(0.55 0.15 320));
-  color: #fff; display: grid; place-items: center; font-size: 10px; font-weight: 600;
+  width: 32px; height: 32px; border-radius: 99px; flex-shrink: 0;
+  background: var(--bg-sunken);
+  color: var(--text);
+  border: 1px solid var(--border);
+  display: grid; place-items: center; font-size: 12px; font-weight: 700;
+  letter-spacing: -0.01em;
+  transition: all .15s;
+}
+.voice-item:hover .voice-avatar { border-color: var(--border-strong); }
+.voice-item.on .voice-avatar {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
 }
 .voice-info { flex: 1; min-width: 0; }
-.voice-name { font-size: 12px; font-weight: 500; line-height: 1.3; }
-.voice-meta { font-size: 11px; color: var(--text-tertiary); line-height: 1.3; }
+.voice-name { font-size: 13px; font-weight: 600; line-height: 1.35; letter-spacing: -0.014em; }
+.voice-meta { font-size: 11.5px; color: var(--text-tertiary); line-height: 1.35; margin-top: 1px; }
+.voice-item.on .voice-name { color: var(--accent-text); }
 .voice-play { flex-shrink: 0; }
 
 /* Generated-audio preview player */
@@ -464,13 +976,20 @@
   accent-color: var(--accent);
 }
 
-/* Product list (draggable) */
-.product-list { display: flex; flex-direction: column; gap: 6px; }
+/* Product list — soft rows with shadow, draggable handle */
+.product-list { display: flex; flex-direction: column; gap: 8px; }
 .product-row {
-  display: flex; align-items: center; gap: 10px; padding: 8px; border: 1px solid var(--border);
-  border-radius: var(--r-sm); background: var(--bg-elev);
+  display: flex; align-items: center; gap: 12px; padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md); background: var(--bg-elev);
+  box-shadow: var(--shadow-xs);
+  transition: border-color .15s, box-shadow .15s;
 }
-.product-row.dragging { opacity: 0.4; }
+.product-row:hover {
+  border-color: var(--border-strong);
+  box-shadow: var(--shadow-sm);
+}
+.product-row.dragging { opacity: 0.4; box-shadow: var(--shadow-md); }
 .product-drag { color: var(--text-tertiary); cursor: grab; padding: 4px; }
 .product-thumb { width: 40px; height: 40px; border-radius: 4px; background: var(--bg-sunken); overflow: hidden; flex-shrink: 0; position: relative; }
 .product-thumb img { width: 100%; height: 100%; object-fit: cover; }

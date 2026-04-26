@@ -21,8 +21,8 @@ const VARIANT_MAP: Record<
 };
 
 const VARIANT_OVERRIDES: Record<string, string> = {
-  success: 'border-[hsl(142_71%_45%/0.4)] bg-[hsl(142_71%_96%)] text-[hsl(142_71%_30%)]',
-  warn: 'border-[hsl(38_92%_50%/0.4)] bg-[hsl(38_92%_96%)] text-[hsl(38_92%_35%)]',
+  success: 'border-success/30 bg-success-soft text-success-on-soft',
+  warn: 'border-amber/30 bg-amber-soft text-amber-on-soft',
 };
 
 export interface WizardBadgeProps {
