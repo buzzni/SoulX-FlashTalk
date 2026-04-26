@@ -135,8 +135,11 @@ describe('api.js — humanizeError', () => {
   it('429 → 붐벼요 copy', () => {
     expect(humanizeError({ status: 429 })).toMatch(/붐벼요/);
   });
-  it('401 → 관리자 문의 copy', () => {
-    expect(humanizeError({ status: 401 })).toMatch(/관리자/);
+  it('401 → 다시 로그인 copy', () => {
+    expect(humanizeError({ status: 401 })).toMatch(/로그인/);
+  });
+  it('403 → 관리자 문의 copy', () => {
+    expect(humanizeError({ status: 403 })).toMatch(/관리자/);
   });
   it('413 → 파일 크기 copy', () => {
     expect(humanizeError({ status: 413 })).toMatch(/너무 커요/);

@@ -1,8 +1,21 @@
 import { defineConfig } from 'vitest/config'
 import react from '@vitejs/plugin-react'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 
+const __dirname = path.dirname(fileURLToPath(import.meta.url))
+
+// Vitest reads its own config and does NOT inherit `vite.config.js`,
+// so the `@/` path alias must be redeclared here. Without it, every
+// test file that imports `@/components/...` (or `@/wizard/...`) fails
+// at collection with "Failed to resolve import".
 export default defineConfig({
   plugins: [react()],
+  resolve: {
+    alias: {
+      '@': path.resolve(__dirname, './src'),
+    },
+  },
   test: {
     environment: 'jsdom',
     globals: true,
