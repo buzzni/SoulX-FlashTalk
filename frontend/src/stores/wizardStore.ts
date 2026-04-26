@@ -24,6 +24,9 @@
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import { storageKey } from './storageKey';
+import type { Background } from '../wizard/schema';
+import { INITIAL_BACKGROUND } from '../wizard/schema';
+import { migrateLegacy as migrateLegacyToSchema, persistBackground } from '../wizard/normalizers';
 
 // ────────────────────────────────────────────────────────────────────
 // Wizard state shape
@@ -45,7 +48,9 @@ export type WizardSlice = Record<string, unknown>;
 export interface WizardState {
   host: WizardSlice;
   products: WizardSlice[];
-  background: WizardSlice;
+  /** Schema-typed (Phase 2a migration). Tagged union — kind = preset |
+   * upload | url | prompt. Other slices migrate in Phase 2b/2c. */
+  background: Background;
   composition: WizardSlice;
   voice: WizardSlice;
   script: string;
@@ -82,15 +87,7 @@ export const INITIAL_WIZARD_STATE: WizardState = {
     variants: [],
   },
   products: [],
-  background: {
-    source: 'preset',
-    preset: null,
-    url: '',
-    prompt: '',
-    imageUrl: null,
-    _gradient: null,
-    _file: null,
-  },
+  background: INITIAL_BACKGROUND,
   composition: {
     direction: '',
     shot: 'medium',
@@ -135,7 +132,10 @@ export const INITIAL_WIZARD_STATE: WizardState = {
 export interface WizardActions {
   setHost: (patch: WizardSlice) => void;
   setProducts: (updater: WizardSlice[] | ((p: WizardSlice[]) => WizardSlice[])) => void;
-  setBackground: (patch: WizardSlice) => void;
+  /** Schema-typed (Phase 2a). Replace-style: callers pass the next
+   * full Background or a function that derives it from the previous
+   * value. No partial-patch — tagged unions don't compose with `Partial`. */
+  setBackground: (next: Background | ((prev: Background) => Background)) => void;
   setComposition: (patch: WizardSlice) => void;
   setVoice: (patch: WizardSlice) => void;
   setScript: (s: string) => void;
@@ -183,10 +183,10 @@ function migrateLegacyStateOnce(): void {
       products: Array.isArray(legacy.products)
         ? (legacy.products as WizardState['products'])
         : INITIAL_WIZARD_STATE.products,
-      background: {
-        ...INITIAL_WIZARD_STATE.background,
-        ...(legacy.background as Record<string, unknown> | undefined),
-      },
+      // Phase 2a: background is now schema-typed (tagged union). Run
+       // the schema migrator on the legacy raw value rather than spreading
+       // optional fields into a Background that wouldn't satisfy any kind.
+      background: migrateLegacyToSchema({ background: legacy.background }).background,
       composition: {
         ...INITIAL_WIZARD_STATE.composition,
         ...(legacy.composition as Record<string, unknown> | undefined),
@@ -280,7 +280,6 @@ function dropTransient(u: unknown): unknown {
 function partializeForPersist(s: WizardState): WizardState {
   const host = s.host ?? {};
   const composition = s.composition ?? {};
-  const background = s.background ?? {};
   const voice = s.voice ?? {};
 
   const cleanHost: WizardSlice = {
@@ -297,11 +296,9 @@ function partializeForPersist(s: WizardState): WizardState {
     variants: cleanVariantsList(composition.variants),
     selectedUrl: dropTransient(composition.selectedUrl),
   };
-  const cleanBackground: WizardSlice = {
-    ...background,
-    _file: null,
-    imageUrl: dropTransient(background.imageUrl),
-  };
+  // Phase 2a: background uses schema-typed persist — drops LocalAsset
+  // (File handle + blob URL) but keeps ServerAsset.
+  const cleanBackground: Background = persistBackground(s.background);
   const cleanProducts: WizardSlice[] = (Array.isArray(s.products) ? s.products : []).map((p) => {
     // Strip `_file` (a File handle) and transient blob URLs; keep the
     // server `path` so uploads survive reload.
@@ -379,8 +376,10 @@ export const useWizardStore = create<WizardStore>()(
               ? (updater as (p: WizardState['products']) => WizardState['products'])(s.products)
               : updater,
         })),
-      setBackground: (patch) =>
-        set((s) => ({ background: { ...s.background, ...patch } })),
+      setBackground: (next) =>
+        set((s) => ({
+          background: typeof next === 'function' ? next(s.background) : next,
+        })),
       setComposition: (patch) =>
         set((s) => ({ composition: { ...s.composition, ...patch } })),
       setVoice: (patch) =>
@@ -407,7 +406,21 @@ export const useWizardStore = create<WizardStore>()(
       // Strip transient fields at save time. One-way — no inverse
       // hydrator needed, just a plain merge against INITIAL state.
       partialize: (state) => partializeForPersist(state),
-      version: 1,
+      // v1 → v2: background slice became schema-typed (tagged union).
+      // Re-run the schema migrator on the persisted blob so legacy
+      // shapes (`{source, preset, url, prompt, imageUrl, _gradient,
+      // _file, uploadPath, ...}`) get translated to the new tagged
+      // form. Other slices stay untouched here — Phase 2b/2c will bump
+      // the version again as they migrate.
+      version: 2,
+      migrate: (persisted, fromVersion) => {
+        if (!persisted || typeof persisted !== 'object') return persisted as WizardState;
+        const p = persisted as Record<string, unknown>;
+        if (fromVersion < 2) {
+          p.background = migrateLegacyToSchema({ background: p.background }).background;
+        }
+        return p as WizardState;
+      },
     },
   ),
 );

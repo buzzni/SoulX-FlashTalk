@@ -469,7 +469,10 @@ describe('api.js — generateVideo attaches full provenance meta', () => {
         direction: '소파에 앉아 1번 들기', shot: 'medium', angle: 'eye', temperature: 0.4,
       },
       products: [{ name: '쿠션', path: '/srv/cushion.png' }, { name: '소파', path: '/srv/sofa.png' }],
-      background: { source: 'preset', preset: { id: 'living_cozy', label: '아늑한 거실' } },
+      // Phase 2a: schema-shaped tagged union. presetLabel is dropped
+      // from the schema (it's a derived UI field, looked up from
+      // BG_PRESETS) so the provenance carries presetId only.
+      background: { kind: 'preset', presetId: 'living_cozy' },
       voice: { source: 'tts', voiceId: 'v_minji', voiceName: '민지', script: '안녕하세요' },
       resolution: { width: 720, height: 1280 },
       imageQuality: '2K',
@@ -495,7 +498,7 @@ describe('api.js — generateVideo attaches full provenance meta', () => {
     // Background
     expect(meta.background.source).toBe('preset');
     expect(meta.background.presetId).toBe('living_cozy');
-    expect(meta.background.presetLabel).toBe('아늑한 거실');
+    expect(meta.background.presetLabel).toBeNull();
     // Voice
     expect(meta.voice.voiceName).toBe('민지');
     expect(meta.voice.script).toBe('안녕하세요');

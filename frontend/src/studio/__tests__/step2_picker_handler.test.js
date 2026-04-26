@@ -2,7 +2,7 @@
  * picker_handler.js — pure reducers for ServerFilePicker selections.
  */
 import { describe, it, expect } from 'vitest';
-import { applyPickedFileToBackground, applyPickedFileToProducts } from '../picker_handler.js';
+import { applyPickedFileToProducts } from '../picker_handler.js';
 
 const sampleFile = {
   filename: 'place1.png',
@@ -12,20 +12,11 @@ const sampleFile = {
   modified: 1700000000,
 };
 
-describe('applyPickedFileToBackground', () => {
-  it('sets imageUrl + uploadPath + serverFilename and clears preset/prompt/url/_file', () => {
-    const before = { source: 'preset', preset: { id: 'studio_white' }, prompt: 'old prompt', url: 'http://x/y.png', _file: { name: 'orphan' }, imageUrl: null };
-    const after = applyPickedFileToBackground(before, sampleFile);
-    expect(after.imageUrl).toBe(sampleFile.url);
-    expect(after.uploadPath).toBe(sampleFile.path);
-    expect(after.serverFilename).toBe(sampleFile.filename);
-    expect(after.preset).toBeNull();
-    expect(after.prompt).toBe('');
-    expect(after.url).toBe('');
-    expect(after._file).toBeNull();
-    expect(after.source).toBe('preset');
-  });
-});
+// `applyPickedFileToBackground` was deleted in Phase 2a — schema-typed
+// Background is constructed inline in Step2Composite from a single
+// AssetRef, so a multi-field merge reducer no longer earns its
+// keep. The product-list reducer still exists because product rows
+// remain a legacy shape until Phase 2c.
 
 describe('applyPickedFileToProducts', () => {
   it('appends single row when products list is empty', () => {

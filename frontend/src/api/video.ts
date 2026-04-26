@@ -13,6 +13,8 @@
 
 import { API_BASE, getAuthHeaders, parseResponse } from './http';
 import { stringifyResolution } from './mapping';
+import type { Background } from '../wizard/schema';
+import { isServerAsset } from '../wizard/normalizers';
 
 export interface GenerateVideoInput {
   state: {
@@ -40,13 +42,9 @@ export interface GenerateVideoInput {
       temperature?: number | null;
     } | null;
     products?: Array<{ name?: string; path?: string; url?: string }>;
-    background?: {
-      source?: string | null;
-      preset?: { id?: string; label?: string } | string | null;
-      prompt?: string;
-      uploadPath?: string | null;
-      imageUrl?: string | null;
-    } | null;
+    /** Schema-typed (Phase 2a) — see wizard/schema.ts Background.
+     * Provenance snapshot is built via `backgroundProvenance` below. */
+    background?: Background | null;
     voice?: {
       source?: string | null;
       voiceId?: string | null;
@@ -120,17 +118,7 @@ export async function generateVideo(
       path: p.path || '',
       url: p.url || '',
     })),
-    background: {
-      source: state.background?.source || null,
-      presetId:
-        (typeof state.background?.preset === 'object' && state.background.preset?.id) ||
-        (typeof state.background?.preset === 'string' ? state.background.preset : null),
-      presetLabel:
-        typeof state.background?.preset === 'object' ? state.background.preset?.label || null : null,
-      prompt: state.background?.prompt || '',
-      uploadPath: state.background?.uploadPath || null,
-      imageUrl: state.background?.imageUrl || null,
-    },
+    background: backgroundProvenance(state.background),
     voice: {
       source: state.voice?.source || null,
       voiceId: state.voice?.voiceId || null,
@@ -168,4 +156,40 @@ export async function generateVideo(
     signal,
   });
   return parseResponse(res, '영상 생성');
+}
+
+/** Schema-typed `Background` (from wizard/schema) → the legacy
+ * provenance shape `{source, presetId, presetLabel, prompt,
+ * uploadPath, imageUrl}` that the backend's _synthesize_result + the
+ * frontend's ProvenanceCard expect. Keeps wire format stable while the
+ * UI layer uses the typed model. */
+function backgroundProvenance(bg: unknown): {
+  source: string | null;
+  presetId: string | null;
+  presetLabel: string | null;
+  prompt: string;
+  uploadPath: string | null;
+  imageUrl: string | null;
+} {
+  const b = (bg ?? null) as Background | null;
+  if (!b || typeof b !== 'object' || !('kind' in b)) {
+    return { source: null, presetId: null, presetLabel: null, prompt: '', uploadPath: null, imageUrl: null };
+  }
+  switch (b.kind) {
+    case 'preset':
+      return { source: 'preset', presetId: b.presetId, presetLabel: null, prompt: '', uploadPath: null, imageUrl: null };
+    case 'upload':
+      return {
+        source: 'upload',
+        presetId: null,
+        presetLabel: null,
+        prompt: '',
+        uploadPath: isServerAsset(b.asset) ? b.asset.path : null,
+        imageUrl: isServerAsset(b.asset) ? (b.asset.url ?? null) : null,
+      };
+    case 'url':
+      return { source: 'url', presetId: null, presetLabel: null, prompt: '', uploadPath: null, imageUrl: b.url };
+    case 'prompt':
+      return { source: 'prompt', presetId: null, presetLabel: null, prompt: b.prompt, uploadPath: null, imageUrl: null };
+  }
 }

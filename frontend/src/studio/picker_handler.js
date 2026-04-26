@@ -32,23 +32,6 @@ export function applyPickedFileToProducts(products, f) {
   return [...ps, nextRow];
 }
 
-/**
- * Apply a server-file pick to the background object.
- * Returns the next background object.
- *
- * Sets imageUrl + uploadPath + serverFilename so generateComposite's
- * `if (background.uploadPath)` check skips the upload step. Clears any
- * conflicting source data (preset id, prompt text, raw URL, in-memory File).
- */
-export function applyPickedFileToBackground(background, f) {
-  return {
-    ...(background || {}),
-    _file: null,
-    imageUrl: f.url,
-    uploadPath: f.path,
-    preset: null,
-    prompt: '',
-    url: '',
-    serverFilename: f.filename,
-  };
-}
+// `applyPickedFileToBackground` removed in Phase 2a — schema-typed
+// Background is constructed inline by Step2Composite via a single
+// `{ kind: 'upload', asset: { path, url, name } }` literal.
