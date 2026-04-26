@@ -1,6 +1,10 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
 // Vite dev-server proxies /api and /static to the FastAPI backend on
 // 127.0.0.1:8001. This keeps the backend bound to loopback (per plan §4.0.3
@@ -9,6 +13,11 @@ import tailwindcss from '@tailwindcss/vite'
 // the Vite process, not directly to the user's machine.
 export default defineConfig({
   plugins: [react(), tailwindcss()],
+  resolve: {
+    alias: {
+      '@': path.resolve(__dirname, './src'),
+    },
+  },
   server: {
     host: '0.0.0.0',
     port: 5174,

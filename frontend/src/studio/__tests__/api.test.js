@@ -135,8 +135,11 @@ describe('api.js — humanizeError', () => {
   it('429 → 붐벼요 copy', () => {
     expect(humanizeError({ status: 429 })).toMatch(/붐벼요/);
   });
-  it('401 → 관리자 문의 copy', () => {
-    expect(humanizeError({ status: 401 })).toMatch(/관리자/);
+  it('401 → 다시 로그인 copy', () => {
+    expect(humanizeError({ status: 401 })).toMatch(/로그인/);
+  });
+  it('403 → 관리자 문의 copy', () => {
+    expect(humanizeError({ status: 403 })).toMatch(/관리자/);
   });
   it('413 → 파일 크기 copy', () => {
     expect(humanizeError({ status: 413 })).toMatch(/너무 커요/);
@@ -459,19 +462,73 @@ describe('api.js — generateVideo attaches full provenance meta', () => {
   it('includes host, composition, products, background, voice, imageQuality in meta blob', async () => {
     const { generateVideo } = await import('../api.js');
     const state = {
+      // Phase 2b: schema-shaped host. input is a tagged union;
+      // generation is a state machine with `selected` carrying the
+      // committed pick.
       host: {
-        mode: 'image', selectedSeed: 42, selectedPath: '/srv/host_42.png', imageUrl: '/api/files/host_42.png',
-        faceRefPath: '/srv/face.png', outfitRefPath: null, outfitText: '베이지 니트',
-        faceStrength: 0.7, outfitStrength: 0.5, temperature: 1.0,
+        input: {
+          kind: 'image',
+          faceRef: { path: '/srv/face.png' },
+          outfitRef: null,
+          outfitText: '베이지 니트',
+          extraPrompt: '',
+          faceStrength: 0.7,
+          outfitStrength: 0.5,
+        },
+        temperature: 1.0,
+        generation: {
+          state: 'ready',
+          batchId: null,
+          variants: [
+            { seed: 42, imageId: 'host_42', url: '/api/files/host_42.png', path: '/srv/host_42.png' },
+          ],
+          selected: { seed: 42, imageId: 'host_42', url: '/api/files/host_42.png', path: '/srv/host_42.png' },
+          prevSelected: null,
+        },
       },
+      // Phase 2c: schema-shaped composition (settings + generation).
       composition: {
-        selectedSeed: 77, selectedPath: '/srv/c_77.png', selectedUrl: '/api/files/c_77.png',
-        direction: '소파에 앉아 1번 들기', shot: 'medium', angle: 'eye', temperature: 0.4,
+        settings: {
+          direction: '소파에 앉아 1번 들기',
+          shot: 'medium',
+          angle: 'eye',
+          temperature: 0.4,
+          rembg: true,
+        },
+        generation: {
+          state: 'ready',
+          batchId: null,
+          variants: [
+            { seed: 77, imageId: 'c_77', url: '/api/files/c_77.png', path: '/srv/c_77.png' },
+          ],
+          selected: { seed: 77, imageId: 'c_77', url: '/api/files/c_77.png', path: '/srv/c_77.png' },
+          prevSelected: null,
+        },
       },
-      products: [{ name: '쿠션', path: '/srv/cushion.png' }, { name: '소파', path: '/srv/sofa.png' }],
-      background: { source: 'preset', preset: { id: 'living_cozy', label: '아늑한 거실' } },
-      voice: { source: 'tts', voiceId: 'v_minji', voiceName: '민지', script: '안녕하세요' },
-      resolution: { width: 720, height: 1280 },
+      // Phase 2c: schema-shaped products (tagged source).
+      products: [
+        { id: 'p1', name: '쿠션', source: { kind: 'uploaded', asset: { path: '/srv/cushion.png' } } },
+        { id: 'p2', name: '소파', source: { kind: 'uploaded', asset: { path: '/srv/sofa.png' } } },
+      ],
+      // Phase 2a: schema-shaped tagged union. presetLabel is dropped
+      // from the schema (it's a derived UI field, looked up from
+      // BG_PRESETS) so the provenance carries presetId only.
+      background: { kind: 'preset', presetId: 'living_cozy' },
+      // Phase 2c.4: schema-shaped voice (tagged union over source).
+      // tts/clone carry generation state machine + advanced settings;
+      // upload bypasses TTS. voiceProvenance flattens this back to the
+      // legacy provenance keys the backend manifest expects.
+      voice: {
+        source: 'tts',
+        voiceId: 'v_minji',
+        voiceName: '민지',
+        advanced: { speed: 1, stability: 0.5, style: 0.3, similarity: 0.75 },
+        script: { paragraphs: ['안녕하세요'] },
+        generation: { state: 'ready', audio: { path: '/srv/a.wav' } },
+      },
+      // Phase 2c: schema-shaped resolution is just the key — meta
+      // (width/height/label) derived via RESOLUTION_META.
+      resolution: '720p',
       imageQuality: '2K',
     };
     await generateVideo({ state, audio: { audio_path: '/srv/a.wav' } });
@@ -495,7 +552,7 @@ describe('api.js — generateVideo attaches full provenance meta', () => {
     // Background
     expect(meta.background.source).toBe('preset');
     expect(meta.background.presetId).toBe('living_cozy');
-    expect(meta.background.presetLabel).toBe('아늑한 거실');
+    expect(meta.background.presetLabel).toBeNull();
     // Voice
     expect(meta.voice.voiceName).toBe('민지');
     expect(meta.voice.script).toBe('안녕하세요');

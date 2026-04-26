@@ -15,8 +15,8 @@
 
 import { Fragment } from 'react';
 import Icon from '../Icon.jsx';
-import { Field } from '../primitives.jsx';
-
+import { Field } from '@/components/field';
+import type { Script } from '@/wizard/schema';
 const BREATH_TAG = ' [breath] ';
 export const SCRIPT_LIMIT = 5000;
 
@@ -31,11 +31,13 @@ export function buildScript(paragraphs: string[]): string {
 }
 
 export interface ScriptEditorProps {
-  paragraphs: string[];
-  onParagraphsChange: (next: string[]) => void;
+  script: Script;
+  onScriptChange: (script: Script) => void;
 }
 
-export function ScriptEditor({ paragraphs, onParagraphsChange }: ScriptEditorProps) {
+export function ScriptEditor({ script, onScriptChange }: ScriptEditorProps) {
+  const paragraphs = script.paragraphs.length > 0 ? script.paragraphs : [''];
+  const onParagraphsChange = (next: string[]) => onScriptChange({ paragraphs: next });
   const combined = buildScript(paragraphs);
   const totalLen = combined.length;
   const remaining = SCRIPT_LIMIT - totalLen;
@@ -92,16 +94,35 @@ export function ScriptEditor({ paragraphs, onParagraphsChange }: ScriptEditorPro
             <div className="script-paragraph">
               <div className="script-paragraph__header">
                 <span className="script-paragraph__label">문단 {idx + 1}</span>
-                {idx !== 0 && (
-                  <button
-                    type="button"
-                    className="btn btn-ghost btn-sm paragraph-delete-btn"
-                    onClick={() => removeParagraph(idx)}
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                  <span
+                    style={{
+                      fontFamily: 'var(--font-mono)',
+                      fontSize: 10.5,
+                      color:
+                        (p || '').length > 800
+                          ? 'var(--danger)'
+                          : (p || '').length > 500
+                            ? 'var(--warn)'
+                            : 'var(--text-tertiary)',
+                      letterSpacing: '0.02em',
+                      fontVariantNumeric: 'tabular-nums',
+                    }}
+                    title="문단별 글자수"
                   >
-                    <Icon name="trash" size={11} style={{ marginRight: 4 }} />
-                    삭제
-                  </button>
-                )}
+                    {(p || '').length.toLocaleString()}자
+                  </span>
+                  {idx !== 0 && (
+                    <button
+                      type="button"
+                      className="paragraph-delete-btn inline-flex items-center gap-1 h-7 px-2.5 rounded-md text-[12px] font-medium text-muted-foreground hover:bg-secondary hover:text-foreground transition-colors"
+                      onClick={() => removeParagraph(idx)}
+                    >
+                      <Icon name="trash" size={11} />
+                      삭제
+                    </button>
+                  )}
+                </span>
               </div>
               <textarea
                 className="textarea"
@@ -118,15 +139,15 @@ export function ScriptEditor({ paragraphs, onParagraphsChange }: ScriptEditorPro
           </Fragment>
         ))}
       </div>
-      <div style={{ marginTop: 10, display: 'flex', justifyContent: 'center' }}>
+      <div className="mt-2.5 flex justify-center">
         <button
           type="button"
-          className="btn btn-secondary btn-sm add-paragraph-btn"
+          className="add-paragraph-btn inline-flex items-center gap-1.5 h-8 px-3 rounded-md text-[12px] font-medium border border-input bg-card text-foreground hover:bg-secondary disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
           onClick={addParagraph}
           disabled={!canAddParagraph}
           title={canAddParagraph ? '문단 추가' : '5000자 한도에 도달했어요'}
         >
-          <Icon name="plus" size={12} style={{ marginRight: 5 }} />
+          <Icon name="plus" size={12} />
           문단 추가
         </button>
       </div>

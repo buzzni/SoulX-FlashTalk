@@ -9,38 +9,40 @@
  */
 
 import { useRef } from 'react';
+import { Sparkles as SparklesIcon } from 'lucide-react';
 import Icon from '../Icon.jsx';
-import { Button, Chip, Field, Segmented } from '../primitives.jsx';
+import { WizardButton as Button } from '@/components/wizard-button';
+import { Chip } from '@/components/chip';
+import { Field } from '@/components/field';
+import { Segmented } from '@/components/segmented';
 import type { Product } from './ProductList';
-
-export interface Composition {
-  direction?: string;
-  shot?: 'closeup' | 'bust' | 'medium' | 'full';
-  angle?: 'eye' | 'low' | 'high';
-  temperature?: number;
-}
+import type { CompositionSettings } from '@/wizard/schema';
 
 export interface CompositionControlsProps {
-  composition: Composition;
+  settings: CompositionSettings;
   products: Product[];
   generating: boolean;
   errorMsg: string | null;
   canGenerate: boolean;
   missingReason: string | null;
-  onCompositionChange: (patch: Partial<Composition>) => void;
+  onSettingsChange: (patch: Partial<CompositionSettings>) => void;
   onGenerate: () => void;
 }
 
+// Schema's CompositionShot is close|medium|far. Labels use Korean
+// film-industry standards (클로즈업/미디엄샷/풀샷); tooltips describe
+// the framing range so users don't have to know the jargon. The UI
+// previously had 4 buttons with 상반신 and 미디엄 both wired to
+// 'medium' — same value, identical behavior. Collapsed.
 const SHOT_OPTS = [
-  { v: 'closeup' as const, label: '클로즈업' },
-  { v: 'bust' as const, label: '상반신' },
-  { v: 'medium' as const, label: '미디엄' },
-  { v: 'full' as const, label: '풀샷' },
+  { v: 'close' as const, label: '클로즈업', desc: '얼굴 중심 (Close-Up)' },
+  { v: 'medium' as const, label: '미디엄샷', desc: '머리~허리 (Medium Shot)' },
+  { v: 'far' as const, label: '풀샷', desc: '전신 (Full Shot)' },
 ];
 const ANGLE_OPTS = [
-  { v: 'eye' as const, label: '정면' },
-  { v: 'low' as const, label: '살짝 아래에서' },
-  { v: 'high' as const, label: '살짝 위에서' },
+  { v: 'eye' as const, label: '정면', desc: '아이레벨 — 같은 눈높이' },
+  { v: 'low' as const, label: '살짝 아래에서', desc: '로우앵글 — 인물이 더 커 보임' },
+  { v: 'high' as const, label: '살짝 위에서', desc: '하이앵글 — 인물이 더 작아 보임' },
 ];
 
 const DIRECTION_EXAMPLES = [
@@ -53,13 +55,13 @@ const DIRECTION_EXAMPLES = [
 ];
 
 export function CompositionControls({
-  composition,
+  settings,
   products,
   generating,
   errorMsg,
   canGenerate,
   missingReason,
-  onCompositionChange,
+  onSettingsChange,
   onGenerate,
 }: CompositionControlsProps) {
   const directionRef = useRef<HTMLTextAreaElement | null>(null);
@@ -67,9 +69,9 @@ export function CompositionControls({
   const insertProductRef = (idx: number) => {
     const ref = `${idx + 1}번`;
     const ta = directionRef.current;
-    const cur = composition.direction || '';
+    const cur = settings.direction || '';
     if (!ta) {
-      onCompositionChange({
+      onSettingsChange({
         direction: cur + (cur && !cur.endsWith(' ') ? ' ' : '') + ref + ' ',
       });
       return;
@@ -78,7 +80,7 @@ export function CompositionControls({
     const e = ta.selectionEnd ?? cur.length;
     const insert = ref + ' ';
     const next = cur.slice(0, s) + insert + cur.slice(e);
-    onCompositionChange({ direction: next });
+    onSettingsChange({ direction: next });
     requestAnimationFrame(() => {
       if (!directionRef.current) return;
       const pos = s + insert.length;
@@ -93,7 +95,7 @@ export function CompositionControls({
         <div className="hl-textarea">
           <div className="hl-textarea__mirror" aria-hidden>
             {(() => {
-              const text = composition.direction || '';
+              const text = settings.direction || '';
               if (!text) return ' ';
               const parts = text.split(/(\d+번)/);
               return parts.map((chunk, i) => {
@@ -118,8 +120,8 @@ export function CompositionControls({
             className="textarea hl-textarea__input"
             rows={3}
             placeholder="예) 소파에 앉아 1번은 손에 들고, 2번은 옆 테이블 위에 놓기"
-            value={composition.direction || ''}
-            onChange={(e) => onCompositionChange({ direction: e.target.value })}
+            value={settings.direction || ''}
+            onChange={(e) => onSettingsChange({ direction: e.target.value })}
             onScroll={(e) => {
               const mirror = (e.target as HTMLTextAreaElement)
                 .previousSibling as HTMLElement | null;
@@ -151,11 +153,22 @@ export function CompositionControls({
               title={`${i + 1}번 상품 입력`}
             >
               <span className="product-ref-thumb">
-                {p.url ? (
-                  <img src={p.url} alt="" />
-                ) : (
-                  <span className="product-ref-thumb__empty" />
-                )}
+                {(() => {
+                  // Derive preview URL from the source discriminator.
+                  const url =
+                    p.source.kind === 'localFile'
+                      ? p.source.asset.previewUrl
+                      : p.source.kind === 'uploaded'
+                        ? p.source.asset.url
+                        : p.source.kind === 'url'
+                          ? p.source.url
+                          : null;
+                  return url ? (
+                    <img src={url} alt="" />
+                  ) : (
+                    <span className="product-ref-thumb__empty" />
+                  );
+                })()}
               </span>
               <span className="product-ref-text">
                 <strong>{i + 1}</strong>번
@@ -170,7 +183,7 @@ export function CompositionControls({
       </div>
       <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
         {DIRECTION_EXAMPLES.map((ex) => (
-          <Chip key={ex} onClick={() => onCompositionChange({ direction: ex })}>
+          <Chip key={ex} onClick={() => onSettingsChange({ direction: ex })}>
             {ex}
           </Chip>
         ))}
@@ -184,8 +197,9 @@ export function CompositionControls({
             {SHOT_OPTS.map((o) => (
               <Chip
                 key={o.v}
-                on={composition.shot === o.v}
-                onClick={() => onCompositionChange({ shot: o.v })}
+                on={settings.shot === o.v}
+                onClick={() => onSettingsChange({ shot: o.v })}
+                title={o.desc}
               >
                 {o.label}
               </Chip>
@@ -197,8 +211,9 @@ export function CompositionControls({
             {ANGLE_OPTS.map((o) => (
               <Chip
                 key={o.v}
-                on={composition.angle === o.v}
-                onClick={() => onCompositionChange({ angle: o.v })}
+                on={settings.angle === o.v}
+                onClick={() => onSettingsChange({ angle: o.v })}
+                title={o.desc}
               >
                 {o.label}
               </Chip>
@@ -214,8 +229,8 @@ export function CompositionControls({
         hint="같은 입력으로도 결과를 얼마나 다양하게 뽑을지 — 안정적이면 4장이 비슷, 창의적이면 제각각"
       >
         <Segmented
-          value={composition.temperature ?? 0.7}
-          onChange={(v: number) => onCompositionChange({ temperature: v })}
+          value={settings.temperature ?? 0.7}
+          onChange={(v: number) => onSettingsChange({ temperature: v })}
           options={[
             { value: 0.4, label: '안정적' },
             { value: 0.7, label: '보통' },
@@ -241,24 +256,28 @@ export function CompositionControls({
         </div>
       )}
 
-      <div className="flex justify-between items-center">
-        <div className="text-xs text-tertiary">
+      <div className="flex justify-between items-center gap-3 pt-1">
+        <div className="text-[12.5px] text-muted-foreground">
           버튼을 누르면 아래에 4장의 합성 후보가 나타나요. 마음에 드는 걸 하나 고르세요.
         </div>
-        <Button
-          variant="primary"
-          icon={generating ? undefined : 'sparkles'}
+        <button
+          type="button"
           onClick={onGenerate}
           disabled={generating || !canGenerate}
+          className="inline-flex items-center gap-2 h-10 px-5 rounded-md bg-primary text-primary-foreground text-[13.5px] font-bold hover:bg-[var(--primary-hover)] disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer transition-colors"
         >
           {generating ? (
             <>
-              <span className="spinner" /> 합성 중…
+              <span className="spinner" /> 합성 중
             </>
           ) : (
-            '합성 이미지 만들기'
+            <>
+              <SparklesIcon className="size-4" />
+              <span>합성 이미지 만들기</span>
+              <span className="text-[11px] font-medium opacity-70 tabular-nums">~25초</span>
+            </>
           )}
-        </Button>
+        </button>
       </div>
       {!canGenerate && missingReason && (
         <div className="text-xs text-tertiary" style={{ marginTop: 6 }}>

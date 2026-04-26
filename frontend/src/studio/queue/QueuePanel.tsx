@@ -1,10 +1,10 @@
 /**
- * QueuePanel — the 340px dropdown rendered when the trigger is clicked.
+ * QueuePanel — inner content for the queue popover.
  *
- * Stateless wrt what to fetch — consumes the queue snapshot + action
- * callbacks from the container. Sections render in fixed order
- * (실행 중 → 대기 중 → 최근 완료); each section is suppressed when empty,
- * and a friendly empty-state takes over when the whole thing is empty.
+ * Wrapping (portal, anchor positioning, click-outside, escape) lives
+ * in QueueStatus via shadcn `Popover` (Radix). This component only
+ * renders the body: header + sections (실행 중 / 대기 중 / 최근 완료) +
+ * empty-state.
  */
 import type { QueueSnapshot } from '../../types/app';
 import Icon from '../Icon.jsx';
@@ -41,26 +41,7 @@ export function QueuePanel({
   const recent = queueData.recent ?? [];
 
   return (
-    <div
-      style={{
-        position: 'absolute',
-        right: 0,
-        top: 'calc(100% + 6px)',
-        width: 340,
-        background: 'var(--bg-elev)',
-        border: '1px solid var(--border)',
-        borderRadius: 'var(--r-md)',
-        boxShadow: 'var(--shadow-lg)',
-        padding: 14,
-        maxHeight: '70vh',
-        overflowY: 'auto',
-        // Belt-and-braces against horizontal scroll: even with the
-        // min-width:0 fixes inside rows, ensure long task labels can't
-        // push the panel wider than 340px.
-        overflowX: 'hidden',
-        boxSizing: 'border-box',
-      }}
-    >
+    <div>
       <div className="flex justify-between items-center" style={{ marginBottom: 8 }}>
         <strong style={{ fontSize: 13 }}>작업 목록</strong>
         <button

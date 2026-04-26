@@ -37,7 +37,8 @@ def client(monkeypatch, tmp_path):
 
     from fastapi.testclient import TestClient
     import app as app_module
-    return TestClient(app_module.app)
+    with TestClient(app_module.app) as c:
+        yield c
 
 
 def _stub_generate_speech(text, voice_id, output_path, **kw):

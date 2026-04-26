@@ -12,18 +12,23 @@
  * from a single backend endpoint, so there's no more
  * "which source has this field?" gymnastics.
  */
-import { useEffect, useState } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
-import { Badge, Button } from './primitives.jsx';
+import { useEffect, useState, useSyncExternalStore } from 'react';
+import { useParams, useNavigate, Link } from 'react-router-dom';
+import { WizardBadge as Badge } from '@/components/wizard-badge';
+import { WizardButton as Button } from '@/components/wizard-button';
 import ProvenanceCard from './ProvenanceCard.jsx';
 import QueueStatus from './QueueStatus';
+import { ProfileMenu } from '../routes/ProfileMenu';
 import { fetchResult } from '../api/result';
-import { humanizeError } from '../api/http';
+import { fetchJSON, humanizeError } from '../api/http';
 import { formatTaskTitle } from './taskFormat.js';
 import { Confetti } from './shared/Confetti';
 import { ResultVideoCard } from './result/ResultVideoCard';
 import { ResultStats } from './result/ResultStats';
 import { ResultActions } from './result/ResultActions';
+import { getUser, subscribe } from '../stores/authStore';
+import { Spinner } from '../components/spinner';
+import { videoTitle, formatRelativeDate, formatDuration } from '../lib/format';
 
 // Manifest shape — matches /api/results/{id}. Kept inline (not shared
 // with ProvenanceCard) because ProvenanceCard types `result: any` to
@@ -56,6 +61,15 @@ function deriveResolutionLabel(
   return `${m[2]}×${m[1]}`;
 }
 
+interface RecentItem {
+  task_id: string;
+  timestamp?: string;
+  script_text?: string;
+  host_image?: string;
+  generation_time?: number;
+  video_url?: string;
+}
+
 export default function ResultPage() {
   const { taskId } = useParams<{ taskId: string }>();
   const navigate = useNavigate();
@@ -63,6 +77,19 @@ export default function ResultPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [recent, setRecent] = useState<RecentItem[] | null>(null);
+
+  // Fetch a few recent results to show as "다른 영상 둘러보기" sidebar.
+  useEffect(() => {
+    const ctl = new AbortController();
+    fetchJSON<{ videos: RecentItem[] }>('/api/history?limit=6', {
+      signal: ctl.signal,
+      label: '최근 영상',
+    })
+      .then((r) => setRecent(r.videos.filter((v) => v.task_id !== taskId).slice(0, 5)))
+      .catch(() => {});
+    return () => ctl.abort();
+  }, [taskId]);
 
   useEffect(() => {
     if (!taskId) return;
@@ -123,31 +150,28 @@ export default function ResultPage() {
     }
   };
 
+  const user = useSyncExternalStore(subscribe, getUser, getUser);
+  const display = user?.display_name || user?.user_id || 'F';
+  const initial = (display[0] || 'F').toUpperCase();
+
   return (
     <div className="studio-root" data-density="comfortable">
       <div className="app-shell" data-screen-label="06 Result">
         <header className="topbar">
           <div style={{ display: 'flex', alignItems: 'center', gap: 20 }}>
-            <div className="brand">
-              <div className="brand-mark">H</div>
-              <span>HostStudio</span>
-              <span
-                className="brand-tag text-xs text-tertiary"
-                style={{
-                  marginLeft: 6,
-                  paddingLeft: 10,
-                  borderLeft: '1px solid var(--border)',
-                }}
-              >
-                완성된 영상
-              </span>
-            </div>
+            <Link to="/" className="brand" style={{ textDecoration: 'none', color: 'inherit' }} title="홈으로">
+              <div className="brand-mark" aria-hidden>{initial}</div>
+              <span>FlashTalk</span>
+              <span className="brand-tag">완성된 영상</span>
+            </Link>
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <div className="topbar-right">
+            <span className="meta">자동 저장됨</span>
             <QueueStatus />
-            <Button icon="home" onClick={() => navigate('/')}>
+            <Button icon="home" size="sm" onClick={() => navigate('/')}>
               처음으로
             </Button>
+            <ProfileMenu />
           </div>
         </header>
 
@@ -161,18 +185,23 @@ export default function ResultPage() {
           }}
         >
           {isDone && <Confetti />}
-          <div style={{ maxWidth: 960, margin: '0 auto', position: 'relative', zIndex: 1 }}>
+          <div style={{ maxWidth: 1100, margin: '0 auto', position: 'relative', zIndex: 1 }}>
             <div className="flex justify-between items-center" style={{ marginBottom: 24 }}>
               <div>
-                <div className="card-eyebrow">결과</div>
+                <div style={{ fontSize: 13, color: 'var(--text-tertiary)', fontWeight: 500 }}>결과</div>
                 <h1
                   style={{
-                    fontSize: 24,
-                    fontWeight: 600,
-                    letterSpacing: '-0.015em',
-                    margin: '2px 0 0',
+                    fontSize: 22,
+                    fontWeight: 700,
+                    letterSpacing: '-0.024em',
+                    lineHeight: 1.25,
+                    margin: '4px 0 0',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 10,
                   }}
                 >
+                  {loading && <Spinner size="md" />}
                   {loading
                     ? '영상 정보 불러오는 중…'
                     : isError
@@ -192,7 +221,7 @@ export default function ResultPage() {
             </div>
 
             {error && !result && (
-              <div className="card" style={{ padding: 20, borderColor: 'var(--danger)' }}>
+              <div className="surface-base p-5" style={{ padding: 20, borderColor: 'var(--danger)' }}>
                 <div style={{ color: 'var(--danger)', fontSize: 14 }}>{error}</div>
                 <div style={{ marginTop: 10 }}>
                   <Button icon="arrow_left" onClick={() => navigate('/')}>
@@ -203,7 +232,7 @@ export default function ResultPage() {
             )}
 
             {!error && result && taskId && (
-              <div className="card" style={{ padding: 24 }}>
+              <div className="surface-base p-5" style={{ padding: 24 }}>
                 <div
                   style={{
                     display: 'grid',
@@ -264,10 +293,70 @@ export default function ResultPage() {
               </div>
             )}
 
-            {result && <ProvenanceCard result={result} />}
+            {/* 2-column body: main details on left, related sidebar on right */}
+            {!error && result && taskId && recent && recent.length > 0 && (
+              <div
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'minmax(0, 1fr) 280px',
+                  gap: 20,
+                  marginTop: 16,
+                  alignItems: 'start',
+                }}
+              >
+                <div>
+                  {result && <ProvenanceCard result={result} />}
+                </div>
+                <RelatedRail items={recent} />
+              </div>
+            )}
+            {!error && result && taskId && (!recent || recent.length === 0) && (
+              <>{result && <ProvenanceCard result={result} />}</>
+            )}
           </div>
         </div>
       </div>
     </div>
+  );
+}
+
+function RelatedRail({ items }: { items: RecentItem[] }) {
+  return (
+    <aside
+      className="surface-base"
+      style={{ padding: 14, position: 'sticky', top: 16 }}
+    >
+      <div style={{ fontSize: 11.5, fontWeight: 700, color: 'var(--text-tertiary)', textTransform: 'uppercase', letterSpacing: 0.06, marginBottom: 10 }}>
+        다른 영상 둘러보기
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        {items.map((it) => (
+          <Link
+            key={it.task_id}
+            to={`/result/${it.task_id}`}
+            className="grid grid-cols-[64px_1fr] gap-2.5 p-2 rounded-md no-underline text-foreground hover:bg-secondary transition-colors"
+          >
+            <div className="w-16 h-12 rounded overflow-hidden bg-foreground">
+              <video
+                src={it.video_url || `/api/videos/${it.task_id}`}
+                preload="metadata"
+                muted
+                playsInline
+                className="block w-full h-full object-cover"
+              />
+            </div>
+            <div className="min-w-0 flex flex-col justify-center">
+              <div className="text-[12.5px] font-semibold tracking-[-0.012em] line-clamp-2 leading-tight">
+                {videoTitle(it)}
+              </div>
+              <div className="text-[10.5px] text-muted-foreground tabular-nums mt-0.5">
+                {formatRelativeDate(it.timestamp)}
+                {it.generation_time && it.generation_time < 600 && ` · ${formatDuration(it.generation_time)}`}
+              </div>
+            </div>
+          </Link>
+        ))}
+      </div>
+    </aside>
   );
 }

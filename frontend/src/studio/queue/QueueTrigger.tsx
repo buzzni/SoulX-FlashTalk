@@ -6,23 +6,29 @@
  * re-mounted between wizard and render views).
  *
  * Badge turns accent-color when at least one task is running/pending.
+ *
+ * Open/close behaviour is owned by the parent Radix Popover (via
+ * `PopoverTrigger asChild`), so this component is render-only — no
+ * onClick of its own; Radix injects toggle-on-click through the child.
  */
+import { forwardRef } from 'react';
 import Icon from '../Icon.jsx';
 
 export interface QueueTriggerProps {
   loading: boolean;
   totalActive: number;
-  onClick: () => void;
 }
 
-export function QueueTrigger({ loading, totalActive, onClick }: QueueTriggerProps) {
+export const QueueTrigger = forwardRef<HTMLButtonElement, QueueTriggerProps & React.ButtonHTMLAttributes<HTMLButtonElement>>(function QueueTrigger(
+  { loading, totalActive, ...rest },
+  ref,
+) {
   return (
     <button
+      ref={ref}
       type="button"
-      onClick={() => {
-        if (!loading) onClick();
-      }}
       disabled={loading}
+      {...rest}
       style={{
         display: 'inline-flex',
         alignItems: 'center',
@@ -57,4 +63,4 @@ export function QueueTrigger({ loading, totalActive, onClick }: QueueTriggerProp
       )}
     </button>
   );
-}
+});

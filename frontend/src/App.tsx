@@ -19,41 +19,54 @@ import ResultPage from './studio/ResultPage';
 import WizardLayout from './routes/WizardLayout';
 import { Step1Page, Step2Page, Step3Page } from './routes/StepPages';
 import { RenderDispatchPage, RenderAttachPage } from './routes/RenderPage';
-import { RootRedirect } from './routes/RootRedirect';
+import LoginPage from './routes/LoginPage';
+import { RequireAuth } from './routes/RequireAuth';
+import { HomePage } from './routes/HomePage';
+import { MyPage } from './routes/MyPage';
+import { ResultsListPage } from './routes/ResultsListPage';
 
 export default function App() {
   return (
     <ErrorBoundary>
       <BrowserRouter>
         <Routes>
-          <Route path="/" element={<RootRedirect />} />
+          <Route path="/login" element={<LoginPage />} />
+          <Route path="/" element={<RequireAuth><HomePage /></RequireAuth>} />
+          <Route path="/mypage" element={<RequireAuth><MyPage /></RequireAuth>} />
+          <Route path="/results" element={<RequireAuth><ResultsListPage /></RequireAuth>} />
           <Route
             path="/step/1"
             element={
-              <WizardLayout>
-                <Step1Page />
-              </WizardLayout>
+              <RequireAuth>
+                <WizardLayout>
+                  <Step1Page />
+                </WizardLayout>
+              </RequireAuth>
             }
           />
           <Route
             path="/step/2"
             element={
-              <WizardLayout>
-                <Step2Page />
-              </WizardLayout>
+              <RequireAuth>
+                <WizardLayout>
+                  <Step2Page />
+                </WizardLayout>
+              </RequireAuth>
             }
           />
           <Route
             path="/step/3"
             element={
-              <WizardLayout>
-                <Step3Page />
-              </WizardLayout>
+              <RequireAuth>
+                <WizardLayout>
+                  <Step3Page />
+                </WizardLayout>
+              </RequireAuth>
             }
           />
-          <Route path="/render" element={<RenderDispatchPage />} />
-          <Route path="/render/:taskId" element={<RenderAttachPage />} />
-          <Route path="/result/:taskId" element={<ResultPage />} />
+          <Route path="/render" element={<RequireAuth><RenderDispatchPage /></RequireAuth>} />
+          <Route path="/render/:taskId" element={<RequireAuth><RenderAttachPage /></RequireAuth>} />
+          <Route path="/result/:taskId" element={<RequireAuth><ResultPage /></RequireAuth>} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </BrowserRouter>

@@ -2,29 +2,60 @@
  * VoiceCloner — user uploads a recording sample; backend clones it
  * into an ElevenLabs voice_id we can then use for TTS generation.
  *
- * Just the UI — the actual clone-on-generate happens in the
- * container via useVoiceClone. We only need the user to stage a
- * file here.
+ * Drives the `voice.sample` state machine (empty → pending → cloned).
+ * The actual clone-on-generate happens in Step3Audio via
+ * useVoiceClone — this component only stages the file (pending) or
+ * surfaces the cloned identity (cloned).
  */
 
+import { useEffect } from 'react';
 import Icon from '../Icon.jsx';
-import { Field, UploadTile } from '../primitives.jsx';
-
-export interface CloneSample {
-  name?: string;
-  size?: number;
-  type?: string;
-  url?: string;
-  _file?: File;
-  voiceId?: string | null;
-}
+import { Field } from '@/components/field';
+import { UploadTile } from '@/components/upload-tile';
+import {
+  localAssetFromUploadFile,
+  revokeLocalAssetIfBlob,
+  type UploadTileFile,
+} from '@/components/upload-tile-bridge';
+import type { VoiceCloneSample } from '@/wizard/schema';
 
 export interface VoiceClonerProps {
-  cloneSample: CloneSample | null;
-  onSampleSelected: (f: CloneSample | null) => void;
+  sample: VoiceCloneSample;
+  onSampleChange: (sample: VoiceCloneSample) => void;
 }
 
-export function VoiceCloner({ cloneSample, onSampleSelected }: VoiceClonerProps) {
+export function VoiceCloner({ sample, onSampleChange }: VoiceClonerProps) {
+  // Revoke our blob: previewUrl on replace or unmount.
+  useEffect(() => {
+    return () => {
+      if (sample.state === 'pending') revokeLocalAssetIfBlob(sample.asset);
+    };
+  }, [sample]);
+
+  const tileFile: UploadTileFile | null = (() => {
+    if (sample.state === 'pending') {
+      return {
+        name: sample.asset.name,
+        size: sample.asset.file.size,
+        type: sample.asset.file.type,
+        url: sample.asset.previewUrl,
+        _file: sample.asset.file,
+      };
+    }
+    if (sample.state === 'cloned') return { name: sample.name };
+    return null;
+  })();
+
+  const handlePick = (next: UploadTileFile | null) => {
+    if (sample.state === 'pending') revokeLocalAssetIfBlob(sample.asset);
+    const asset = localAssetFromUploadFile(next);
+    if (!asset) {
+      onSampleChange({ state: 'empty' });
+      return;
+    }
+    onSampleChange({ state: 'pending', asset });
+  };
+
   return (
     <div className="flex-col gap-3">
       <div
@@ -48,15 +79,15 @@ export function VoiceCloner({ cloneSample, onSampleSelected }: VoiceClonerProps)
       </div>
       <Field label="참고할 녹음 파일" hint="MP3 또는 WAV">
         <UploadTile
-          file={cloneSample}
-          onFile={(f) => onSampleSelected(f)}
-          onRemove={() => onSampleSelected(null)}
+          file={tileFile}
+          onFile={handlePick}
+          onRemove={() => handlePick(null)}
           accept="audio/*"
           label="녹음 파일 올리기"
           sub="10초 이상, 주변 소음 없는 파일"
         />
       </Field>
-      {cloneSample && (
+      {sample.state === 'cloned' && (
         <div
           className="flex items-center gap-3"
           style={{ padding: 12, background: 'var(--success-soft)', borderRadius: 'var(--r-sm)' }}

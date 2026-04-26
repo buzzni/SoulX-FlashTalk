@@ -17,12 +17,14 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Badge, Button } from '../primitives.jsx';
+import { WizardBadge as Badge } from '@/components/wizard-badge';
+import { WizardButton as Button } from '@/components/wizard-button';
 import { generateVideo } from '../../api/video';
 import { getVideoMeta } from '../../api/file';
 import { humanizeError } from '../../api/http';
 import { useRenderJob } from '../../hooks/useRenderJob';
 import { useQueuePosition } from '../../stores/queueStore';
+import { RESOLUTION_META } from '../../wizard/schema';
 import { formatTaskTitle } from '../taskFormat.js';
 import RenderHistory from '../RenderHistory.jsx';
 import { Confetti } from '../shared/Confetti';
@@ -87,8 +89,21 @@ export default function RenderDashboard({
 
     (async () => {
       try {
-        const audio_path =
-          state.voice?.generatedAudioPath || state.voice?.uploadedAudio?.path || '';
+        // Audio path lives on `voice.generation.audio.path` (tts /
+        // clone) or `voice.audio.path` (upload mode, once the file
+        // has uploaded — LocalAsset means still uploading and surfaces
+        // the same "missing audio" error).
+        const audio_path = (() => {
+          const v = state.voice;
+          if (!v || typeof v !== 'object') return '';
+          if (v.source === 'upload') {
+            const a = v.audio;
+            return a && typeof a === 'object' && 'path' in a ? (a.path as string) : '';
+          }
+          const gen = v.generation;
+          if (gen && gen.state === 'ready' && gen.audio?.path) return gen.audio.path as string;
+          return '';
+        })();
         if (!audio_path) {
           throw new Error('음성 파일 경로를 찾을 수 없어요 (3단계에서 다시 만들기)');
         }
@@ -187,8 +202,12 @@ export default function RenderDashboard({
         return { width: Number(w), height: Number(h), label: `${w}×${h}` };
       }
     }
-    const r = state.resolution;
-    return r ? { width: r.width, height: r.height, label: r.label } : null;
+    // state.resolution is a ResolutionKey — look up dimensions via
+    // RESOLUTION_META.
+    const key = state.resolution;
+    if (!key) return null;
+    const meta = RESOLUTION_META[key as keyof typeof RESOLUTION_META];
+    return meta ? { width: meta.width, height: meta.height, label: meta.label } : null;
   })();
 
   // Overall status — aggregates dispatchError, useRenderJob flags, and the
@@ -249,7 +268,7 @@ export default function RenderDashboard({
       <div style={{ maxWidth: 960, margin: '0 auto', position: 'relative', zIndex: 1 }}>
         <div className="flex justify-between items-center" style={{ marginBottom: 24 }}>
           <div>
-            <div className="card-eyebrow">마지막 단계</div>
+            <div className="text-[11px] uppercase tracking-widest font-semibold text-muted-foreground">마지막 단계</div>
             <h1 style={{ fontSize: 24, fontWeight: 600, letterSpacing: '-0.015em', margin: '2px 0 0' }}>
               {status === 'done'
                 ? '영상이 완성됐어요!'
@@ -268,7 +287,7 @@ export default function RenderDashboard({
           </div>
         </div>
 
-        <div className="card" style={{ padding: 24 }}>
+        <div className="surface-base p-5" style={{ padding: 24 }}>
           <div
             style={{
               display: 'grid',

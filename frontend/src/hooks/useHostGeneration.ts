@@ -15,10 +15,11 @@
  * events land in the right tile. UI never sees intermediate
  * un-init'd placeholders.
  *
- * Final set is persisted to `wizardStore.host.variants` so
- * reload restores the grid (Decision #1).
- *
- * Contract — see useHostGeneration.ts header for the canonical doc.
+ * Phase 2b: schema-typed. The store holds `host.generation` (state
+ * machine: idle | streaming | ready | failed) — this hook drives the
+ * transitions. The hook itself keeps a local `HostVariantUI` type
+ * with placeholder/error fields for mid-stream UI; only completed
+ * variants get committed to the schema's `HostVariant`.
  */
 
 import { useCallback, useState } from 'react';
@@ -27,11 +28,14 @@ import { humanizeError } from '../api/http';
 import { imageIdFromPath } from '../api/mapping';
 import { useWizardStore } from '../stores/wizardStore';
 import { useAbortableRequest } from './useAbortableRequest';
+import type { HostVariant as SchemaHostVariant } from '../wizard/schema';
 
+/** UI/transient streaming variant shape. Carries placeholder/error
+ * for mid-stream rendering — the schema's stable HostVariant is the
+ * sub-shape that survives to persistence. */
 export interface HostVariant {
   seed: number;
   id: string;
-  /** Stable server-side identifier (filename stem, e.g. `host_abc12345_s10`). */
   imageId?: string | null;
   url?: string;
   path?: string;
@@ -44,16 +48,10 @@ export interface HostVariant {
 
 export interface UseHostGenerationReturn {
   variants: HostVariant[];
-  /** Optional 5th tile — the previous batch's selected image, still
-   * pickable until the next selection commits. */
   prevSelected: HostVariant | null;
   batchId: string | null;
   isLoading: boolean;
   error: string | null;
-  /** Start a fresh stream. `seeds` overrides the backend default —
-   * pass `makeRandomSeeds()` for "다시 만들기" that returns fresh
-   * variants; omit to let the backend use its deterministic default
-   * (so two users with the same input see the same output). */
   regenerate: (
     input: HostGenerateInput & { imageSize?: '1K' | '2K' | '4K' },
     seeds?: number[],
@@ -61,18 +59,54 @@ export interface UseHostGenerationReturn {
   abort: () => void;
 }
 
-export function useHostGeneration(): UseHostGenerationReturn {
-  // Seed initial state from the store so a reload shows the last
-  // run's grid instantly. We don't subscribe — store only matters
-  // at mount; during an active stream we're authoritative.
-  const initialHost = (useWizardStore.getState().host ?? {}) as Record<string, unknown>;
-  const initialVariants = (initialHost.variants as HostVariant[] | undefined) ?? [];
-  const initialPrev = (initialHost.prevSelected as HostVariant | null | undefined) ?? null;
-  const initialBatchId = (initialHost.batchId as string | null | undefined) ?? null;
+/** Schema HostVariant → UI HostVariant (add placeholder=false). */
+function liftSchemaVariant(v: SchemaHostVariant): HostVariant {
+  return {
+    seed: v.seed,
+    id: `v${v.seed}`,
+    imageId: v.imageId,
+    url: v.url,
+    path: v.path,
+    placeholder: false,
+  };
+}
 
-  const [variants, setVariants] = useState<HostVariant[]>(initialVariants);
-  const [prevSelected, setPrevSelected] = useState<HostVariant | null>(initialPrev);
-  const [batchId, setBatchId] = useState<string | null>(initialBatchId);
+/** UI HostVariant (filter to non-placeholder, non-error) → schema. */
+function lowerToSchema(variants: HostVariant[]): SchemaHostVariant[] {
+  return variants
+    .filter((v) => !v.placeholder && !v.error && v.url && v.path && v.imageId)
+    .map((v) => ({
+      seed: v.seed,
+      imageId: v.imageId as string,
+      url: v.url as string,
+      path: v.path as string,
+    }));
+}
+
+/** Seed initial UI state from the current store host slice. */
+function readInitialFromStore(): {
+  variants: HostVariant[];
+  prevSelected: HostVariant | null;
+  batchId: string | null;
+} {
+  const host = useWizardStore.getState().host;
+  if (host.generation.state !== 'ready') {
+    return { variants: [], prevSelected: null, batchId: null };
+  }
+  return {
+    variants: host.generation.variants.map(liftSchemaVariant),
+    prevSelected: host.generation.prevSelected
+      ? { ...liftSchemaVariant(host.generation.prevSelected), id: `prev-${host.generation.prevSelected.imageId}`, isPrev: true }
+      : null,
+    batchId: host.generation.batchId,
+  };
+}
+
+export function useHostGeneration(): UseHostGenerationReturn {
+  const initial = readInitialFromStore();
+  const [variants, setVariants] = useState<HostVariant[]>(initial.variants);
+  const [prevSelected, setPrevSelected] = useState<HostVariant | null>(initial.prevSelected);
+  const [batchId, setBatchId] = useState<string | null>(initial.batchId);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const { run, abort } = useAbortableRequest();
@@ -87,39 +121,30 @@ export function useHostGeneration(): UseHostGenerationReturn {
 
       setIsLoading(true);
       setError(null);
-      // Placeholders are NOT drawn yet — wait for `init` to confirm
-      // the backend accepted the request.
       setVariants([]);
 
-      // Eager-persist prev_selected before the stream opens so a
-      // mid-stream navigation preserves the prev tile. Backend's
-      // authoritative prev_selected on `done` overrides this if it differs.
-      const storeHostBefore = (useWizardStore.getState().host ?? {}) as Record<string, unknown>;
-      const oldSelectedPath = storeHostBefore.selectedPath as string | null | undefined;
-      const oldSelectedUrl = storeHostBefore.imageUrl as string | null | undefined;
-      const oldSelectedSeed = storeHostBefore.selectedSeed as number | null | undefined;
-      const oldSelectedImageId =
-        (storeHostBefore.selectedImageId as string | null | undefined) ??
-        (oldSelectedPath ? imageIdFromPath(oldSelectedPath) : undefined);
-      const seedPrev: HostVariant | null =
-        oldSelectedPath && oldSelectedUrl && oldSelectedImageId
-          ? {
-              seed: typeof oldSelectedSeed === 'number' ? oldSelectedSeed : -1,
-              id: `prev-${oldSelectedImageId}`,
-              imageId: oldSelectedImageId,
-              url: oldSelectedUrl,
-              path: oldSelectedPath,
-              placeholder: false,
-              isPrev: true,
-            }
-          : null;
+      // Carry over current selection (if any) as prev_selected so it
+      // appears as the 5th tile until the next pick. Schema state's
+      // `selected` becomes this batch's `prevSelected`.
+      const hostBefore = useWizardStore.getState().host;
+      const oldSelected =
+        hostBefore.generation.state === 'ready' ? hostBefore.generation.selected : null;
+      const seedPrev: HostVariant | null = oldSelected
+        ? { ...liftSchemaVariant(oldSelected), id: `prev-${oldSelected.imageId}`, isPrev: true }
+        : null;
       setPrevSelected(seedPrev);
-      // Persist immediately so navigation away preserves prev info.
-      useWizardStore.getState().setHost({
-        variants: [],
-        prevSelected: seedPrev,
-        batchId: null,
-      });
+
+      // Move generation into streaming state. The state machine
+      // transition is the only persisted side-effect at stream start;
+      // variants stay [] until candidates land.
+      useWizardStore.getState().setHost((prev) => ({
+        ...prev,
+        generation: {
+          state: 'streaming',
+          batchId: null,
+          variants: [],
+        },
+      }));
 
       let currentVariants: HostVariant[] = [];
       let currentPrev: HostVariant | null = seedPrev;
@@ -156,11 +181,15 @@ export function useHostGeneration(): UseHostGenerationReturn {
                 : v,
             );
             setVariants(currentVariants);
-            // Persist arrived slots only — strip placeholders so a
-            // remount won't render dead spinners.
-            useWizardStore.getState().setHost({
-              variants: currentVariants.filter((v) => !v.placeholder && !v.error),
-            });
+            // Persist completed slots only.
+            useWizardStore.getState().setHost((prev) => ({
+              ...prev,
+              generation: {
+                state: 'streaming',
+                batchId: currentBatchId,
+                variants: lowerToSchema(currentVariants),
+              },
+            }));
           } else if (evt.type === 'error') {
             errorCount += 1;
             const detail = typeof evt.error === 'string' ? evt.error : 'unknown';
@@ -211,11 +240,30 @@ export function useHostGeneration(): UseHostGenerationReturn {
               currentPrev = null;
             }
             setPrevSelected(currentPrev);
-            useWizardStore.getState().setHost({
-              variants: currentVariants,
-              prevSelected: currentPrev,
-              batchId: currentBatchId,
-            });
+
+            // Final state machine transition to `ready`. Selection
+            // resets to null — user picks fresh from this batch.
+            // prevSelected (the 5th tile) is preserved for revert.
+            const finalVariants = lowerToSchema(currentVariants);
+            const prevSchema: SchemaHostVariant | null =
+              currentPrev && currentPrev.imageId && currentPrev.url && currentPrev.path
+                ? {
+                    seed: currentPrev.seed,
+                    imageId: currentPrev.imageId,
+                    url: currentPrev.url,
+                    path: currentPrev.path,
+                  }
+                : null;
+            useWizardStore.getState().setHost((prev) => ({
+              ...prev,
+              generation: {
+                state: 'ready',
+                batchId: currentBatchId,
+                variants: finalVariants,
+                selected: null,
+                prevSelected: prevSchema,
+              },
+            }));
           }
         }
 
@@ -229,7 +277,12 @@ export function useHostGeneration(): UseHostGenerationReturn {
           return;
         }
         setIsLoading(false);
-        setError(humanizeError(err));
+        const msg = humanizeError(err);
+        setError(msg);
+        useWizardStore.getState().setHost((prev) => ({
+          ...prev,
+          generation: { state: 'failed', error: msg },
+        }));
       }
     },
     [run],

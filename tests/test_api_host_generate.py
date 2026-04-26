@@ -28,7 +28,8 @@ def client(monkeypatch, tmp_path):
     from fastapi.testclient import TestClient
     import app as app_module
 
-    return TestClient(app_module.app)
+    with TestClient(app_module.app) as c:
+        yield c
 
 
 def test_happy_path_returns_candidates(client):

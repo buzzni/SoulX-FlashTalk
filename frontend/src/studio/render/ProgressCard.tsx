@@ -10,7 +10,8 @@
  * card and renders RenderStats instead.
  */
 
-import Icon from '../Icon.jsx';
+import { Check } from 'lucide-react';
+import { Spinner } from '@/components/spinner';
 import { STAGES, formatDateTime, formatElapsed } from './stages';
 
 export interface ProgressCardProps {
@@ -77,50 +78,61 @@ export function ProgressCard({
         )}
       </div>
 
-      {/* Stage checklist — vertical so the per-stage label can read in full. */}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+      {/* Stage timeline — connector dots + lines, with active stage shimmer */}
+      <div className="flex flex-col gap-0">
         {STAGES.map((s, i) => {
           const done = i < currentStageIdx;
           const active = i === currentStageIdx;
+          const isLast = i === STAGES.length - 1;
           return (
-            <div
-              key={s.key}
-              style={{
-                padding: '8px 10px',
-                background: done
-                  ? 'var(--success-soft)'
-                  : active
-                    ? 'var(--accent-soft)'
-                    : 'var(--bg-sunken)',
-                borderRadius: 6,
-                border: `1px solid ${
-                  done
-                    ? 'oklch(0.85 0.05 160)'
-                    : active
-                      ? 'var(--accent-soft-border)'
-                      : 'var(--border)'
-                }`,
-                fontSize: 11,
-                display: 'flex',
-                alignItems: 'center',
-                gap: 8,
-              }}
-            >
-              {done ? (
-                <Icon name="check" size={12} style={{ color: 'var(--success)' }} />
-              ) : active ? (
-                <span className="spinner" style={{ width: 11, height: 11 }} />
-              ) : (
+            <div key={s.key} className="grid grid-cols-[28px_1fr] gap-3 items-stretch">
+              {/* Left rail — dot + connector line */}
+              <div className="flex flex-col items-center">
                 <div
-                  style={{
-                    width: 12,
-                    height: 12,
-                    borderRadius: 99,
-                    border: '1.5px solid var(--border-strong)',
-                  }}
-                />
-              )}
-              <span className={done ? '' : active ? '' : 'text-tertiary'}>{s.label}</span>
+                  className={`grid place-items-center size-6 rounded-full transition-colors ${
+                    done
+                      ? 'bg-success text-white'
+                      : active
+                        ? 'bg-primary text-white'
+                        : 'bg-card border border-border text-muted-foreground'
+                  }`}
+                >
+                  {done ? (
+                    <Check className="size-3.5" />
+                  ) : active ? (
+                    <Spinner size="xs" />
+                  ) : (
+                    <span className="text-[10px] font-bold tabular-nums">{i + 1}</span>
+                  )}
+                </div>
+                {!isLast && (
+                  <div
+                    className={`flex-1 w-0.5 my-1 transition-colors ${
+                      done ? 'bg-success' : 'bg-border'
+                    }`}
+                    style={{ minHeight: 18 }}
+                  />
+                )}
+              </div>
+              {/* Right — label + status */}
+              <div className={`pb-3 ${active ? '' : ''}`}>
+                <div
+                  className={`text-[12.5px] font-semibold tracking-[-0.012em] ${
+                    done
+                      ? 'text-success-on-soft'
+                      : active
+                        ? 'text-foreground'
+                        : 'text-muted-foreground'
+                  }`}
+                >
+                  {s.label}
+                </div>
+                {active && message && (
+                  <div className="text-[11px] text-muted-foreground mt-0.5">
+                    {message}
+                  </div>
+                )}
+              </div>
             </div>
           );
         })}

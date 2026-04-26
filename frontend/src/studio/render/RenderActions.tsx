@@ -10,8 +10,7 @@
  */
 
 import Icon from '../Icon.jsx';
-import { Button } from '../primitives.jsx';
-
+import { WizardButton as Button } from '@/components/wizard-button';
 export interface RenderActionsProps {
   status: 'pending' | 'rendering' | 'done' | 'error';
   playableVideoUrl: string | null;
@@ -44,8 +43,7 @@ export function RenderActions({
         <a
           href={downloadUrl ?? playableVideoUrl}
           download
-          className="btn btn-primary"
-          style={{ textDecoration: 'none', justifyContent: 'center' }}
+          className="inline-flex h-9 items-center justify-center gap-2 px-4 rounded-md bg-primary text-primary-foreground text-sm font-medium hover:bg-[var(--primary-hover)] transition-colors no-underline"
         >
           <Icon name="download" size={14} /> 내 컴퓨터에 저장
         </a>

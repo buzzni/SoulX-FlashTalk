@@ -9,40 +9,32 @@
  */
 
 import Icon from '../Icon.jsx';
-import { Field, Slider } from '../primitives.jsx';
+import { Field } from '@/components/field';
+import { WizardSlider as Slider } from '@/components/wizard-slider';
+import type { VoiceAdvanced } from '@/wizard/schema';
 
 export interface VoiceAdvancedSettingsProps {
-  speed: number;
-  stability: number;
-  style: number;
-  similarity: number;
+  advanced: VoiceAdvanced;
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  onSpeedChange: (v: number) => void;
-  onStabilityChange: (v: number) => void;
-  onStyleChange: (v: number) => void;
-  onSimilarityChange: (v: number) => void;
+  onAdvancedChange: (next: VoiceAdvanced) => void;
 }
 
 export function VoiceAdvancedSettings({
-  speed,
-  stability,
-  style,
-  similarity,
+  advanced,
   open,
   onOpenChange,
-  onSpeedChange,
-  onStabilityChange,
-  onStyleChange,
-  onSimilarityChange,
+  onAdvancedChange,
 }: VoiceAdvancedSettingsProps) {
+  const set = (patch: Partial<VoiceAdvanced>) =>
+    onAdvancedChange({ ...advanced, ...patch });
   return (
     <>
       <div className="field-row" style={{ marginTop: 12 }}>
-        <Field label={`읽는 속도 · ${speed.toFixed(2)}배`} hint="0.5배 ~ 1.8배">
+        <Field label={`읽는 속도 · ${advanced.speed.toFixed(2)}배`} hint="0.5배 ~ 1.8배">
           <Slider
-            value={speed}
-            onChange={onSpeedChange}
+            value={advanced.speed}
+            onChange={(v: number) => set({ speed: v })}
             min={0.5}
             max={1.8}
             step={0.05}
@@ -72,12 +64,12 @@ export function VoiceAdvancedSettings({
         </summary>
         <div className="field-row-3" style={{ marginTop: 10 }}>
           <Field
-            label={`일정함 · ${Math.round(stability * 100)}`}
-            hint="높을수록 기복 적음"
+            label={`일정함 · ${Math.round(advanced.stability * 100)}`}
+            hint="높을수록 톤 유지"
           >
             <Slider
-              value={stability}
-              onChange={onStabilityChange}
+              value={advanced.stability}
+              onChange={(v: number) => set({ stability: v })}
               min={0}
               max={1}
               step={0.01}
@@ -85,12 +77,12 @@ export function VoiceAdvancedSettings({
             />
           </Field>
           <Field
-            label={`말투 강조 · ${Math.round(style * 100)}`}
-            hint="높을수록 감정 표현"
+            label={`말투 강조 · ${Math.round(advanced.style * 100)}`}
+            hint="높을수록 감정 풍부"
           >
             <Slider
-              value={style}
-              onChange={onStyleChange}
+              value={advanced.style}
+              onChange={(v: number) => set({ style: v })}
               min={0}
               max={1}
               step={0.01}
@@ -98,12 +90,12 @@ export function VoiceAdvancedSettings({
             />
           </Field>
           <Field
-            label={`원본 유사도 · ${Math.round(similarity * 100)}`}
-            hint="목소리 복제 시"
+            label={`원본 유사도 · ${Math.round(advanced.similarity * 100)}`}
+            hint="복제 모드에서만 적용"
           >
             <Slider
-              value={similarity}
-              onChange={onSimilarityChange}
+              value={advanced.similarity}
+              onChange={(v: number) => set({ similarity: v })}
               min={0}
               max={1}
               step={0.01}

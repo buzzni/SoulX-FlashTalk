@@ -1,10 +1,17 @@
 /**
  * useVoiceClone — upload a voice sample to ElevenLabs and receive
- * back a cloned voice_id.
+ * back a cloned voice_id, driving the schema voice.sample state
+ * machine.
  *
- * Written to `wizardStore.voice.cloneSample` on success so the
- * voice picker's "내 목소리" row shows the cloned voice without
- * a re-fetch.
+ * Phase 2c.4: voice is schema-typed. Clone-mode voices carry a
+ * separate `sample` state machine (empty → pending → cloned). This
+ * hook is responsible for the network step that flips
+ * `pending → cloned` (or stays empty on failure).
+ *
+ * The `pending` state isn't persisted — the staged File can't survive
+ * reload — but it's set transiently so the UI can show the
+ * pre-clone preview. `cloned` carries the server-issued voice_id and
+ * IS persisted.
  */
 
 import { useCallback, useState } from 'react';
@@ -24,7 +31,8 @@ export interface UseVoiceCloneReturn {
   isLoading: boolean;
   error: string | null;
   /** Upload the sample file and clone. `name` is the user-visible
-   * label for the cloned voice. */
+   * label for the cloned voice. The file isn't read off the store
+   * (it's a local UI handle); the caller passes it in directly. */
   clone: (sample: Blob, name?: string) => Promise<CloneResult | null>;
   abort: () => void;
 }
@@ -47,8 +55,19 @@ export function useVoiceClone(): UseVoiceCloneReturn {
         setIsLoading(false);
 
         if (res?.voice_id) {
-          useWizardStore.getState().setVoice({
-            cloneSample: { voiceId: res.voice_id, name: res.name ?? name },
+          // Transition the clone-mode voice's sample state to `cloned`.
+          // Other source modes (tts/upload) shouldn't have this hook
+          // invoked — narrow defensively.
+          useWizardStore.getState().setVoice((prev) => {
+            if (prev.source !== 'clone') return prev;
+            return {
+              ...prev,
+              sample: {
+                state: 'cloned',
+                voiceId: res.voice_id as string,
+                name: res.name ?? name,
+              },
+            };
           });
         }
         return res;

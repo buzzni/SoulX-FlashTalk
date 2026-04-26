@@ -13,8 +13,7 @@
 
 import { useRef, useState } from 'react';
 import Icon from '../Icon.jsx';
-import { Field } from '../primitives.jsx';
-
+import { Field } from '@/components/field';
 const VOICE_PRESETS: VoiceItem[] = [
   { id: 'v_minji', name: '민지', desc: '밝고 경쾌한 느낌의 20대 여성' },
   { id: 'v_sora', name: '소라', desc: '차분하고 부드러운 30대 여성' },
@@ -131,30 +130,34 @@ export function VoicePicker({
                 />
               </div>
             ))
-          : voiceList.map((v) => (
-              <div
-                key={v.id}
-                className={`voice-item ${selectedVoiceId === v.id ? 'on' : ''}`}
-                onClick={() => onVoiceSelected({ id: v.id, name: v.name })}
-              >
-                <div className="voice-avatar">{v.name[0]}</div>
-                <div className="voice-info">
-                  <div className="voice-name">{v.name}</div>
-                  <div className="voice-meta">{v.desc || v.lang || ''}</div>
-                </div>
-                <button
-                  className="btn btn-ghost btn-icon btn-sm voice-play"
-                  title={v.preview_url ? '미리 듣기' : '미리듣기 샘플이 없어요'}
-                  disabled={!v.preview_url}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    playPreview(v);
-                  }}
+          : voiceList.map((v) => {
+              const isPlaying = playingPreview === v.id;
+              return (
+                <div
+                  key={v.id}
+                  className={`voice-item ${selectedVoiceId === v.id ? 'on' : ''}`}
+                  onClick={() => onVoiceSelected({ id: v.id, name: v.name })}
                 >
-                  <Icon name={playingPreview === v.id ? 'pause' : 'play'} size={10} />
-                </button>
-              </div>
-            ))}
+                  <div className="voice-avatar">{v.name[0]}</div>
+                  <div className="voice-info">
+                    <div className="voice-name">{v.name}</div>
+                    <div className="voice-meta">{v.desc || v.lang || ''}</div>
+                  </div>
+                  <button
+                    type="button"
+                    className="voice-play inline-flex items-center justify-center size-8 rounded-md text-muted-foreground hover:bg-secondary hover:text-foreground disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                    title={v.preview_url ? '미리 듣기' : '미리듣기 샘플이 없어요'}
+                    disabled={!v.preview_url}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      playPreview(v);
+                    }}
+                  >
+                    <Icon name={isPlaying ? 'pause' : 'play'} size={10} />
+                  </button>
+                </div>
+              );
+            })}
       </div>
       <audio
         ref={previewAudioRef}

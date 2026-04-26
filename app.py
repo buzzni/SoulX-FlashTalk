@@ -21,6 +21,8 @@ from fastapi.staticfiles import StaticFiles
 import uvicorn
 
 import config
+from modules import auth as auth_module
+from modules import db as db_module
 from modules.task_queue import task_queue
 from modules.schemas import (
     HistoryResponse,
@@ -66,15 +68,20 @@ app.add_middleware(AuditLog)  # outermost (logs even on 4xx)
 app.add_middleware(ApiKeyAuth)
 app.add_middleware(ContentLengthLimit)
 
+
+# Studio JWT auth (PR2). Goes inside CORS / AuditLog so 401s still get
+# CORS headers and audit lines. The middleware is a no-op for paths in
+# auth_module.PUBLIC_PATHS / PUBLIC_PATH_PREFIXES.
+@app.middleware("http")
+async def _studio_auth(request, call_next):
+    return await auth_module.auth_middleware(request, call_next)
+
 # Create directories
 for d in [config.UPLOADS_DIR, config.OUTPUTS_DIR, config.TEMP_DIR, config.EXAMPLES_DIR, config.HOSTS_DIR, config.RESULTS_DIR]:
     os.makedirs(d, exist_ok=True)
 
 # Mount static files (UPLOADS only — NOT PROJECT_ROOT; Phase 0 Critical #1)
 app.mount("/static", StaticFiles(directory=config.UPLOADS_DIR), name="static")
-
-# Video history file
-VIDEO_HISTORY_FILE = os.path.join(config.OUTPUTS_DIR, "video_history.json")
 
 
 # ========================================
@@ -201,46 +208,6 @@ def set_task_error(task_id: str, error: str):
 
 
 # ========================================
-# Video History
-# ========================================
-
-def load_video_history() -> list:
-    if not os.path.exists(VIDEO_HISTORY_FILE):
-        return []
-    try:
-        with open(VIDEO_HISTORY_FILE, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except Exception:
-        return []
-
-
-def save_video_history(history: list):
-    try:
-        with open(VIDEO_HISTORY_FILE, "w", encoding="utf-8") as f:
-            json.dump(history, f, ensure_ascii=False, indent=2)
-    except Exception as e:
-        logger.error(f"Failed to save history: {e}")
-
-
-def add_to_history(task_id: str, script_text: str, host_image: str, audio_source: str, output_path: str, generation_time: float = None):
-    history = load_video_history()
-    file_size = os.path.getsize(output_path) if os.path.exists(output_path) else 0
-    history.insert(0, {
-        "task_id": task_id,
-        "timestamp": datetime.now().isoformat(),
-        "script_text": script_text[:100] + "..." if len(script_text) > 100 else script_text,
-        "host_image": os.path.basename(host_image),
-        "audio_source": audio_source,
-        "output_path": output_path,
-        "file_size": file_size,
-        "video_url": f"/api/videos/{task_id}",
-        "generation_time": round(generation_time, 2) if generation_time else None,
-    })
-    history = history[:100]
-    save_video_history(history)
-
-
-# ========================================
 # Helper
 # ========================================
 
@@ -346,22 +313,6 @@ def _ensure_multitalk_pipeline(cpu_offload: bool):
 # Video Generation (async)
 # ========================================
 
-def _write_result_manifest(task_id: str, manifest: dict) -> str:
-    """Persist a per-task result manifest to outputs/results/{task_id}.json.
-
-    Called on successful render — the manifest is the source of truth for the
-    frontend /result/:taskId page. Unlike the task queue (which trims to the
-    last 20 entries), manifests live forever so old completions remain viewable.
-    """
-    os.makedirs(config.RESULTS_DIR, exist_ok=True)
-    path = os.path.join(config.RESULTS_DIR, f"{task_id}.json")
-    tmp = path + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(manifest, f, ensure_ascii=False, indent=2)
-    os.replace(tmp, path)
-    return path
-
-
 async def generate_video_task(
     task_id: str,
     host_image: str,
@@ -370,11 +321,13 @@ async def generate_video_task(
     prompt: str,
     seed: int,
     cpu_offload: bool,
+    user_id: Optional[str] = None,
     script_text: str = "",
     resolution: str = "1280x720",
     scene_prompt: str = "",
     reference_image_paths: list = None,
     meta: Optional[dict] = None,
+    playlist_id: Optional[str] = None,
 ):
     """Run SoulX-FlashTalk video generation in background"""
     global pipeline, pipeline_lock
@@ -583,57 +536,71 @@ async def generate_video_task(
             # Record
             task_states[task_id]["output_path"] = output_path
             generation_time = time.time() - start_time
-            add_to_history(task_id, script_text, host_image, audio_source_label, output_path, generation_time)
 
             # Result manifest — source of truth for the frontend /result/:taskId
-            # page. Kept separate from task_queue.json because the queue trims
-            # to the last 20 entries (we want completed renders viewable
-            # forever). Captures both sides: the backend payload actually used
+            # page. Captures both sides: the backend payload actually used
             # (resolution AFTER 16× snap, file stats, seed, output path) AND
             # the client snapshot (`meta`) when one was attached at dispatch.
+            # Persisted to studio_results (PR5; was outputs/results/<task>.json).
+            video_bytes = os.path.getsize(output_path) if os.path.exists(output_path) else 0
+            from modules import storage as _storage
             try:
-                video_bytes = os.path.getsize(output_path) if os.path.exists(output_path) else 0
-                _write_result_manifest(task_id, {
-                    "task_id": task_id,
-                    "type": "generate",
-                    "status": "completed",
-                    "completed_at": datetime.now().isoformat(),
-                    "generation_time_sec": round(generation_time, 2),
-                    "video_url": f"/api/videos/{task_id}",
-                    "video_path": output_path,
-                    "video_bytes": video_bytes,
-                    "video_filename": os.path.basename(output_path),
-                    "params": {
-                        "host_image": host_image,
-                        "audio_path": audio_path,
-                        "audio_source_label": audio_source_label,
-                        "prompt": prompt,
-                        "seed": seed,
-                        "cpu_offload": cpu_offload,
-                        "script_text": script_text,
-                        "resolution_requested": resolution,
-                        "resolution_actual": f"{target_h}x{target_w}",
-                        "scene_prompt": scene_prompt,
-                        "reference_image_paths": reference_image_paths or [],
-                    },
-                    "meta": meta,
-                })
-            except Exception as e:
-                # Never fail the task because the manifest write failed; log
-                # and move on — the video itself already landed on disk.
-                logger.warning(f"Task {task_id}: manifest write failed: {e}")
+                video_storage_key = _storage.media_store.key_from_path(output_path)
+            except ValueError:
+                video_storage_key = None
+            manifest = {
+                "task_id": task_id,
+                "type": "generate",
+                "status": "completed",
+                "completed_at": datetime.now(),
+                "generation_time_sec": round(generation_time, 2),
+                "video_url": f"/api/videos/{task_id}",
+                "video_storage_key": video_storage_key,
+                "video_path": output_path,
+                "video_bytes": video_bytes,
+                "video_filename": os.path.basename(output_path),
+                "params": {
+                    "host_image": host_image,
+                    "audio_path": audio_path,
+                    "audio_source_label": audio_source_label,
+                    "prompt": prompt,
+                    "seed": seed,
+                    "cpu_offload": cpu_offload,
+                    "script_text": script_text,
+                    "resolution_requested": resolution,
+                    "resolution_actual": f"{target_h}x{target_w}",
+                    "scene_prompt": scene_prompt,
+                    "reference_image_paths": reference_image_paths or [],
+                },
+                "meta": meta,
+                "playlist_id": playlist_id,
+            }
+            if user_id:
+                try:
+                    from modules.repositories import studio_result_repo as _result_repo
+                    await _result_repo.upsert(user_id, manifest)
+                except Exception as e:
+                    # Never fail the task because the manifest write failed.
+                    logger.warning(f"Task {task_id}: manifest upsert failed: {e}")
+            else:
+                logger.info(f"Task {task_id}: skipping manifest persist (no user_id)")
 
             # Lifecycle commit — promote each step's currently-selected
             # candidate to "committed" (linked to this video task_id) and
             # delete the surrounding draft / prev_selected siblings. No-op
             # if the user never marked a selection (commit returns None).
             # task_id IS the video_id (frontend uses /api/videos/{task_id}).
-            try:
-                from modules import lifecycle
-                lifecycle.commit("host", task_id)
-                lifecycle.commit("composite", task_id)
-            except Exception as le:
-                logger.warning(f"Task {task_id}: lifecycle commit failed: {le}")
+            if user_id:
+                try:
+                    from modules.repositories import studio_host_repo as host_repo
+                    await host_repo.commit(user_id, "1-host", task_id)
+                    await host_repo.commit(user_id, "2-composite", task_id)
+                except Exception as le:
+                    logger.warning(f"Task {task_id}: lifecycle commit failed: {le}")
+            else:
+                # Pre-PR2 task with no owner — nothing to attribute the
+                # commit to. Skip; data integrity preserved by 007 import.
+                logger.info(f"Task {task_id}: skipping lifecycle commit (no user_id)")
 
             update_task(task_id, "complete", 1.0, f"비디오 생성 완료! ({generation_time:.1f}초)")
             logger.info(f"Task {task_id} completed: {output_path}")
@@ -675,6 +642,11 @@ async def startup_event():
     global pipeline_lock
     pipeline_lock = asyncio.Lock()
 
+    # Connect to MongoDB and ensure indexes exist before serving traffic.
+    # Fail-fast: if mongod is unreachable, this raises and uvicorn won't bind
+    # (per docs/db-integration-plan.md decision #15).
+    await db_module.init()
+
     # Register queue handlers and start worker
     task_queue.register_handler("generate", _queue_generate_handler)
     task_queue.register_handler("conversation", _queue_conversation_handler)
@@ -683,10 +655,16 @@ async def startup_event():
     logger.info("SoulX-FlashTalk API server started (queue worker active)")
 
 
-async def _queue_generate_handler(task_id: str, **params):
+@app.on_event("shutdown")
+async def shutdown_event():
+    await db_module.close()
+
+
+async def _queue_generate_handler(task_id: str, user_id: str, **params):
     """Queue handler that delegates to generate_video_task."""
     await generate_video_task(
         task_id=task_id,
+        user_id=user_id,
         host_image=params["host_image"],
         audio_path=params["audio_path"],
         audio_source_label=params["audio_source_label"],
@@ -698,19 +676,22 @@ async def _queue_generate_handler(task_id: str, **params):
         scene_prompt=params.get("scene_prompt", ""),
         reference_image_paths=params.get("reference_image_paths"),
         meta=params.get("meta"),
+        playlist_id=params.get("playlist_id"),
     )
 
 
-async def _queue_conversation_handler(task_id: str, **params):
+async def _queue_conversation_handler(task_id: str, user_id: str, **params):
     """Queue handler that delegates to generate_conversation_task."""
     await generate_conversation_task(
         task_id=task_id,
+        user_id=user_id,
         dialog_data=params["dialog_data"],
         layout=params["layout"],
         prompt=params["prompt"],
         seed=params["seed"],
         cpu_offload=params["cpu_offload"],
         resolution=params.get("resolution", "1280x720"),
+        playlist_id=params.get("playlist_id"),
     )
 
 
@@ -741,6 +722,28 @@ async def get_config():
         "default_resolution": "1280x720",
         "multitalk_enabled": config.MULTITALK_ENABLED and os.path.exists(config.MULTITALK_CKPT_DIR),
     }
+
+
+# --- Auth (PR2) ---
+
+@app.post("/api/auth/login")
+async def auth_login(payload: dict):
+    """Studio login. Body: {user_id, password}. Returns access_token + user."""
+    user_id = (payload or {}).get("user_id") or ""
+    password = (payload or {}).get("password") or ""
+    return await auth_module.login(user_id, password)
+
+
+@app.post("/api/auth/logout")
+async def auth_logout(request: Request):
+    user = auth_module.get_request_user(request)
+    new_sid = await auth_module.logout(user["user_id"])
+    return {"ok": True, "studio_token_version": new_sid}
+
+
+@app.get("/api/auth/me")
+async def auth_me(request: Request):
+    return auth_module.me(auth_module.get_request_user(request))
 
 
 # --- File Upload Endpoints ---
@@ -1132,6 +1135,7 @@ async def clone_voice(
 
 @app.post("/api/generate")
 async def generate_video(
+    request: Request,
     audio_source: str = Form("upload"),  # "upload", "elevenlabs"
     host_image_path: Optional[str] = Form(None),
     audio_path: Optional[str] = Form(None),
@@ -1158,6 +1162,10 @@ async def generate_video(
     # temperatures, etc.) instead of whatever state.* the wizard happens
     # to hold at view time. None → dashboard falls back to state.
     meta: Optional[str] = Form(None),
+    # Playlist assignment at generate time (per docs/playlist-feature-plan.md
+    # decision #3). Empty string / null → 미지정. Validation lives in the
+    # manifest upsert path (decision #9: silent coerce on miss/cross-user).
+    playlist_id: Optional[str] = Form(None),
 ):
     """Generate video from host image + audio"""
     from utils.security import safe_upload_path
@@ -1247,6 +1255,10 @@ async def generate_video(
         except json.JSONDecodeError as e:
             logger.warning("Invalid meta JSON on /api/generate: %s", e)
 
+    user = auth_module.get_request_user(request)
+    # Normalize empty-string playlist_id to None — frontends can't always
+    # send null in multipart/form-data.
+    pid = playlist_id if playlist_id not in ("", "null", None) else None
     await task_queue.enqueue(
         task_id=task_id,
         task_type="generate",
@@ -1262,11 +1274,13 @@ async def generate_video(
             "scene_prompt": scene_prompt,
             "reference_image_paths": ref_paths,
             "meta": meta_obj,
+            "playlist_id": pid,
         },
+        user_id=user["user_id"],
         label=_build_queue_label(queue_label, script_text, resolution, host_image_path),
     )
 
-    queue_status = await task_queue.get_status()
+    queue_status = await task_queue.get_status(user_id=user["user_id"])
     position = queue_status["total_pending"]
 
     return {"task_id": task_id, "message": "Video generation queued", "queue_position": position}
@@ -1326,15 +1340,20 @@ async def _progress_event_generator(task_id: str):
 
 
 @app.get("/api/progress/{task_id}")
-async def progress_stream(task_id: str):
-    """SSE endpoint for real-time progress."""
+async def progress_stream(task_id: str, request: Request):
+    """SSE endpoint for real-time progress. Owner-scoped (admins see all)."""
+    user = auth_module.get_request_user(request)
+    if user.get("role") not in ("admin", "master"):
+        owner = await task_queue.get_task_owner(task_id)
+        if owner is not None and owner != user["user_id"]:
+            raise HTTPException(status_code=404, detail="Task not found")
     if task_id not in task_states:
         raise HTTPException(status_code=404, detail="Task not found")
     return StreamingResponse(_progress_event_generator(task_id), media_type="text/event-stream")
 
 
 @app.get("/api/tasks/{task_id}/state", response_model=TaskStateSnapshot)
-async def task_state_snapshot(task_id: str):
+async def task_state_snapshot(task_id: str, request: Request):
     """Plain-JSON snapshot of current task state — polling alternative to the
     SSE endpoint above. Exists because some client environments (certain
     browser extensions, corporate proxies, weird connection-pool states) block
@@ -1353,6 +1372,11 @@ async def task_state_snapshot(task_id: str):
          task as failed after 8 consecutive 404s (~12s window).
       3. only 404 if the task genuinely doesn't exist anywhere.
     """
+    user = auth_module.get_request_user(request)
+    if user.get("role") not in ("admin", "master"):
+        owner = await task_queue.get_task_owner(task_id)
+        if owner is not None and owner != user["user_id"]:
+            raise HTTPException(status_code=404, detail="Task not found")
     state = task_states.get(task_id)
     if state:
         return {
@@ -1426,21 +1450,67 @@ async def get_video(task_id: str, download: bool = False):
             headers["Content-Disposition"] = "inline"
         return FileResponse(state["output_path"], media_type="video/mp4", headers=headers)
 
-    # Fallback: search history
-    history = load_video_history()
-    for entry in history:
-        if entry["task_id"] == task_id:
-            if os.path.exists(entry["output_path"]):
-                headers = {"Content-Disposition": "attachment" if download else "inline"}
-                return FileResponse(entry["output_path"], media_type="video/mp4", headers=headers)
+    # Fallback: studio_results lookup (no user filter — public endpoint per
+    # plan §6 because <video> tags can't send Authorization headers).
+    from modules.repositories import studio_result_repo as _result_repo
+    doc = await _result_repo.find_by_task_id(task_id)
+    if doc:
+        # Prefer the absolute video_path the worker recorded; fall back to
+        # resolving the storage_key. Either way the file must still exist.
+        candidate = doc.get("video_path")
+        if not candidate and doc.get("video_storage_key"):
+            from modules import storage as _storage
+            try:
+                candidate = str(_storage.media_store.local_path_for(doc["video_storage_key"]))
+            except ValueError:
+                candidate = None
+        if candidate and os.path.exists(candidate):
+            headers = {"Content-Disposition": "attachment" if download else "inline"}
+            return FileResponse(candidate, media_type="video/mp4", headers=headers)
 
     raise HTTPException(status_code=404, detail="Video not found")
 
 
 @app.get("/api/history", response_model=HistoryResponse)
-async def get_history(limit: int = 50):
-    history = load_video_history()
-    return {"total": len(history), "videos": history[:limit]}
+async def get_history(
+    request: Request,
+    limit: int = 50,
+    playlist_id: Optional[str] = None,
+):
+    """Return the authenticated user's recent completed renders.
+
+    PR5 cutover: was outputs/video_history.json (global), now studio_results
+    scoped to the calling user (admin/master sees all).
+
+    Optional `playlist_id` query param filters results (plan decision #12):
+        omitted        → all renders
+        "unassigned"   → only renders with no playlist
+        <hex id>       → exact playlist match. Unknown / deleted id returns
+                         200 [] so cross-tab playlist deletion doesn't break
+                         filter-UI restoration.
+    """
+    from modules.repositories import studio_result_repo as _result_repo
+    user = auth_module.get_request_user(request)
+    rows = await _result_repo.list_completed(
+        user["user_id"], limit=limit, playlist_id=playlist_id
+    )
+    # Project the legacy `videos` shape so the SPA's existing parser keeps working.
+    videos = []
+    for r in rows:
+        videos.append({
+            "task_id": r["task_id"],
+            "timestamp": (r.get("completed_at").isoformat()
+                          if hasattr(r.get("completed_at"), "isoformat")
+                          else r.get("completed_at")),
+            "script_text": (r.get("params") or {}).get("script_text", ""),
+            "host_image": (r.get("params") or {}).get("host_image", ""),
+            "audio_source": (r.get("params") or {}).get("audio_source_label", ""),
+            "output_path": r.get("video_path"),
+            "file_size": r.get("video_bytes", 0),
+            "video_url": r.get("video_url") or f"/api/videos/{r['task_id']}",
+            "generation_time": r.get("generation_time_sec"),
+        })
+    return {"total": len(videos), "videos": videos}
 
 
 # ========================================
@@ -1454,7 +1524,9 @@ async def generate_conversation_task(
     prompt: str,
     seed: int,
     cpu_offload: bool,
+    user_id: Optional[str] = None,
     resolution: str = "1280x720",
+    playlist_id: Optional[str] = None,
 ):
     """Run multi-agent conversation video generation in background."""
     global pipeline, pipeline_lock
@@ -1659,14 +1731,39 @@ async def generate_conversation_task(
             if len(dialog.turns) > 3:
                 script_summary += f" ... (+{len(dialog.turns) - 3}턴)"
 
-            add_to_history(
-                task_id,
-                script_summary,
-                "multi-agent",
-                f"conversation:{layout}",
-                output_path,
-                generation_time,
-            )
+            # Result manifest persisted to studio_results (PR5).
+            video_bytes = os.path.getsize(output_path) if os.path.exists(output_path) else 0
+            from modules import storage as _storage
+            try:
+                video_storage_key = _storage.media_store.key_from_path(output_path)
+            except ValueError:
+                video_storage_key = None
+            manifest = {
+                "task_id": task_id,
+                "type": "conversation",
+                "status": "completed",
+                "completed_at": datetime.now(),
+                "generation_time_sec": round(generation_time, 2),
+                "video_url": f"/api/videos/{task_id}",
+                "video_storage_key": video_storage_key,
+                "video_path": output_path,
+                "video_bytes": video_bytes,
+                "video_filename": os.path.basename(output_path),
+                "params": {
+                    "script_summary": script_summary,
+                    "layout": layout,
+                    "host_image": "multi-agent",
+                    "audio_source_label": f"conversation:{layout}",
+                },
+                "meta": None,
+                "playlist_id": playlist_id,
+            }
+            if user_id:
+                try:
+                    from modules.repositories import studio_result_repo as _result_repo
+                    await _result_repo.upsert(user_id, manifest)
+                except Exception as e:
+                    logger.warning(f"Conversation task {task_id}: manifest upsert failed: {e}")
 
             update_task(task_id, "complete", 1.0, f"대화 영상 생성 완료! ({generation_time:.1f}초)")
             logger.info(f"Conversation task {task_id} completed: {output_path}")
@@ -1698,12 +1795,15 @@ async def generate_conversation_task(
 
 @app.post("/api/generate-conversation")
 async def generate_conversation_endpoint(
+    request: Request,
     dialog_data: str = Form(...),  # JSON string
     layout: str = Form("split"),
     prompt: Optional[str] = Form(None),
     seed: int = Form(9999),
     cpu_offload: bool = Form(True),
     resolution: str = Form("1280x720"),
+    # Symmetry with /api/generate — see comment there.
+    playlist_id: Optional[str] = Form(None),
 ):
     """Generate multi-agent conversation video."""
     try:
@@ -1731,6 +1831,8 @@ async def generate_conversation_endpoint(
     dialog_turns = parsed_data.get("dialog", [])
     label = dialog_turns[0]["text"][:50] if dialog_turns else "Conversation"
 
+    user = auth_module.get_request_user(request)
+    pid = playlist_id if playlist_id not in ("", "null", None) else None
     await task_queue.enqueue(
         task_id=task_id,
         task_type="conversation",
@@ -1741,11 +1843,13 @@ async def generate_conversation_endpoint(
             "seed": seed,
             "cpu_offload": cpu_offload,
             "resolution": resolution,
+            "playlist_id": pid,
         },
+        user_id=user["user_id"],
         label=label,
     )
 
-    queue_status = await task_queue.get_status()
+    queue_status = await task_queue.get_status(user_id=user["user_id"])
     position = queue_status["total_pending"]
 
     return {"task_id": task_id, "message": "Conversation video generation queued", "queue_position": position}
@@ -1756,16 +1860,25 @@ async def generate_conversation_endpoint(
 # ========================================
 
 @app.get("/api/queue", response_model=QueueSnapshot)
-async def get_queue_status():
-    """Get current queue status: running, pending, and recent tasks."""
-    return await task_queue.get_status()
+async def get_queue_status(request: Request):
+    """Get queue status scoped to the authenticated user (admin sees all)."""
+    user = auth_module.get_request_user(request)
+    scope = None if user.get("role") in ("admin", "master") else user["user_id"]
+    return await task_queue.get_status(user_id=scope)
 
 
 @app.delete("/api/queue/{task_id}")
-async def cancel_queued_task(task_id: str):
-    """Cancel a pending task in the queue."""
-    success = await task_queue.cancel_task(task_id)
-    if not success:
+async def cancel_queued_task(task_id: str, request: Request):
+    """Cancel a pending task. Owner-only (admins/masters can cancel any)."""
+    user = auth_module.get_request_user(request)
+    is_admin = user.get("role") in ("admin", "master")
+    outcome = await task_queue.cancel_task(
+        task_id, requesting_user_id=user["user_id"], is_admin=is_admin,
+    )
+    if outcome == "not_found":
+        raise HTTPException(status_code=404, detail="Task not found or not in pending state")
+    if outcome == "forbidden":
+        # Don't leak whether task exists; return 404 (per plan auth posture)
         raise HTTPException(status_code=404, detail="Task not found or not in pending state")
     # Also update task_states
     if task_id in task_states:
@@ -1847,26 +1960,41 @@ def _synthesize_result_from_queue(entry: dict) -> dict:
 
 
 @app.get("/api/results/{task_id}", response_model=ResultManifest)
-async def get_result(task_id: str):
-    """Return the result manifest for a completed task.
+async def get_result(task_id: str, request: Request):
+    """Return the result manifest for a completed task. Owner-scoped.
 
-    Reads outputs/results/{task_id}.json when present (written by the worker
-    at completion). Falls back to synthesizing from task_queue.json so
-    pre-manifest tasks remain viewable in the frontend /result/:taskId page.
+    PR5: reads from studio_results. Falls back to synthesizing from the
+    task_queue snapshot for in-flight tasks the worker hasn't yet upserted.
     """
-    # Path-traversal guard — task_id is user-supplied in the URL.
     if not task_id or "/" in task_id or "\\" in task_id or ".." in task_id:
         raise HTTPException(status_code=400, detail="Invalid task_id")
 
-    manifest_path = os.path.join(config.RESULTS_DIR, f"{task_id}.json")
-    if os.path.exists(manifest_path):
-        try:
-            with open(manifest_path, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except Exception as e:
-            logger.warning(f"Failed to read manifest for {task_id}: {e}")
+    from modules.repositories import studio_result_repo as _result_repo
+    user = auth_module.get_request_user(request)
+    is_admin = user.get("role") in ("admin", "master")
 
-    # Fallback: scan task_queue for this id
+    # Primary path — studio_results.
+    if is_admin:
+        doc = await _result_repo.find_by_task_id(task_id)
+    else:
+        doc = await _result_repo.get(user["user_id"], task_id)
+        if doc is None:
+            # Cross-check the queue: if the user owns the task but the
+            # manifest hasn't landed yet, fall through to the synthesizer.
+            owner = await task_queue.get_task_owner(task_id)
+            if owner is not None and owner != user["user_id"]:
+                raise HTTPException(status_code=404, detail="Task not found")
+    if doc is not None:
+        # Strip user_id from the returned payload — the SPA doesn't need it
+        # and we don't want to expose it indirectly.
+        doc.pop("user_id", None)
+        return doc
+
+    # Fallback — in-flight tasks not yet persisted to studio_results.
+    if not is_admin:
+        owner = await task_queue.get_task_owner(task_id)
+        if owner is not None and owner != user["user_id"]:
+            raise HTTPException(status_code=404, detail="Task not found")
     status = await task_queue.get_status()
     for bucket in ("running", "pending", "recent"):
         for entry in status.get(bucket, []):
@@ -1878,24 +2006,26 @@ async def get_result(task_id: str):
 
 @app.get("/api/files/{filename:path}")
 async def get_file(filename: str):
-    """Serve files from SAFE_ROOTS (UPLOADS/OUTPUTS/EXAMPLES). No PROJECT_ROOT fallback.
+    """Serve files. Accepts both legacy (bucket-less) and PR3 storage_key forms.
 
-    Phase 0 CSO Critical #1 fix. Probes each safe root in order; rejects path
-    traversal via utils.security.safe_upload_path realpath containment.
+    Examples:
+      /api/files/outputs/hosts/saved/x.png   ← PR3 storage_key
+      /api/files/hosts/saved/x.png           ← legacy (still resolves)
+      /api/files/ref_img_abc.png             ← legacy (probes UPLOADS)
+
+    Bucket-prefixed keys go through `modules.storage` (rejects `..`).
+    Legacy filenames probe every bucket dir and pass through `safe_upload_path`
+    for the final realpath-containment check.
     """
     from utils.security import safe_upload_path
+    from modules.storage import resolve_legacy_or_keyed
 
-    candidate = None
-    for root in config.SAFE_ROOTS:
-        probe = os.path.join(root, filename)
-        if os.path.exists(probe):
-            candidate = probe
-            break
-    if candidate is None:
+    resolved = resolve_legacy_or_keyed(filename)
+    if resolved is None:
         raise HTTPException(status_code=404, detail="File not found")
-
-    # Validate no traversal escape (safe_upload_path raises on any escape)
-    filepath = safe_upload_path(candidate)
+    # Defense in depth — confirm realpath stays inside a safe root even if
+    # the storage layer's traversal check is somehow bypassed.
+    filepath = safe_upload_path(str(resolved))
 
     ext = os.path.splitext(filename)[1].lower()
     media_types = {
@@ -1987,6 +2117,7 @@ async def host_generate(
 
 @app.post("/api/host/generate/stream")
 async def host_generate_stream(
+    request: Request,
     mode: str = Form(...),
     prompt: Optional[str] = Form(None),
     extraPrompt: Optional[str] = Form(None),
@@ -2014,8 +2145,10 @@ async def host_generate_stream(
     """
     from utils.security import safe_upload_path
     from modules.host_generator import stream_host_candidates
-    from modules import lifecycle
+    from modules.repositories import studio_host_repo as host_repo
 
+    user = auth_module.get_request_user(request)
+    user_id = user["user_id"]
     face = safe_upload_path(faceRefPath) if faceRefPath else None
     outfit = safe_upload_path(outfitRefPath) if outfitRefPath else None
     style = safe_upload_path(styleRefPath) if styleRefPath else None
@@ -2033,7 +2166,7 @@ async def host_generate_stream(
         raise HTTPException(status_code=400, detail=f"temperature must be in [0.0, 2.0], got {temperature}")
 
     async def events():
-        batch_id = lifecycle.new_batch_id()
+        batch_id = f"batch_{uuid.uuid4().hex[:8]}"
         saved_paths: list = []
         try:
             async for evt in stream_host_candidates(
@@ -2057,11 +2190,11 @@ async def host_generate_stream(
                     saved_paths.append(evt["path"])
                 if evt.get("type") == "done" and saved_paths:
                     try:
-                        lifecycle.record_batch("host", saved_paths, batch_id)
-                        lifecycle.cleanup_after_generate("host", batch_id)
-                        state = lifecycle.get_state("host")
+                        await host_repo.record_batch(user_id, "1-host", saved_paths, batch_id)
+                        await host_repo.cleanup_after_generate(user_id, "1-host", batch_id)
+                        state = await host_repo.get_state(user_id, "1-host")
                         evt["batch_id"] = batch_id
-                        evt["prev_selected"] = lifecycle.serialize_record(state["prev_selected"])
+                        evt["prev_selected"] = state["prev_selected"]
                     except Exception as le:
                         logger.error("host lifecycle bookkeeping failed: %s", le)
                         evt["lifecycle_error"] = str(le)
@@ -2086,6 +2219,7 @@ async def host_generate_stream(
 
 @app.post("/api/composite/generate")
 async def composite_generate(
+    request: Request,
     hostImagePath: str = Form(...),
     productImagePaths: str = Form("[]"),  # JSON array of paths
     backgroundType: str = Form(...),  # "preset"|"upload"|"prompt"
@@ -2152,16 +2286,18 @@ async def composite_generate(
     # Lifecycle bookkeeping — tag fresh batch as draft, demote previous
     # selected to is_prev_selected, evict the older prev marker. Augment
     # the response so the frontend can render the 5-tile picker.
-    from modules import lifecycle
+    from modules.repositories import studio_host_repo as host_repo
+    user = auth_module.get_request_user(request)
+    user_id = user["user_id"]
     saved_paths = [c.get("path") for c in (result.get("candidates") or []) if c.get("path")]
     if saved_paths:
         try:
-            batch_id = lifecycle.new_batch_id()
-            lifecycle.record_batch("composite", saved_paths, batch_id)
-            lifecycle.cleanup_after_generate("composite", batch_id)
-            state = lifecycle.get_state("composite")
+            batch_id = f"batch_{uuid.uuid4().hex[:8]}"
+            await host_repo.record_batch(user_id, "2-composite", saved_paths, batch_id)
+            await host_repo.cleanup_after_generate(user_id, "2-composite", batch_id)
+            state = await host_repo.get_state(user_id, "2-composite")
             result["batch_id"] = batch_id
-            result["prev_selected"] = lifecycle.serialize_record(state["prev_selected"])
+            result["prev_selected"] = state["prev_selected"]
         except Exception as le:
             logger.error("composite lifecycle bookkeeping failed: %s", le)
             result["lifecycle_error"] = str(le)
@@ -2170,6 +2306,7 @@ async def composite_generate(
 
 @app.post("/api/composite/generate/stream")
 async def composite_generate_stream(
+    request: Request,
     hostImagePath: str = Form(...),
     productImagePaths: str = Form("[]"),
     backgroundType: str = Form(...),
@@ -2192,8 +2329,10 @@ async def composite_generate_stream(
     """
     from utils.security import safe_upload_path
     from modules.composite_generator import stream_composite_candidates
-    from modules import lifecycle
+    from modules.repositories import studio_host_repo as host_repo
 
+    user = auth_module.get_request_user(request)
+    user_id = user["user_id"]
     host_resolved = safe_upload_path(hostImagePath)
 
     try:
@@ -2212,7 +2351,7 @@ async def composite_generate_stream(
         raise HTTPException(status_code=400, detail=f"temperature must be in [0.0, 2.0], got {temperature}")
 
     async def events():
-        batch_id = lifecycle.new_batch_id()
+        batch_id = f"batch_{uuid.uuid4().hex[:8]}"
         saved_paths: list = []
         try:
             async for evt in stream_composite_candidates(
@@ -2236,11 +2375,11 @@ async def composite_generate_stream(
                     saved_paths.append(evt["path"])
                 if evt.get("type") == "done" and saved_paths:
                     try:
-                        lifecycle.record_batch("composite", saved_paths, batch_id)
-                        lifecycle.cleanup_after_generate("composite", batch_id)
-                        state = lifecycle.get_state("composite")
+                        await host_repo.record_batch(user_id, "2-composite", saved_paths, batch_id)
+                        await host_repo.cleanup_after_generate(user_id, "2-composite", batch_id)
+                        state = await host_repo.get_state(user_id, "2-composite")
                         evt["batch_id"] = batch_id
-                        evt["prev_selected"] = lifecycle.serialize_record(state["prev_selected"])
+                        evt["prev_selected"] = state["prev_selected"]
                     except Exception as le:
                         logger.error("composite lifecycle bookkeeping failed: %s", le)
                         evt["lifecycle_error"] = str(le)
@@ -2259,46 +2398,33 @@ async def composite_generate_stream(
 
 
 # ========================================
-# HostStudio Phase 1 — Saved Hosts CRUD
+# HostStudio Phase 1 — Saved Hosts CRUD (PR4: DB-backed)
 # ========================================
 
 
-def _host_meta_path(host_id: str) -> str:
-    return os.path.join(config.HOSTS_DIR, f"{host_id}.json")
-
-
-def _host_image_path(host_id: str) -> str:
-    return os.path.join(config.HOSTS_DIR, f"{host_id}.png")
-
-
 @app.get("/api/hosts")
-async def list_saved_hosts():
-    """List saved hosts (server-persisted). localStorage holds index on client."""
-    if not os.path.isdir(config.HOSTS_DIR):
-        return {"hosts": []}
-    items = []
-    for fname in sorted(os.listdir(config.HOSTS_DIR)):
-        if not fname.endswith(".json"):
-            continue
-        host_id = fname[:-5]
-        meta_path = _host_meta_path(host_id)
-        try:
-            with open(meta_path, "r", encoding="utf-8") as f:
-                meta = json.load(f)
-        except (OSError, json.JSONDecodeError):
-            continue
-        items.append(meta)
+async def list_saved_hosts(request: Request):
+    """List saved hosts owned by the authenticated user."""
+    from modules.repositories import studio_saved_host_repo
+    user = auth_module.get_request_user(request)
+    items = await studio_saved_host_repo.list_for_user(user["user_id"])
     return {"hosts": items}
 
 
 @app.post("/api/hosts/save")
 async def save_host(
+    request: Request,
     source_path: str = Form(...),
     name: str = Form(...),
     meta: Optional[str] = Form(None),  # JSON dict
 ):
-    """Persist a candidate image under HOSTS_DIR (V1 — no auth; protect via REQUIRE_API_KEY)."""
+    """Persist a candidate image as a long-lived saved host (PR4: DB-backed)."""
+    from pathlib import Path as _Path
+    from modules import storage as storage_module
+    from modules.repositories import studio_saved_host_repo
     from utils.security import safe_upload_path
+
+    user = auth_module.get_request_user(request)
 
     # Guard source_path (must be in UPLOADS/OUTPUTS)
     source = safe_upload_path(source_path)
@@ -2306,48 +2432,149 @@ async def save_host(
         raise HTTPException(status_code=404, detail="Source image not found")
 
     host_id = uuid.uuid4().hex
-    dst = _host_image_path(host_id)
-    import shutil
-    shutil.copyfile(source, dst)
+    storage_key = storage_module.media_store.save_path(
+        "hosts", _Path(source), basename=f"{host_id}.png"
+    )
 
-    meta_dict = {"id": host_id, "name": name, "path": dst, "url": f"/api/files/outputs/hosts/saved/{host_id}.png"}
+    meta_dict = None
     if meta:
         try:
             extra = json.loads(meta)
             if isinstance(extra, dict):
-                meta_dict["meta"] = extra
+                meta_dict = extra
         except json.JSONDecodeError:
             pass
+
     try:
-        with open(_host_meta_path(host_id), "w", encoding="utf-8") as f:
-            json.dump(meta_dict, f, ensure_ascii=False, indent=2)
-    except OSError as e:
-        # Cleanup image if metadata write fails
+        return await studio_saved_host_repo.create(
+            user["user_id"],
+            host_id=host_id,
+            name=name,
+            storage_key=storage_key,
+            meta=meta_dict,
+        )
+    except Exception as e:
+        # If DB insert fails, clean up the file we just wrote.
         try:
-            os.unlink(dst)
-        except OSError:
+            storage_module.media_store.delete(storage_key)
+        except Exception:
             pass
         raise HTTPException(status_code=500, detail=f"Failed to save host: {e}")
-    return meta_dict
 
 
 @app.delete("/api/hosts/{host_id}")
-async def delete_host(host_id: str):
-    """Remove a saved host and its metadata."""
-    # Defensive: host_id must be alphanumeric (UUID hex) to avoid path traversal
+async def delete_host(host_id: str, request: Request):
+    """Remove a saved host (DB row + backing file). Owner-scoped."""
+    from modules.repositories import studio_saved_host_repo
+    user = auth_module.get_request_user(request)
+    # Defensive: host_id must be alphanumeric (UUID hex) to avoid traversal-shaped values.
     if not host_id.isalnum():
         raise HTTPException(status_code=400, detail="Invalid host_id")
-    meta = _host_meta_path(host_id)
-    img = _host_image_path(host_id)
-    if not os.path.exists(meta):
+    ok = await studio_saved_host_repo.delete(user["user_id"], host_id)
+    if not ok:
         raise HTTPException(status_code=404, detail="Host not found")
-    try:
-        os.unlink(meta)
-        if os.path.exists(img):
-            os.unlink(img)
-    except OSError as e:
-        raise HTTPException(status_code=500, detail=f"Delete failed: {e}")
     return {"message": "deleted", "id": host_id}
+
+
+# ========================================
+# Playlists CRUD (per docs/playlist-feature-plan.md)
+# ========================================
+
+
+def _validate_playlist_id(playlist_id: str) -> None:
+    """playlist_id is a 32-char hex uuid (uuid4().hex). Defense-in-depth
+    against path-traversal-shaped values arriving via path parameter."""
+    if (
+        not playlist_id
+        or len(playlist_id) != 32
+        or not all(c in "0123456789abcdef" for c in playlist_id)
+    ):
+        raise HTTPException(status_code=400, detail="Invalid playlist_id")
+
+
+@app.get("/api/playlists")
+async def list_playlists(request: Request):
+    """List the user's playlists with video counts + the synthetic 미지정 count.
+    Sidebar applies alphabetical sort in JS (plan decision #11)."""
+    from modules.repositories import studio_playlist_repo
+    user = auth_module.get_request_user(request)
+    user_id = user["user_id"]
+    playlists = await studio_playlist_repo.list_for_user(user_id)
+    unassigned = await studio_playlist_repo.unassigned_count(user_id)
+    return {"playlists": playlists, "unassigned_count": unassigned}
+
+
+@app.post("/api/playlists")
+async def create_playlist(request: Request, name: str = Form(...)):
+    """Create a new playlist. 409 on duplicate name (per-user, NFC+casefold)."""
+    from modules.repositories import studio_playlist_repo
+    user = auth_module.get_request_user(request)
+    try:
+        return await studio_playlist_repo.create(user["user_id"], name=name)
+    except studio_playlist_repo.DuplicateNameError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    except studio_playlist_repo.ReservedNameError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.patch("/api/playlists/{playlist_id}")
+async def rename_playlist(playlist_id: str, request: Request, name: str = Form(...)):
+    """Rename. 404 if missing/cross-user, 409 on name dup."""
+    from modules.repositories import studio_playlist_repo
+    _validate_playlist_id(playlist_id)
+    user = auth_module.get_request_user(request)
+    try:
+        out = await studio_playlist_repo.rename(user["user_id"], playlist_id, name=name)
+    except studio_playlist_repo.DuplicateNameError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    except studio_playlist_repo.ReservedNameError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    if out is None:
+        raise HTTPException(status_code=404, detail="Playlist not found")
+    return out
+
+
+@app.delete("/api/playlists/{playlist_id}")
+async def delete_playlist(playlist_id: str, request: Request):
+    """Delete a playlist; cascades videos to 미지정. 404 if missing/cross-user."""
+    from modules.repositories import studio_playlist_repo
+    _validate_playlist_id(playlist_id)
+    user = auth_module.get_request_user(request)
+    ok = await studio_playlist_repo.delete(user["user_id"], playlist_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail="Playlist not found")
+    return {"message": "deleted", "playlist_id": playlist_id}
+
+
+@app.patch("/api/results/{task_id}/playlist")
+async def move_result_to_playlist(
+    task_id: str,
+    request: Request,
+    playlist_id: Optional[str] = Form(None),
+):
+    """Move a video to a playlist (or empty/null = 미지정). 404 if result
+    missing/cross-user OR if playlist_id is non-empty and unknown/cross-user."""
+    from modules.repositories import studio_result_repo
+    user = auth_module.get_request_user(request)
+    if not task_id.isalnum():
+        raise HTTPException(status_code=400, detail="Invalid task_id")
+    # Empty string from frontends that can't easily send null in a Form body
+    # collapses to "unassign". Explicit null-as-text is also normalized.
+    if playlist_id in ("", "null", None):
+        playlist_id = None
+    else:
+        _validate_playlist_id(playlist_id)
+    try:
+        out = await studio_result_repo.set_playlist(user["user_id"], task_id, playlist_id)
+    except LookupError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    if out is None:
+        raise HTTPException(status_code=404, detail="Result not found")
+    return {"task_id": task_id, "playlist_id": playlist_id, "message": "updated"}
 
 
 # ========================================
@@ -2364,40 +2591,43 @@ def _validate_image_id(image_id: str) -> None:
 
 
 @app.post("/api/host/select")
-async def host_select(image_id: str = Form(...)):
+async def host_select(request: Request, image_id: str = Form(...)):
     """Mark a Step1 candidate as the user's current selection. Idempotent."""
-    from modules import lifecycle
+    from modules.repositories import studio_host_repo as host_repo
+    user = auth_module.get_request_user(request)
     _validate_image_id(image_id)
     try:
-        rec = lifecycle.select("host", image_id)
-    except FileNotFoundError:
+        rec = await host_repo.select(user["user_id"], "1-host", image_id)
+    except LookupError:
         raise HTTPException(status_code=404, detail="Image not found")
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
-    return {"selected": lifecycle.serialize_record(rec)}
+    return {"selected": rec}
 
 
 @app.post("/api/composite/select")
-async def composite_select(image_id: str = Form(...)):
+async def composite_select(request: Request, image_id: str = Form(...)):
     """Mark a Step2 candidate as the user's current selection. Idempotent."""
-    from modules import lifecycle
+    from modules.repositories import studio_host_repo as host_repo
+    user = auth_module.get_request_user(request)
     _validate_image_id(image_id)
     try:
-        rec = lifecycle.select("composite", image_id)
-    except FileNotFoundError:
+        rec = await host_repo.select(user["user_id"], "2-composite", image_id)
+    except LookupError:
         raise HTTPException(status_code=404, detail="Image not found")
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
-    return {"selected": lifecycle.serialize_record(rec)}
+    return {"selected": rec}
 
 
 @app.delete("/api/composites/{image_id}")
-async def delete_composite(image_id: str):
+async def delete_composite(image_id: str, request: Request):
     """Remove a single composite candidate. Refuses `committed` images —
     delete the parent video instead so video_ids bookkeeping stays consistent."""
-    from modules import lifecycle
+    from modules.repositories import studio_host_repo as host_repo
+    user = auth_module.get_request_user(request)
     _validate_image_id(image_id)
-    result = lifecycle.delete_candidate("composite", image_id)
+    result = await host_repo.delete_candidate(user["user_id"], "2-composite", image_id)
     if result == "not_found":
         raise HTTPException(status_code=404, detail="Composite not found")
     if result == "committed":
@@ -2409,28 +2639,35 @@ async def delete_composite(image_id: str):
 
 
 @app.delete("/api/videos/{task_id}")
-async def delete_video(task_id: str):
+async def delete_video(task_id: str, request: Request):
     """Remove a generated video. Cascade-deletes any committed step1/step2
     images linked exclusively to this video (see
-    `lifecycle.cascade_delete_by_video`). Also drops the result manifest
-    and history entry so the dashboard stops surfacing it."""
-    from modules import lifecycle
+    studio_host_repo.cascade_delete_by_video). Also drops the result
+    manifest and history entry so the dashboard stops surfacing it."""
+    from modules.repositories import studio_host_repo as host_repo
+    user = auth_module.get_request_user(request)
 
     if not task_id.replace("-", "").isalnum():
         raise HTTPException(status_code=400, detail="Invalid task_id")
 
-    removed_images = lifecycle.cascade_delete_by_video(task_id)
+    removed_images = await host_repo.cascade_delete_by_video(user["user_id"], task_id)
 
-    # Resolve the video path. Prefer in-memory state; fall back to history.
+    # Resolve the video path: prefer in-memory state, then studio_results.
+    from modules.repositories import studio_result_repo as _result_repo
     video_path: Optional[str] = None
     state = task_states.get(task_id)
     if state and state.get("output_path"):
         video_path = state["output_path"]
     if not video_path:
-        for entry in load_video_history():
-            if entry.get("task_id") == task_id:
-                video_path = entry.get("output_path")
-                break
+        doc = await _result_repo.get(user["user_id"], task_id)
+        if doc:
+            video_path = doc.get("video_path")
+            if not video_path and doc.get("video_storage_key"):
+                from modules import storage as _storage
+                try:
+                    video_path = str(_storage.media_store.local_path_for(doc["video_storage_key"]))
+                except ValueError:
+                    video_path = None
 
     deleted_video = False
     if video_path and os.path.exists(video_path):
@@ -2440,19 +2677,8 @@ async def delete_video(task_id: str):
         except OSError as e:
             logger.warning("Failed to delete video file %s: %s", video_path, e)
 
-    # Manifest sidecar (RESULTS_DIR/<task_id>.json)
-    manifest_path = os.path.join(config.RESULTS_DIR, f"{task_id}.json")
-    if os.path.exists(manifest_path):
-        try:
-            os.unlink(manifest_path)
-        except OSError as e:
-            logger.warning("Failed to delete manifest %s: %s", manifest_path, e)
-
-    # History entry — keep the dashboard view consistent
-    history = load_video_history()
-    new_history = [e for e in history if e.get("task_id") != task_id]
-    if len(new_history) != len(history):
-        save_video_history(new_history)
+    # Result row (PR5 replacement for outputs/results/<task>.json + history.json).
+    await _result_repo.delete(user["user_id"], task_id)
 
     # In-memory task state (best effort)
     task_states.pop(task_id, None)

@@ -1,0 +1,149 @@
+"""Tests for studio_saved_host_repo: CRUD + user scoping."""
+from __future__ import annotations
+
+import os
+from pathlib import Path
+
+import pytest
+import pytest_asyncio
+from motor.motor_asyncio import AsyncIOMotorClient
+
+import config
+from modules import db as db_module
+from modules.repositories import studio_saved_host_repo as repo
+
+
+def _test_db_name() -> str:
+    worker = os.environ.get("PYTEST_XDIST_WORKER", "main")
+    return f"ai_showhost_test_{worker}_savedhost"
+
+
+@pytest_asyncio.fixture
+async def repo_db(monkeypatch, tmp_path):
+    uploads = tmp_path / "uploads"
+    outputs = tmp_path / "outputs"
+    examples = tmp_path / "examples"
+    for d in (uploads, outputs, examples, outputs / "hosts" / "saved"):
+        d.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(config, "UPLOADS_DIR", str(uploads))
+    monkeypatch.setattr(config, "OUTPUTS_DIR", str(outputs))
+    monkeypatch.setattr(config, "EXAMPLES_DIR", str(examples))
+    monkeypatch.setattr(config, "MONGO_URL", "mongodb://localhost:27017")
+    monkeypatch.setattr(config, "DB_NAME", _test_db_name())
+
+    pre = AsyncIOMotorClient("mongodb://localhost:27017", serverSelectionTimeoutMS=2000)
+    pre_db = pre[_test_db_name()]
+    for c in await pre_db.list_collection_names():
+        await pre_db[c].drop()
+    pre.close()
+
+    await db_module.init()
+    yield db_module.get_db(), outputs
+    d = db_module.get_db()
+    for c in await d.list_collection_names():
+        await d[c].drop()
+    await db_module.close()
+
+
+def _write_png(path: Path, content: bytes = b"png-bytes"):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(content)
+
+
+async def test_create_returns_public_shape(repo_db):
+    _, outputs = repo_db
+    p = outputs / "hosts" / "saved" / "abc123.png"; _write_png(p)
+    out = await repo.create("u1", host_id="abc123", name="my host",
+                             storage_key="outputs/hosts/saved/abc123.png")
+    assert out["id"] == "abc123"
+    assert out["name"] == "my host"
+    assert out["url"] == "/api/files/outputs/hosts/saved/abc123.png"
+    assert out["created_at"] is not None
+
+
+async def test_create_persists_meta(repo_db):
+    _, outputs = repo_db
+    p = outputs / "hosts" / "saved" / "abc123.png"; _write_png(p)
+    out = await repo.create("u1", host_id="abc123", name="x",
+                             storage_key="outputs/hosts/saved/abc123.png",
+                             meta={"seed": 42, "prompt": "p"})
+    assert out["meta"] == {"seed": 42, "prompt": "p"}
+
+
+async def test_create_idempotent_by_host_id(repo_db):
+    _, outputs = repo_db
+    p = outputs / "hosts" / "saved" / "abc123.png"; _write_png(p)
+    o1 = await repo.create("u1", host_id="abc123", name="first",
+                             storage_key="outputs/hosts/saved/abc123.png")
+    o2 = await repo.create("u1", host_id="abc123", name="second",
+                             storage_key="outputs/hosts/saved/abc123.png")
+    items = await repo.list_for_user("u1")
+    assert len(items) == 1
+    assert items[0]["name"] == "second"
+    # created_at preserved on second call
+    assert items[0]["created_at"] == o1["created_at"]
+
+
+async def test_list_for_user_returns_newest_first(repo_db):
+    _, outputs = repo_db
+    for i in range(3):
+        p = outputs / "hosts" / "saved" / f"id{i}.png"; _write_png(p)
+        await repo.create("u1", host_id=f"id{i}", name=f"h{i}",
+                           storage_key=f"outputs/hosts/saved/id{i}.png")
+    items = await repo.list_for_user("u1")
+    assert len(items) == 3
+    assert items[0]["id"] == "id2"
+    assert items[2]["id"] == "id0"
+
+
+async def test_list_for_user_isolation(repo_db):
+    _, outputs = repo_db
+    pa = outputs / "hosts" / "saved" / "alice.png"; _write_png(pa)
+    pb = outputs / "hosts" / "saved" / "bob.png"; _write_png(pb)
+    await repo.create("alice", host_id="alice", name="a",
+                       storage_key="outputs/hosts/saved/alice.png")
+    await repo.create("bob", host_id="bob", name="b",
+                       storage_key="outputs/hosts/saved/bob.png")
+    assert len(await repo.list_for_user("alice")) == 1
+    assert (await repo.list_for_user("alice"))[0]["id"] == "alice"
+    assert len(await repo.list_for_user("bob")) == 1
+
+
+async def test_get_returns_doc(repo_db):
+    _, outputs = repo_db
+    p = outputs / "hosts" / "saved" / "abc.png"; _write_png(p)
+    await repo.create("u1", host_id="abc", name="x",
+                       storage_key="outputs/hosts/saved/abc.png")
+    out = await repo.get("u1", "abc")
+    assert out["id"] == "abc"
+
+
+async def test_get_returns_none_for_missing(repo_db):
+    assert await repo.get("u1", "ghost") is None
+
+
+async def test_delete_removes_row_and_file(repo_db):
+    _, outputs = repo_db
+    p = outputs / "hosts" / "saved" / "abc.png"; _write_png(p)
+    await repo.create("u1", host_id="abc", name="x",
+                       storage_key="outputs/hosts/saved/abc.png")
+    assert p.exists()
+    ok = await repo.delete("u1", "abc")
+    assert ok is True
+    assert not p.exists()
+    assert await repo.get("u1", "abc") is None
+
+
+async def test_delete_owner_mismatch_returns_false(repo_db):
+    _, outputs = repo_db
+    p = outputs / "hosts" / "saved" / "abc.png"; _write_png(p)
+    await repo.create("alice", host_id="abc", name="x",
+                       storage_key="outputs/hosts/saved/abc.png")
+    ok = await repo.delete("bob", "abc")  # bob doesn't own it
+    assert ok is False
+    assert p.exists()  # alice's file untouched
+    assert await repo.get("alice", "abc") is not None
+
+
+async def test_delete_missing_returns_false(repo_db):
+    assert await repo.delete("u1", "ghost") is False

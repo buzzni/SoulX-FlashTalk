@@ -34,6 +34,14 @@ export function getAuthHeaders(): Record<string, string> {
   }
 }
 
+// 401/403 callback — authStore wires a redirect-to-login handler here.
+// Default is a no-op so non-SPA contexts (tests, scripts) still work.
+export type UnauthorizedHandler = (status: number) => void;
+let onUnauthorized: UnauthorizedHandler = () => {};
+export function setUnauthorizedHandler(fn: UnauthorizedHandler): void {
+  onUnauthorized = fn;
+}
+
 // ────────────────────────────────────────────────────────────────────
 // Typed errors
 // ────────────────────────────────────────────────────────────────────
@@ -128,6 +136,13 @@ export async function parseResponse<T>(res: Response, label: string): Promise<T>
       /* body unreadable — swallow */
     }
   }
+  // PR2: 401 (no/expired/revoked token) and 403 (subscription pulled)
+  // both mean "kick to /login". Don't trigger on the login endpoint itself
+  // — wrong-password 401 there is a normal user-facing failure.
+  if ((res.status === 401 || res.status === 403)
+      && !res.url.endsWith('/api/auth/login')) {
+    try { onUnauthorized(res.status); } catch { /* ignore */ }
+  }
   throw new ApiError(`${label} 실패 (${res.status}): ${detail}`, {
     status: res.status,
     detail,
@@ -142,7 +157,8 @@ export function humanizeError(err: unknown): string {
   if (!err) return '알 수 없는 오류가 발생했어요';
   const e = err as ErrorWithStatus;
   if (e.status === 429) return '지금은 많이 붐벼요. 잠시 후 다시 시도해주세요.';
-  if (e.status === 401) return '서비스 연결이 잘못됐어요. 관리자에게 문의해주세요.';
+  if (e.status === 401) return '로그인이 필요해요. 다시 로그인해주세요.';
+  if (e.status === 403) return '접근 권한이 없어요. 관리자에게 문의해주세요.';
   if (e.status === 413) return '파일이 너무 커요 (최대 20MB).';
   if (e.status === 503) return '생성 결과가 부족해요. 다시 시도해주세요.';
   // TypeError typically means a network fault (CORS / DNS / no connection).

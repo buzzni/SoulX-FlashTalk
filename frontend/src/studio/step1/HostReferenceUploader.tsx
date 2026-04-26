@@ -13,7 +13,9 @@
  */
 
 import Icon from '../Icon.jsx';
-import { Field, Segmented, UploadTile } from '../primitives.jsx';
+import { Field } from '@/components/field';
+import { Segmented } from '@/components/segmented';
+import { UploadTile } from '@/components/upload-tile';
 import { uploadReferenceImage, type UploadResult } from '../../api/upload';
 import { useUploadReferenceImage } from '../../hooks/useUploadReferenceImage';
 

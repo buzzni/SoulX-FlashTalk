@@ -37,7 +37,11 @@ describe('wizardStore — legacy showhost_state migration', () => {
       host: {
         mode: 'text',
         prompt: '소개 영상',
-        selectedSeed: 42,
+        // Phase 2b: schema migrator binds the legacy `selectedSeed` to
+        // the matching variant (or selectedImageId / selectedPath
+        // fallback). Seed 10 matches the lone variant below — the
+        // migrator picks that as `generation.selected`.
+        selectedSeed: 10,
         variants: [
           { seed: 10, id: 'v10', url: '/api/files/host_a.png', path: '/srv/host_a.png' },
         ],
@@ -60,13 +64,24 @@ describe('wizardStore — legacy showhost_state migration', () => {
     expect(localStorage.getItem(LEGACY_STEP_KEY)).toBeNull();
 
     // New key written with the Zustand persist envelope shape.
+    // Phase 2a/2b: host + background are now schema-typed tagged
+    // unions. Legacy `selectedSeed` lives under
+    // `host.generation.selected.seed`; legacy `variants` under
+    // `host.generation.variants` (only when state is `ready`).
     const raw = localStorage.getItem(storageKey('wizard'));
     expect(raw).toBeTruthy();
     const envelope = JSON.parse(raw);
-    expect(envelope.version).toBe(1);
-    expect(envelope.state.host.selectedSeed).toBe(42);
-    expect(envelope.state.host.variants).toHaveLength(1);
+    expect(envelope.version).toBe(7);
+    expect(envelope.state.host.input.kind).toBe('text');
+    expect(envelope.state.host.input.prompt).toBe('소개 영상');
+    expect(envelope.state.host.generation.state).toBe('ready');
+    expect(envelope.state.host.generation.selected?.seed).toBeDefined();
+    expect(envelope.state.host.generation.variants).toHaveLength(1);
+    expect(envelope.state.background).toEqual({ kind: 'preset', presetId: 'cafe' });
     expect(envelope.state.products).toHaveLength(1);
+    // Phase 2c.4: voice is schema-typed. Legacy `voice.voiceId` lives
+    // on the tts-source variant directly; tagged union narrows by source.
+    expect(envelope.state.voice.source).toBe('tts');
     expect(envelope.state.voice.voiceId).toBe('v_abc');
     expect(envelope.state.imageQuality).toBe('1K');
 

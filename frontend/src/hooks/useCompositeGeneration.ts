@@ -1,13 +1,12 @@
 /**
- * useCompositeGeneration — SSE-driven composite (host × products ×
- * background) candidate generation with slot-aware state.
+ * useCompositeGeneration — SSE-driven composite candidate generation
+ * with slot-aware state.
  *
- * Mirror of `useHostGeneration` with the same event vocabulary
- * (init / candidate / error / fatal / done) and the same slot
- * tracking by seed. Final set persists to
- * `wizardStore.composition.variants` (Decision #1).
- *
- * See `useHostGeneration` header for the canonical contract doc.
+ * Mirror of `useHostGeneration` (Phase 2b), now driving the schema's
+ * `composition.generation` state machine (idle | streaming | ready |
+ * failed). Local UI variant type with placeholder/error fields for
+ * mid-stream rendering; schema's stable CompositionVariant lives in
+ * the persisted slice.
  */
 
 import { useCallback, useState } from 'react';
@@ -16,7 +15,10 @@ import { humanizeError } from '../api/http';
 import { imageIdFromPath } from '../api/mapping';
 import { useWizardStore } from '../stores/wizardStore';
 import { useAbortableRequest } from './useAbortableRequest';
+import type { CompositionVariant as SchemaCompositionVariant } from '../wizard/schema';
 
+/** UI/transient streaming variant. Carries placeholder/error for
+ * mid-stream rendering. */
 export interface CompositionVariant {
   seed: number;
   id: string;
@@ -30,8 +32,6 @@ export interface CompositionVariant {
 }
 
 export interface UseCompositeGenerationOptions {
-  /** Backend runs rembg background removal by default; pass `false`
-   * to skip. */
   rembg?: boolean;
 }
 
@@ -49,15 +49,55 @@ export interface UseCompositeGenerationReturn {
   abort: () => void;
 }
 
-export function useCompositeGeneration(): UseCompositeGenerationReturn {
-  const initialComp = (useWizardStore.getState().composition ?? {}) as Record<string, unknown>;
-  const initialVariants = (initialComp.variants as CompositionVariant[] | undefined) ?? [];
-  const initialPrev = (initialComp.prevSelected as CompositionVariant | null | undefined) ?? null;
-  const initialBatchId = (initialComp.batchId as string | null | undefined) ?? null;
+function liftSchemaVariant(v: SchemaCompositionVariant): CompositionVariant {
+  return {
+    seed: v.seed,
+    id: `c${v.seed}`,
+    imageId: v.imageId,
+    url: v.url,
+    path: v.path,
+    placeholder: false,
+  };
+}
 
-  const [variants, setVariants] = useState<CompositionVariant[]>(initialVariants);
-  const [prevSelected, setPrevSelected] = useState<CompositionVariant | null>(initialPrev);
-  const [batchId, setBatchId] = useState<string | null>(initialBatchId);
+function lowerToSchema(variants: CompositionVariant[]): SchemaCompositionVariant[] {
+  return variants
+    .filter((v) => !v.placeholder && !v.error && v.url && v.path && v.imageId)
+    .map((v) => ({
+      seed: v.seed,
+      imageId: v.imageId as string,
+      url: v.url as string,
+      path: v.path as string,
+    }));
+}
+
+function readInitialFromStore(): {
+  variants: CompositionVariant[];
+  prevSelected: CompositionVariant | null;
+  batchId: string | null;
+} {
+  const comp = useWizardStore.getState().composition;
+  if (comp.generation.state !== 'ready') {
+    return { variants: [], prevSelected: null, batchId: null };
+  }
+  return {
+    variants: comp.generation.variants.map(liftSchemaVariant),
+    prevSelected: comp.generation.prevSelected
+      ? {
+          ...liftSchemaVariant(comp.generation.prevSelected),
+          id: `prev-${comp.generation.prevSelected.imageId}`,
+          isPrev: true,
+        }
+      : null,
+    batchId: comp.generation.batchId,
+  };
+}
+
+export function useCompositeGeneration(): UseCompositeGenerationReturn {
+  const initial = readInitialFromStore();
+  const [variants, setVariants] = useState<CompositionVariant[]>(initial.variants);
+  const [prevSelected, setPrevSelected] = useState<CompositionVariant | null>(initial.prevSelected);
+  const [batchId, setBatchId] = useState<string | null>(initial.batchId);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const { run, abort } = useAbortableRequest();
@@ -70,8 +110,6 @@ export function useCompositeGeneration(): UseCompositeGenerationReturn {
     ): Promise<void> => {
       const { signal, isCurrent } = run();
 
-      // Thread `imageSize` + optional `_seeds` through the composition
-      // sub-object (that's where buildCompositeBody picks them up).
       const comp = {
         ...(input.composition ?? {}),
         ...(input.imageSize ? { imageSize: input.imageSize } : {}),
@@ -83,33 +121,24 @@ export function useCompositeGeneration(): UseCompositeGenerationReturn {
       setError(null);
       setVariants([]);
 
-      // Eager-persist a prev_selected from the about-to-be-replaced
-      // selection so a mid-stream navigation preserves the prev tile.
-      const storeCompBefore = (useWizardStore.getState().composition ?? {}) as Record<string, unknown>;
-      const oldSelectedPath = storeCompBefore.selectedPath as string | null | undefined;
-      const oldSelectedUrl = storeCompBefore.selectedUrl as string | null | undefined;
-      const oldSelectedSeed = storeCompBefore.selectedSeed as number | null | undefined;
-      const oldSelectedImageId =
-        (storeCompBefore.selectedImageId as string | null | undefined) ??
-        (oldSelectedPath ? imageIdFromPath(oldSelectedPath) : undefined);
-      const seedPrev: CompositionVariant | null =
-        oldSelectedPath && oldSelectedUrl && oldSelectedImageId
-          ? {
-              seed: typeof oldSelectedSeed === 'number' ? oldSelectedSeed : -1,
-              id: `prev-${oldSelectedImageId}`,
-              imageId: oldSelectedImageId,
-              url: oldSelectedUrl,
-              path: oldSelectedPath,
-              placeholder: false,
-              isPrev: true,
-            }
-          : null;
+      // Carry over current selection (if any) as prev_selected.
+      const compBefore = useWizardStore.getState().composition;
+      const oldSelected =
+        compBefore.generation.state === 'ready' ? compBefore.generation.selected : null;
+      const seedPrev: CompositionVariant | null = oldSelected
+        ? { ...liftSchemaVariant(oldSelected), id: `prev-${oldSelected.imageId}`, isPrev: true }
+        : null;
       setPrevSelected(seedPrev);
-      useWizardStore.getState().setComposition({
-        variants: [],
-        prevSelected: seedPrev,
-        batchId: null,
-      });
+
+      // Move generation into streaming state.
+      useWizardStore.getState().setComposition((prev) => ({
+        ...prev,
+        generation: {
+          state: 'streaming',
+          batchId: null,
+          variants: [],
+        },
+      }));
 
       let currentVariants: CompositionVariant[] = [];
       let currentPrev: CompositionVariant | null = seedPrev;
@@ -132,15 +161,8 @@ export function useCompositeGeneration(): UseCompositeGenerationReturn {
               placeholder: true,
             }));
             setVariants(currentVariants);
-
-            // The backend also echoes back the English-translated
-            // direction via init — cache so Phase 5 debug UIs can
-            // display "what the model actually saw."
-            if (typeof evt.direction_en === 'string') {
-              useWizardStore
-                .getState()
-                .setComposition({ direction_en: evt.direction_en });
-            }
+            // direction_en (backend's English-translated direction) is
+            // a debug field — drop on persist; not modeled in schema.
           } else if (evt.type === 'candidate') {
             const path = evt.path as string;
             currentVariants = currentVariants.map((v) =>
@@ -155,10 +177,14 @@ export function useCompositeGeneration(): UseCompositeGenerationReturn {
                 : v,
             );
             setVariants(currentVariants);
-            // Strip placeholders so a remount won't render dead spinners.
-            useWizardStore.getState().setComposition({
-              variants: currentVariants.filter((v) => !v.placeholder && !v.error),
-            });
+            useWizardStore.getState().setComposition((prev) => ({
+              ...prev,
+              generation: {
+                state: 'streaming',
+                batchId: currentBatchId,
+                variants: lowerToSchema(currentVariants),
+              },
+            }));
           } else if (evt.type === 'error') {
             errorCount += 1;
             const detail = typeof evt.error === 'string' ? evt.error : 'unknown';
@@ -209,11 +235,26 @@ export function useCompositeGeneration(): UseCompositeGenerationReturn {
               currentPrev = null;
             }
             setPrevSelected(currentPrev);
-            useWizardStore.getState().setComposition({
-              variants: currentVariants,
-              prevSelected: currentPrev,
-              batchId: currentBatchId,
-            });
+            const finalVariants = lowerToSchema(currentVariants);
+            const prevSchema: SchemaCompositionVariant | null =
+              currentPrev && currentPrev.imageId && currentPrev.url && currentPrev.path
+                ? {
+                    seed: currentPrev.seed,
+                    imageId: currentPrev.imageId,
+                    url: currentPrev.url,
+                    path: currentPrev.path,
+                  }
+                : null;
+            useWizardStore.getState().setComposition((prev) => ({
+              ...prev,
+              generation: {
+                state: 'ready',
+                batchId: currentBatchId,
+                variants: finalVariants,
+                selected: null,
+                prevSelected: prevSchema,
+              },
+            }));
           }
         }
 
@@ -227,7 +268,12 @@ export function useCompositeGeneration(): UseCompositeGenerationReturn {
           return;
         }
         setIsLoading(false);
-        setError(humanizeError(err));
+        const msg = humanizeError(err);
+        setError(msg);
+        useWizardStore.getState().setComposition((prev) => ({
+          ...prev,
+          generation: { state: 'failed', error: msg },
+        }));
       }
     },
     [run],

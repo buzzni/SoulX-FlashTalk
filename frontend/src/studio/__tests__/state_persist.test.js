@@ -27,122 +27,195 @@ function roundtrip(state) {
 }
 
 describe('wizardStore persistence', () => {
-  it('preserves finished host variants across reload', () => {
+  it('preserves finished host variants across reload (schema ready state)', () => {
+    // Phase 2b: host is schema-typed. Variants live on
+    // host.generation.variants when state === 'ready', not as a flat array.
+    const variants = [
+      { seed: 10, imageId: 'host_a', url: '/api/files/host_a.png', path: '/srv/host_a.png' },
+      { seed: 42, imageId: 'host_b', url: '/api/files/host_b.png', path: '/srv/host_b.png' },
+      { seed: 77, imageId: 'host_c', url: '/api/files/host_c.png', path: '/srv/host_c.png' },
+      { seed: 128, imageId: 'host_d', url: '/api/files/host_d.png', path: '/srv/host_d.png' },
+    ];
     const state = {
       ...INITIAL_WIZARD_STATE,
       host: {
         ...INITIAL_WIZARD_STATE.host,
-        variants: [
-          { seed: 10, id: 'v10', url: '/api/files/host_a.png', path: '/srv/host_a.png', placeholder: false },
-          { seed: 42, id: 'v42', url: '/api/files/host_b.png', path: '/srv/host_b.png', placeholder: false },
-          { seed: 77, id: 'v77', url: '/api/files/host_c.png', path: '/srv/host_c.png', placeholder: false },
-          { seed: 128, id: 'v128', url: '/api/files/host_d.png', path: '/srv/host_d.png', placeholder: false },
-        ],
+        generation: {
+          state: 'ready',
+          batchId: null,
+          variants,
+          selected: variants[1],
+          prevSelected: null,
+        },
       },
     };
     const restored = roundtrip(state);
-    expect(restored.host.variants).toHaveLength(4);
-    expect(restored.host.variants.map(v => v.seed)).toEqual([10, 42, 77, 128]);
-    expect(restored.host.variants[0].url).toBe('/api/files/host_a.png');
+    expect(restored.host.generation.state).toBe('ready');
+    expect(restored.host.generation.variants).toHaveLength(4);
+    expect(restored.host.generation.variants.map((v) => v.seed)).toEqual([10, 42, 77, 128]);
+    expect(restored.host.generation.selected.seed).toBe(42);
   });
 
-  it('strips placeholder variants (mid-stream state should NOT persist)', () => {
+  it('collapses streaming/failed host generation to idle on persist', () => {
+    // Phase 2b: mid-stream state cannot survive a reload — the SSE
+    // stream is gone. persistHost transitions streaming/failed → idle.
     const state = {
       ...INITIAL_WIZARD_STATE,
       host: {
         ...INITIAL_WIZARD_STATE.host,
-        variants: [
-          { seed: 10, id: 'v10', placeholder: true },
-          { seed: 42, id: 'v42', url: '/api/files/host_b.png', placeholder: false },
-          { seed: 77, id: 'v77', error: 'failed', placeholder: false },
-          { seed: 128, id: 'v128', placeholder: true },
-        ],
+        generation: { state: 'streaming', batchId: null, variants: [] },
       },
     };
-    const restored = roundtrip(state);
-    expect(restored.host.variants).toHaveLength(1);
-    expect(restored.host.variants[0].seed).toBe(42);
+    expect(roundtrip(state).host.generation.state).toBe('idle');
+
+    const failed = {
+      ...INITIAL_WIZARD_STATE,
+      host: {
+        ...INITIAL_WIZARD_STATE.host,
+        generation: { state: 'failed', error: 'oops' },
+      },
+    };
+    expect(roundtrip(failed).host.generation.state).toBe('idle');
   });
 
   it('preserves finished composition variants (Step 2) symmetrically', () => {
+    // Phase 2c.3: composition is schema-typed (settings + generation).
+    const variants = [
+      { seed: 10, imageId: 'c_a', url: '/api/files/c_a.png', path: '/srv/c_a.png' },
+      { seed: 42, imageId: 'c_b', url: '/api/files/c_b.png', path: '/srv/c_b.png' },
+    ];
     const state = {
       ...INITIAL_WIZARD_STATE,
       composition: {
         ...INITIAL_WIZARD_STATE.composition,
-        variants: [
-          { seed: 10, id: 'c10', url: '/api/files/c_a.png', path: '/srv/c_a.png', placeholder: false },
-          { seed: 42, id: 'c42', url: '/api/files/c_b.png', path: '/srv/c_b.png', placeholder: false },
-        ],
+        generation: {
+          state: 'ready',
+          batchId: null,
+          variants,
+          selected: variants[0],
+          prevSelected: null,
+        },
       },
     };
     const restored = roundtrip(state);
-    expect(restored.composition.variants).toHaveLength(2);
-    expect(restored.composition.variants[0].path).toBe('/srv/c_a.png');
+    expect(restored.composition.generation.state).toBe('ready');
+    expect(restored.composition.generation.variants).toHaveLength(2);
+    expect(restored.composition.generation.variants[0].path).toBe('/srv/c_a.png');
   });
 
-  it('preserves face/outfit ref when url is a server URL', () => {
+  it('preserves image-mode host face/outfit ServerAsset refs across reload', () => {
+    // Phase 2b: image-mode input lives on host.input as a tagged
+    // union. ServerAsset (has a path) survives reload; LocalAsset
+    // (File handle + blob URL) gets stripped.
     const state = {
       ...INITIAL_WIZARD_STATE,
       host: {
         ...INITIAL_WIZARD_STATE.host,
-        faceRef: { name: 'face.png', size: 4096, type: 'image/png', url: '/api/files/face_abc.png', _file: {} },
-        outfitRef: { name: 'outfit.png', size: 8192, type: 'image/png', url: '/api/files/outfit_def.png', _file: {} },
-        faceRefPath: '/srv/face_abc.png',
+        input: {
+          kind: 'image',
+          faceRef: { path: '/srv/face_abc.png', url: '/api/files/face_abc.png', name: 'face.png' },
+          outfitRef: { path: '/srv/outfit_def.png', url: '/api/files/outfit_def.png', name: 'outfit.png' },
+          outfitText: '베이지 니트',
+          extraPrompt: '',
+          faceStrength: 0.7,
+          outfitStrength: 0.5,
+        },
       },
     };
     const restored = roundtrip(state);
-    expect(restored.host.faceRef).toBeTruthy();
-    expect(restored.host.faceRef.url).toBe('/api/files/face_abc.png');
-    expect(restored.host.faceRef._file).toBeUndefined();  // File handle stripped
-    expect(restored.host.outfitRef.url).toBe('/api/files/outfit_def.png');
-    expect(restored.host.faceRefPath).toBe('/srv/face_abc.png');
+    expect(restored.host.input.kind).toBe('image');
+    expect(restored.host.input.faceRef.path).toBe('/srv/face_abc.png');
+    expect(restored.host.input.faceRef.url).toBe('/api/files/face_abc.png');
+    expect(restored.host.input.faceRef.file).toBeUndefined();  // No File handle in ServerAsset
+    expect(restored.host.input.outfitRef.path).toBe('/srv/outfit_def.png');
   });
 
-  it('drops face/outfit ref when url is a transient data:/blob: URL', () => {
+  it('drops LocalAsset face/outfit refs (File handle + transient blob URL) on persist', () => {
+    // LocalAsset has { file, previewUrl, name }. Neither survives —
+    // persistHost rewrites to null.
     const state = {
       ...INITIAL_WIZARD_STATE,
       host: {
         ...INITIAL_WIZARD_STATE.host,
-        faceRef: { name: 'face.png', url: 'data:image/png;base64,iVBOR...', _file: {} },
-        outfitRef: { name: 'outfit.png', url: 'blob:http://localhost/abc', _file: {} },
+        input: {
+          kind: 'image',
+          faceRef: { file: {}, previewUrl: 'blob:http://localhost/abc', name: 'face.png' },
+          outfitRef: { file: {}, previewUrl: 'data:image/png;base64,iVBOR...', name: 'outfit.png' },
+          outfitText: '',
+          extraPrompt: '',
+          faceStrength: 0.7,
+          outfitStrength: 0.5,
+        },
       },
     };
     const restored = roundtrip(state);
-    expect(restored.host.faceRef).toBeNull();
-    expect(restored.host.outfitRef).toBeNull();
+    expect(restored.host.input.kind).toBe('image');
+    expect(restored.host.input.faceRef).toBeNull();
+    expect(restored.host.input.outfitRef).toBeNull();
   });
 
-  it('strips product `_file` handles but keeps server paths', () => {
+  it('collapses localFile products to empty on persist; keeps uploaded server paths', () => {
+    // Phase 2c.2: products are schema-typed. ProductSource =
+    // empty | localFile | uploaded | url. localFile (File + blob)
+    // collapses to empty; uploaded (ServerAsset) survives.
     const state = {
       ...INITIAL_WIZARD_STATE,
       products: [
-        { id: 'p1', name: 'Product A', path: '/srv/p1.png', url: '/api/files/p1.png', _file: {} },
-        { id: 'p2', name: 'Product B', path: '/srv/p2.png', url: 'blob:http://localhost/xyz', _file: {} },
+        {
+          id: 'p1',
+          name: 'Product A (uploaded)',
+          source: {
+            kind: 'uploaded',
+            asset: { path: '/srv/p1.png', url: '/api/files/p1.png', name: 'p1.png' },
+          },
+        },
+        {
+          id: 'p2',
+          name: 'Product B (local file)',
+          source: {
+            kind: 'localFile',
+            asset: { file: {}, previewUrl: 'blob:http://localhost/xyz', name: 'p2.png' },
+          },
+        },
+        { id: 'p3', name: 'Product C (url)', source: { kind: 'url', url: 'https://x/y.png', urlInput: 'https://x/y.png' } },
       ],
     };
     const restored = roundtrip(state);
-    expect(restored.products).toHaveLength(2);
-    expect(restored.products[0]._file).toBeUndefined();
-    expect(restored.products[0].path).toBe('/srv/p1.png');
-    // blob URL dropped, but path (server-side) survives so the row can be
-    // re-used without a re-upload.
-    expect(restored.products[1].url).toBeNull();
-    expect(restored.products[1].path).toBe('/srv/p2.png');
+    expect(restored.products).toHaveLength(3);
+    expect(restored.products[0].source.kind).toBe('uploaded');
+    expect(restored.products[0].source.asset.path).toBe('/srv/p1.png');
+    expect(restored.products[1].source.kind).toBe('empty');  // local → empty
+    expect(restored.products[2].source.kind).toBe('url');
+    expect(restored.products[2].source.url).toBe('https://x/y.png');
   });
 
-  it('keeps voice.uploadedAudio when a server path exists, drops when only a File', () => {
+  it('keeps upload-mode voice.audio when a server path exists, drops LocalAsset uploads', () => {
+    // Phase 2c.4: voice is schema-typed. Upload-mode audio lives on
+    // `voice.audio` as ServerAsset | LocalAsset | null. ServerAsset
+    // (has a real path) survives reload; LocalAsset (File handle +
+    // blob URL) gets dropped to null because the File is gone after
+    // a refresh.
     const withPath = {
       ...INITIAL_WIZARD_STATE,
-      voice: { ...INITIAL_WIZARD_STATE.voice, uploadedAudio: { path: '/srv/tts.wav', name: 'tts.wav', _file: {} } },
+      voice: {
+        source: 'upload',
+        audio: { path: '/srv/tts.wav', name: 'tts.wav' },
+        script: { paragraphs: ['caption'] },
+      },
     };
-    expect(roundtrip(withPath).voice.uploadedAudio.path).toBe('/srv/tts.wav');
-    expect(roundtrip(withPath).voice.uploadedAudio._file).toBeUndefined();
+    const restoredWithPath = roundtrip(withPath);
+    expect(restoredWithPath.voice.audio.path).toBe('/srv/tts.wav');
+    expect(restoredWithPath.voice.audio.file).toBeUndefined();
 
     const onlyFile = {
       ...INITIAL_WIZARD_STATE,
-      voice: { ...INITIAL_WIZARD_STATE.voice, uploadedAudio: { name: 'tts.wav', _file: {} } },
+      voice: {
+        source: 'upload',
+        audio: { file: {}, previewUrl: 'blob:http://localhost/x', name: 'tts.wav' },
+        script: { paragraphs: ['caption'] },
+      },
     };
-    expect(roundtrip(onlyFile).voice.uploadedAudio).toBeNull();
+    expect(roundtrip(onlyFile).voice.audio).toBeNull();
   });
 
   it('restores image quality, resolution, and other top-level knobs', () => {

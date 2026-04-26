@@ -1,14 +1,16 @@
 /**
- * TopBar — shared header for wizard + render views.
+ * TopBar — wizard + render header.
  *
- * - `step` null hides the step pills (render view uses this).
- * - Step pills are clickable but only for steps the user has already
- *   satisfied; clicking an unsatisfied step is a no-op so users can't
- *   deep-jump past missing prerequisites.
+ * Workspace mark + "HostStudio" wordmark + Korean step pills (1 / 2 / 3
+ * with circular numbered dots, Korean labels). Visual styling lives in
+ * studio/styles/app.css under `.topbar` / `.brand` / `.step-pill`.
  */
-import { Fragment, type ReactNode } from 'react';
-import Icon from '../studio/Icon.jsx';
-import { Button } from '../studio/primitives.jsx';
+import { Fragment, type ReactNode, useSyncExternalStore } from 'react';
+import { Link } from 'react-router-dom';
+import { Check } from 'lucide-react';
+import { WizardButton as Button } from '@/components/wizard-button';
+import { ProfileMenu } from './ProfileMenu';
+import { getUser, subscribe } from '../stores/authStore';
 import type { WizardValidity } from './wizardValidation';
 
 export const STEPS = [
@@ -26,21 +28,20 @@ export interface TopBarProps {
 }
 
 export function TopBar({ step, valid, onStepClick, onReset, queueSlot }: TopBarProps) {
+  const user = useSyncExternalStore(subscribe, getUser, getUser);
+  const display = user?.display_name || user?.user_id || 'F';
+  const initial = (display[0] || 'F').toUpperCase();
+
   return (
     <header className="topbar">
       <div style={{ display: 'flex', alignItems: 'center', gap: 20 }}>
-        <div className="brand">
-          <div className="brand-mark">H</div>
-          <span>HostStudio</span>
-          <span
-            className="brand-tag text-xs text-tertiary"
-            style={{ marginLeft: 6, paddingLeft: 10, borderLeft: '1px solid var(--border)' }}
-          >
-            AI 쇼호스트 영상
-          </span>
-        </div>
+        <Link to="/" className="brand" style={{ textDecoration: 'none', color: 'inherit' }} title="홈으로">
+          <div className="brand-mark" aria-hidden>{initial}</div>
+          <span>FlashTalk</span>
+          <span className="brand-tag">AI 쇼호스트 영상</span>
+        </Link>
         {step !== null && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 2, marginLeft: 10 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginLeft: 8 }}>
             {STEPS.map((s, i) => {
               const active = step === s.key;
               const done = valid?.[s.key] && step > s.key;
@@ -53,12 +54,12 @@ export function TopBar({ step, valid, onStepClick, onReset, queueSlot }: TopBarP
                     title={s.full}
                     aria-current={active ? 'step' : undefined}
                   >
-                    <span className="dot">
-                      {done ? <Icon name="check" size={10} /> : s.short}
+                    <span className="dot" aria-hidden>
+                      {done ? <Check className="size-3" /> : s.short}
                     </span>
                     <span className="step-pill-label">{s.name}</span>
                   </button>
-                  {i < STEPS.length - 1 && <span className="step-arrow" />}
+                  {i < STEPS.length - 1 && <span className="step-arrow" aria-hidden />}
                 </Fragment>
               );
             })}
@@ -69,8 +70,9 @@ export function TopBar({ step, valid, onStepClick, onReset, queueSlot }: TopBarP
         <span className="meta">자동 저장됨</span>
         {queueSlot}
         <Button size="sm" icon="refresh" onClick={onReset}>
-          처음부터 다시
+          처음부터
         </Button>
+        <ProfileMenu />
       </div>
     </header>
   );

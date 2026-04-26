@@ -1,21 +1,19 @@
 /**
  * WizardLayout — shell for /step/:step.
  *
- * Owns the validation / reset / navigation plumbing so each step page
- * only has to render its own form. The current step is read from the
- * URL (not local state); refreshing on /step/2 keeps you on step 2,
- * which was the original user pain point this route overhaul exists to fix.
+ * Owns validation / reset / navigation plumbing. Each step page controls
+ * its own internal layout (gallery-dominant for Step 1, canvas-split for
+ * Step 2, preview-dock for Step 3). No universal right rail — that
+ * pattern collapsed every step into the same SaaS-default summary.
  *
- * Guard behavior: if you deep-link to /step/3 but haven't finished
- * step 2, you get redirected to the deepest reachable step. This
- * prevents showing a step 3 form that references missing step 2
- * state (e.g. no composite image to preview).
+ * Guard behavior: deep-linking to /step/3 without satisfying step 2
+ * redirects to the deepest reachable step.
  */
 import { useMemo, useState, type ReactNode } from 'react';
 import { Navigate, useLocation, useNavigate } from 'react-router-dom';
-import PreviewPanel from '../studio/PreviewPanel.jsx';
 import QueueStatus from '../studio/QueueStatus';
-import { Button, Modal } from '../studio/primitives.jsx';
+import { WizardButton as Button } from '@/components/wizard-button';
+import { WizardModal as Modal } from '@/components/wizard-modal';
 import { useWizardStore } from '../stores/wizardStore';
 import { TopBar, STEPS } from './TopBar';
 import { StepFooter } from './StepFooter';
@@ -41,10 +39,9 @@ export default function WizardLayout({ children }: WizardLayoutProps) {
   const location = useLocation();
   const navigate = useNavigate();
 
-  // Whole-store subscription is fine here — wizard fields are the
-  // substance of the view. Selector ergonomics will matter when we move
-  // each step to subscribe to its own slice in a later pass; for now
-  // the render cost equals the pre-refactor useState shell.
+  // Subscribe to the whole store so validity recomputes on any change.
+  // Each step page subscribes to its own slice — this layer only needs
+  // the validity bits for routing guards + step footer.
   const state = useWizardStore();
   const resetState = useWizardStore((s) => s.reset);
   const [resetOpen, setResetOpen] = useState(false);
@@ -126,18 +123,9 @@ export default function WizardLayout({ children }: WizardLayoutProps) {
             진행 중인 영상 작업이 있다면 그건 영향을 받지 않아요.
           </p>
         </Modal>
-        <div
-          className="main"
-          style={step === 1 ? { gridTemplateColumns: '1fr' } : undefined}
-        >
-          <div
-            className="left-col"
-            style={step === 1 ? { borderRight: 'none' } : undefined}
-          >
-            {children}
-            <StepFooter step={step} valid={valid} onPrev={prev} onNext={next} />
-          </div>
-          {step !== 1 && <PreviewPanel state={state} step={step} />}
+        <div className="main wizard-main">
+          <div className="wizard-stage">{children}</div>
+          <StepFooter step={step} valid={valid} onPrev={prev} onNext={next} />
         </div>
       </div>
     </div>

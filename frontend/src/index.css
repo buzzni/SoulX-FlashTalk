@@ -1,16 +1,540 @@
-:root {
-  font-family: system-ui, -apple-system, sans-serif;
+@import url('https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css');
+
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent-soft: var(--accent-soft);
+  --color-accent-text: var(--accent-text);
+
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-destructive-soft: var(--destructive-soft);
+
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+
+  --color-sidebar-background: var(--sidebar-background);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+
+  --color-paper: var(--paper);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-ink: var(--ink);
+  --color-ink-2: var(--ink-2);
+  --color-ink-3: var(--ink-3);
+  --color-rule: var(--rule);
+  --color-rule-strong: var(--rule-strong);
+  --color-primary-soft: var(--primary-soft);
+  --color-primary-on-soft: var(--primary-on-soft);
+  --color-success: var(--success);
+  --color-success-soft: var(--success-soft);
+  --color-success-on-soft: var(--success-on-soft);
+  --color-amber: var(--amber);
+  --color-amber-soft: var(--amber-soft);
+  --color-amber-on-soft: var(--amber-on-soft);
+
+  --color-brand-primary: var(--primary);
+  --color-brand-primary-hover: var(--primary-hover);
+  --color-brand-light: var(--secondary);
+  --color-brand-dark: var(--foreground);
+  --color-brand-gray: var(--muted);
+
+  --radius-lg: var(--radius);
+  --radius-md: var(--radius);
+  --radius-sm: 4px;
+  --radius-card: 10px;
+  --radius-pill: 999px;
+
+  --font-sans: "Pretendard Variable", "Pretendard", -apple-system,
+    BlinkMacSystemFont, system-ui, "Apple SD Gothic Neo", "Noto Sans KR",
+    "Malgun Gothic", "Apple Color Emoji", "Segoe UI Emoji", sans-serif;
+  --font-mono: "JetBrains Mono", "SF Mono", "Menlo", "Consolas", monospace;
+
+  --animate-fade-in: fadeIn 280ms cubic-bezier(0.2, 0.8, 0.2, 1);
+  --animate-rise: rise 320ms cubic-bezier(0.2, 0.8, 0.2, 1);
+  --animate-pulse-slow: pulse 3s infinite;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+@keyframes rise {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: none; }
+}
+@keyframes slideUp {
+  0%   { transform: translateY(8px); opacity: 0; }
+  100% { transform: translateY(0);   opacity: 1; }
+}
+
+/* Route transitions — modern view-transitions API where supported.
+ * Browsers without it gracefully fall back to no-animation. The
+ * `animate-rise` utility on each page wrapper still provides per-element
+ * entry. */
+@view-transition {
+  navigation: auto;
+}
+::view-transition-old(root) {
+  animation: 200ms cubic-bezier(0.4, 0, 0.2, 1) both fadeOut;
+}
+::view-transition-new(root) {
+  animation: 280ms cubic-bezier(0.2, 0.8, 0.2, 1) both fadeInRise;
+}
+@keyframes fadeOut { to { opacity: 0; } }
+@keyframes fadeInRise {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: none; }
+}
+
+@layer base {
+  :root {
+    color-scheme: light;
+
+    /* Korean Productivity palette: warm cream paper + warm-cool ink */
+    --paper:        #fafaf7;
+    --surface:      #ffffff;
+    --surface-2:    #f4f3ee;
+
+    --ink:          #1a1814;
+    --ink-2:        #555149;
+    --ink-3:        #8a857a;
+
+    --rule:         #e8e6df;
+    --rule-strong:  #d6d3c8;
+
+    --primary:            #005DFF;
+    --primary-foreground: #ffffff;
+    --primary-hover:      #0049cc;
+    --primary-soft:       #e6efff;
+    --primary-on-soft:    #003cb0;
+
+    --amber:         #d97706;
+    --amber-soft:    #fef3c7;
+    --amber-on-soft: #92400e;
+
+    --success:         #16a34a;
+    --success-soft:    #dcfce7;
+    --success-on-soft: #15803d;
+
+    --destructive:            #dc2626;
+    --destructive-foreground: #ffffff;
+    --destructive-soft:       #fee2e2;
+
+    --background: var(--paper);
+    --foreground: var(--ink);
+    --card: var(--surface);
+    --card-foreground: var(--ink);
+    --popover: var(--surface);
+    --popover-foreground: var(--ink);
+    --secondary: var(--surface-2);
+    --secondary-foreground: var(--ink);
+    --muted: var(--surface-2);
+    --muted-foreground: var(--ink-3);
+    --accent: var(--primary-soft);
+    --accent-foreground: var(--primary-on-soft);
+    --border: var(--rule);
+    --input: var(--rule-strong);
+    --ring: var(--primary);
+
+    --radius: 6px;
+
+    /* Soft layered shadows: hairline + diffuse drop */
+    --shadow-soft: 0 1px 0 rgba(20, 24, 32, 0.04);
+    --shadow-1:    0 1px 0 rgba(20, 24, 32, 0.04),
+                   0 6px 16px -8px rgba(20, 24, 32, 0.10);
+    --shadow-2:    0 1px 0 rgba(20, 24, 32, 0.05),
+                   0 12px 28px -8px rgba(20, 24, 32, 0.18);
+    --shadow-3:    0 1px 0 rgba(20, 24, 32, 0.06),
+                   0 28px 56px -12px rgba(20, 24, 32, 0.24);
+
+    --sidebar-background: var(--surface-2);
+    --sidebar-foreground: var(--ink);
+    --sidebar-primary: var(--primary);
+    --sidebar-primary-foreground: #ffffff;
+    --sidebar-accent: var(--surface);
+    --sidebar-accent-foreground: var(--ink);
+    --sidebar-border: var(--rule);
+    --sidebar-ring: var(--primary);
+  }
+
+  .dark {
+    color-scheme: dark;
+
+    --paper:        #0f0e0c;
+    --surface:      #1a1814;
+    --surface-2:    #14130f;
+
+    --ink:          #f5f4ee;
+    --ink-2:        #b3b1a6;
+    --ink-3:        #76746a;
+
+    --rule:         #2a2620;
+    --rule-strong:  #3a3528;
+
+    --primary:            #4d8aff;
+    --primary-foreground: #0a0a08;
+    --primary-hover:      #6fa0ff;
+    --primary-soft:       #14223a;
+    --primary-on-soft:    #a8c5ff;
+
+    --amber-soft:    #2a1f0c;
+    --amber-on-soft: #fcd34d;
+
+    --success-soft:    #0f2818;
+    --success-on-soft: #4ade80;
+
+    --destructive:      #ef4444;
+    --destructive-soft: #2a1010;
+
+    --shadow-soft: 0 1px 0 rgba(0, 0, 0, 0.30);
+    --shadow-1:    0 1px 0 rgba(0, 0, 0, 0.30),
+                   0 6px 16px -8px rgba(0, 0, 0, 0.50);
+    --shadow-2:    0 1px 0 rgba(0, 0, 0, 0.30),
+                   0 12px 28px -8px rgba(0, 0, 0, 0.65);
+    --shadow-3:    0 1px 0 rgba(0, 0, 0, 0.30),
+                   0 28px 56px -12px rgba(0, 0, 0, 0.75);
+
+    --sidebar-background: var(--surface-2);
+    --sidebar-foreground: var(--ink);
+    --sidebar-accent: var(--surface);
+    --sidebar-accent-foreground: var(--ink);
+    --sidebar-border: var(--rule);
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  *:focus { outline: none; }
+  *:focus-visible {
+    outline: 2px solid var(--primary);
+    outline-offset: 2px;
+    border-radius: var(--radius);
+  }
+  button:focus-visible,
+  a:focus-visible,
+  [role="button"]:focus-visible {
+    outline-offset: 3px;
+  }
+
+  html, body {
+    font-family: var(--font-sans);
+  }
+
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-feature-settings: "ss01", "ss02", "tnum";
+    letter-spacing: -0.012em;
+    line-height: 1.55;
+    word-break: keep-all;
+    overflow-wrap: break-word;
+  }
+
+  ::-webkit-scrollbar { width: 8px; height: 8px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb {
+    background: var(--rule-strong);
+    border-radius: var(--radius);
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: var(--ink-3);
+  }
+
+  ::selection {
+    background: var(--primary-soft);
+    color: var(--primary-on-soft);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      animation-duration: 0.001ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.001ms !important;
+    }
+  }
+}
+
+/* ── Surface utilities ─────────────────────────────────────────────
+ * Soft cards for the productivity aesthetic. Surface = white, border
+ * hairline, layered shadow. surface-flat = warm sunken (panel-in-panel).
+ * surface-raised = same as surface-base but with the bigger drop shadow
+ * for popovers and floating panels. */
+
+@utility surface-base {
+  background: var(--surface);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-soft);
+}
+
+@utility surface-card {
+  background: var(--surface);
+  border: 1px solid var(--rule);
+  border-radius: 10px;
+  box-shadow: var(--shadow-1);
+}
+
+@utility surface-card-dark {
+  /* Anchor "dark card" — always dark regardless of theme. Uses hardcoded
+   * warm-graphite values so the card stays the same primary anchor in
+   * both light and dark mode (the whole point of this utility is that
+   * it's the visual heaviest element on the page). */
+  background: #1a1814;
+  color: #f5f4ee;
+  border: 1px solid #1a1814;
+  border-radius: 10px;
+  box-shadow: var(--shadow-1);
+}
+.dark .surface-card-dark {
+  /* In dark mode, lighten slightly to lift off the dark background */
+  background: #2a2620;
+  border-color: #3a3528;
+}
+
+@utility surface-flat {
+  background: var(--surface-2);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+}
+
+@utility surface-raised {
+  background: var(--surface);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-2);
+}
+
+@utility panel-glass {
+  background: var(--surface);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-2);
+}
+
+/* ── Section header (compact, used in wizard panels) ── */
+@utility section-header {
+  @apply flex items-center justify-between px-3 h-9 shrink-0 border-b;
+  background: var(--surface-2);
+  border-color: var(--rule);
+}
+
+@utility section-header-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink-2);
+  letter-spacing: -0.005em;
+}
+
+/* ── Floating icon button (eg toolbar buttons) ── */
+@utility icon-btn-float {
+  @apply transition-all duration-150 cursor-pointer;
+  border-radius: var(--radius);
+  background: var(--surface);
+  border: 1px solid var(--rule);
+  color: var(--ink-2);
+  &:hover {
+    border-color: var(--rule-strong);
+    color: var(--ink);
+  }
+}
+
+/* ── Panel row (eg: data row inside a panel) ── */
+@utility panel-row {
+  @apply flex items-center justify-between py-1.5 px-3 transition-colors;
+  border-radius: var(--radius);
+  &:hover {
+    background: var(--surface-2);
+  }
+}
+
+@utility panel-section-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--ink-3);
+  letter-spacing: 0.01em;
+  padding: 8px 12px 4px;
+}
+
+/* ── Control bar (sticky bottom toolbar in panels) ── */
+@utility control-bar {
+  @apply border-t;
+  background: var(--surface-2);
+  border-color: var(--rule);
+}
+
+@utility ctrl-btn {
+  @apply flex items-center justify-center transition-all duration-100 cursor-pointer;
+  border-radius: var(--radius);
+  color: var(--ink-2);
+  &:hover {
+    color: var(--primary);
+    background: var(--primary-soft);
+  }
+  &.active {
+    color: var(--primary);
+    background: var(--primary-soft);
+  }
+}
+
+/* ── Progress + resize handles ── */
+@utility progress-track {
+  @apply relative w-full h-1.5 overflow-hidden cursor-pointer;
+  background: var(--rule);
+  border-radius: 99px;
+}
+
+@utility progress-fill {
+  @apply absolute inset-y-0 left-0 transition-[width] duration-200;
+  background: var(--primary);
+  border-radius: 99px;
+}
+
+@utility resize-handle-h {
+  @apply relative shrink-0;
+  width: 3px;
+  background: var(--rule);
+  cursor: col-resize;
+  &:hover, &[data-resize-handle-active] {
+    background: var(--primary);
+  }
+}
+
+@utility resize-handle-v {
+  @apply relative shrink-0;
+  height: 3px;
+  background: var(--rule);
+  cursor: row-resize;
+  &:hover, &[data-resize-handle-active] {
+    background: var(--primary);
+  }
+}
+
+/* ── Korean Productivity headline ladder ──
+ * Heavy weight contrast carries hierarchy (Pretendard 700 + tight tracking),
+ * not size + serif. Korean reads better at 700 weight than at 600 default. */
+
+@utility headline-hero {
+  font-weight: 700;
+  font-size: clamp(28px, 4.4vw, 36px);
+  line-height: 1.18;
+  letter-spacing: -0.028em;
+}
+
+@utility headline-section {
+  font-weight: 700;
+  font-size: 22px;
+  line-height: 1.25;
+  letter-spacing: -0.024em;
+}
+
+@utility headline-card {
+  font-weight: 700;
+  font-size: 18px;
+  line-height: 1.3;
+  letter-spacing: -0.022em;
+}
+
+@utility headline-row {
+  font-weight: 600;
+  font-size: 14px;
+  line-height: 1.4;
+  letter-spacing: -0.014em;
+}
+
+@utility caption-soft {
+  font-size: 13px;
+  color: var(--ink-2);
   line-height: 1.5;
-  color: #213547;
-  background-color: #ffffff;
 }
 
-body {
-  margin: 0;
-  min-width: 320px;
-  min-height: 100vh;
+@utility number-mono {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-weight: 500;
 }
 
-#root {
-  width: 100%;
+/* ── Status pills (완료 / 임시저장 / 진행중) ── */
+@utility pill-success {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 2px 8px;
+  background: var(--success-soft);
+  color: var(--success-on-soft);
+  border-radius: 99px;
+  font-size: 11px; font-weight: 600;
+  letter-spacing: -0.005em;
+}
+
+@utility pill-amber {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 2px 8px;
+  background: var(--amber-soft);
+  color: var(--amber-on-soft);
+  border-radius: 99px;
+  font-size: 11px; font-weight: 600;
+  letter-spacing: -0.005em;
+}
+
+@utility pill-primary {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 2px 8px;
+  background: var(--primary-soft);
+  color: var(--primary-on-soft);
+  border-radius: 99px;
+  font-size: 11px; font-weight: 600;
+  letter-spacing: -0.005em;
+}
+
+@utility pill-neutral {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 2px 8px;
+  background: var(--surface-2);
+  color: var(--ink-2);
+  border-radius: 99px;
+  font-size: 11px; font-weight: 600;
+  letter-spacing: -0.005em;
+}
+
+/* Live indicator — pulsing primary dot */
+@utility signal-dot {
+  display: inline-block;
+  position: relative;
+  flex-shrink: 0;
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--primary);
+  box-shadow: 0 0 0 4px var(--primary-soft);
 }

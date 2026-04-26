@@ -12,53 +12,21 @@
  */
 
 import { API_BASE, getAuthHeaders, parseResponse } from './http';
-import { stringifyResolution } from './mapping';
+import { paragraphsToScript, stringifyResolution } from './mapping';
+import type { Background, Composition, Host, ResolutionKey, Voice } from '../wizard/schema';
+import { RESOLUTION_META } from '../wizard/schema';
+import { isServerAsset } from '../wizard/normalizers';
 
 export interface GenerateVideoInput {
   state: {
-    host?: {
-      mode?: string;
-      selectedSeed?: number | null;
-      selectedPath?: string | null;
-      imageUrl?: string | null;
-      prompt?: string;
-      negativePrompt?: string;
-      faceRefPath?: string | null;
-      outfitRefPath?: string | null;
-      outfitText?: string;
-      faceStrength?: number | null;
-      outfitStrength?: number | null;
-      temperature?: number | null;
-    } | null;
-    composition?: {
-      selectedSeed?: number | null;
-      selectedPath?: string | null;
-      selectedUrl?: string | null;
-      direction?: string;
-      shot?: string | null;
-      angle?: string | null;
-      temperature?: number | null;
-    } | null;
+    host?: Host | null;
+    composition?: Composition | null;
     products?: Array<{ name?: string; path?: string; url?: string }>;
-    background?: {
-      source?: string | null;
-      preset?: { id?: string; label?: string } | string | null;
-      prompt?: string;
-      uploadPath?: string | null;
-      imageUrl?: string | null;
-    } | null;
-    voice?: {
-      source?: string | null;
-      voiceId?: string | null;
-      voiceName?: string | null;
-      script?: string;
-      stability?: number | null;
-      style?: number | null;
-      similarity?: number | null;
-      speed?: number | null;
-    } | null;
-    resolution: { width?: number; height?: number; label?: string };
+    background?: Background | null;
+    voice?: Voice | null;
+    resolution: ResolutionKey | null;
     imageQuality?: string;
+    playlist_id?: string | null;
   };
   audio: { audio_path: string };
 }
@@ -78,65 +46,39 @@ export async function generateVideo(
   // host_image_path here is the FINAL composite frame (Step 2 selection) — that's
   // the single frame FlashTalk animates. The Step 1 host-only image is not sent.
   const body = new FormData();
-  const composite = state.composition?.selectedPath || state.host?.selectedPath;
+  // Selected path lives on `generation.selected` for both host and
+  // composition when state === 'ready'.
+  const hostSelectedPath =
+    state.host?.generation?.state === 'ready'
+      ? state.host.generation.selected?.path ?? null
+      : null;
+  const compositeSelectedPath =
+    state.composition?.generation?.state === 'ready'
+      ? state.composition.generation.selected?.path ?? null
+      : null;
+  const composite = compositeSelectedPath || hostSelectedPath;
   if (composite) body.append('host_image_path', composite);
   body.append('audio_path', audio.audio_path);
   body.append('audio_source', 'upload');
-  body.append('resolution', stringifyResolution(state.resolution));
+  const resKey = (state.resolution ?? '448p') as ResolutionKey;
+  body.append('resolution', stringifyResolution(RESOLUTION_META[resKey]));
+  // Playlist assignment (per docs/playlist-feature-plan.md decision #3).
+  // Empty string is the "미지정" signal the backend understands.
+  if (state.playlist_id) body.append('playlist_id', state.playlist_id);
 
   // Provenance snapshot — see comment in the original api.js. Kept verbatim
   // so the queue entry + manifest shape doesn't change between refactor
   // phases (frontend ProvenanceCard / backend _synthesize_result rely on it).
   const meta = {
-    host: {
-      mode: state.host?.mode ?? 'text',
-      selectedSeed: state.host?.selectedSeed ?? null,
-      selectedPath: state.host?.selectedPath ?? null,
-      imageUrl: state.host?.imageUrl ?? null,
-      prompt: state.host?.prompt ?? '',
-      negativePrompt: state.host?.negativePrompt ?? '',
-      faceRefPath: state.host?.faceRefPath ?? null,
-      outfitRefPath: state.host?.outfitRefPath ?? null,
-      outfitText: state.host?.outfitText ?? '',
-      faceStrength: state.host?.faceStrength ?? null,
-      outfitStrength: state.host?.outfitStrength ?? null,
-      temperature: state.host?.temperature ?? null,
-    },
-    composition: {
-      selectedSeed: state.composition?.selectedSeed ?? null,
-      selectedPath: state.composition?.selectedPath ?? null,
-      selectedUrl: state.composition?.selectedUrl ?? null,
-      direction: state.composition?.direction ?? '',
-      shot: state.composition?.shot ?? null,
-      angle: state.composition?.angle ?? null,
-      temperature: state.composition?.temperature ?? null,
-    },
+    host: hostProvenance(state.host),
+    composition: compositionProvenance(state.composition),
     products: (state.products || []).map((p) => ({
       name: p.name || '',
       path: p.path || '',
       url: p.url || '',
     })),
-    background: {
-      source: state.background?.source || null,
-      presetId:
-        (typeof state.background?.preset === 'object' && state.background.preset?.id) ||
-        (typeof state.background?.preset === 'string' ? state.background.preset : null),
-      presetLabel:
-        typeof state.background?.preset === 'object' ? state.background.preset?.label || null : null,
-      prompt: state.background?.prompt || '',
-      uploadPath: state.background?.uploadPath || null,
-      imageUrl: state.background?.imageUrl || null,
-    },
-    voice: {
-      source: state.voice?.source || null,
-      voiceId: state.voice?.voiceId || null,
-      voiceName: state.voice?.voiceName || null,
-      script: state.voice?.script || '',
-      stability: state.voice?.stability ?? null,
-      style: state.voice?.style ?? null,
-      similarity: state.voice?.similarity ?? null,
-      speed: state.voice?.speed ?? null,
-    },
+    background: backgroundProvenance(state.background),
+    voice: voiceProvenance(state.voice),
     imageQuality: state.imageQuality || '1K',
   };
   body.append('meta', JSON.stringify(meta));
@@ -144,17 +86,18 @@ export async function generateVideo(
   // Queue label — human-readable row title in the queue dropdown. Priority:
   // explicit script preview > voice id > generic. Prevents every job from
   // showing as "Video generation".
-  const scriptPreview = (state.voice?.script || '')
+  const voiceProv = meta.voice;
+  const scriptPreview = (voiceProv.script || '')
     .replace(/\[breath\]/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
   const labelParts: string[] = [];
   if (scriptPreview) {
     labelParts.push(scriptPreview.slice(0, 60));
-  } else if (state.voice?.voiceName) {
-    labelParts.push(`목소리: ${state.voice.voiceName}`);
+  } else if (voiceProv.voiceName) {
+    labelParts.push(`목소리: ${voiceProv.voiceName}`);
   }
-  if (state.resolution?.label) labelParts.push(state.resolution.label);
+  if (state.resolution) labelParts.push(RESOLUTION_META[state.resolution].label);
   if (labelParts.length) body.append('queue_label', labelParts.join(' · '));
 
   const res = await fetch(`${API_BASE}/api/generate`, {
@@ -164,4 +107,180 @@ export async function generateVideo(
     signal,
   });
   return parseResponse(res, '영상 생성');
+}
+
+/** Schema-typed `Host` → the legacy provenance shape (`mode`,
+ * `selectedSeed`, `selectedPath`, `imageUrl`, plus per-mode fields).
+ * Keeps the manifest + ProvenanceCard wire format stable. */
+function hostProvenance(h: unknown): {
+  mode: string;
+  selectedSeed: number | null;
+  selectedPath: string | null;
+  imageUrl: string | null;
+  prompt: string;
+  negativePrompt: string;
+  faceRefPath: string | null;
+  outfitRefPath: string | null;
+  outfitText: string;
+  faceStrength: number | null;
+  outfitStrength: number | null;
+  temperature: number | null;
+} {
+  const host = (h ?? null) as Host | null;
+  if (!host || typeof host !== 'object' || !('input' in host) || !('generation' in host)) {
+    return {
+      mode: 'text', selectedSeed: null, selectedPath: null, imageUrl: null,
+      prompt: '', negativePrompt: '', faceRefPath: null, outfitRefPath: null,
+      outfitText: '', faceStrength: null, outfitStrength: null, temperature: null,
+    };
+  }
+  const selected =
+    host.generation.state === 'ready' ? host.generation.selected : null;
+  const text = host.input.kind === 'text' ? host.input : null;
+  const image = host.input.kind === 'image' ? host.input : null;
+  return {
+    mode: host.input.kind === 'image' ? 'image' : 'text',
+    selectedSeed: selected?.seed ?? null,
+    selectedPath: selected?.path ?? null,
+    imageUrl: selected?.url ?? null,
+    prompt: text?.prompt ?? '',
+    negativePrompt: text?.negativePrompt ?? '',
+    faceRefPath: image && isServerAsset(image.faceRef) ? image.faceRef.path : null,
+    outfitRefPath: image && isServerAsset(image.outfitRef) ? image.outfitRef.path : null,
+    outfitText: image?.outfitText ?? '',
+    faceStrength: image?.faceStrength ?? null,
+    outfitStrength: image?.outfitStrength ?? null,
+    temperature: host.temperature,
+  };
+}
+
+/** Schema-typed Composition → legacy provenance shape. */
+function compositionProvenance(c: unknown): {
+  selectedSeed: number | null;
+  selectedPath: string | null;
+  selectedUrl: string | null;
+  direction: string;
+  shot: string | null;
+  angle: string | null;
+  temperature: number | null;
+} {
+  const comp = (c ?? null) as Composition | null;
+  if (!comp || !comp.settings || !comp.generation) {
+    return {
+      selectedSeed: null, selectedPath: null, selectedUrl: null,
+      direction: '', shot: null, angle: null, temperature: null,
+    };
+  }
+  const selected =
+    comp.generation.state === 'ready' ? comp.generation.selected : null;
+  return {
+    selectedSeed: selected?.seed ?? null,
+    selectedPath: selected?.path ?? null,
+    selectedUrl: selected?.url ?? null,
+    direction: comp.settings.direction,
+    shot: comp.settings.shot,
+    angle: comp.settings.angle,
+    temperature: comp.settings.temperature,
+  };
+}
+
+/** Schema-typed `Background` (from wizard/schema) → the legacy
+ * provenance shape `{source, presetId, presetLabel, prompt,
+ * uploadPath, imageUrl}` that the backend's _synthesize_result + the
+ * frontend's ProvenanceCard expect. Keeps wire format stable while the
+ * UI layer uses the typed model. */
+function backgroundProvenance(bg: unknown): {
+  source: string | null;
+  presetId: string | null;
+  presetLabel: string | null;
+  prompt: string;
+  uploadPath: string | null;
+  imageUrl: string | null;
+} {
+  const b = (bg ?? null) as Background | null;
+  if (!b || typeof b !== 'object' || !('kind' in b)) {
+    return { source: null, presetId: null, presetLabel: null, prompt: '', uploadPath: null, imageUrl: null };
+  }
+  switch (b.kind) {
+    case 'preset':
+      return { source: 'preset', presetId: b.presetId, presetLabel: null, prompt: '', uploadPath: null, imageUrl: null };
+    case 'upload':
+      return {
+        source: 'upload',
+        presetId: null,
+        presetLabel: null,
+        prompt: '',
+        uploadPath: isServerAsset(b.asset) ? b.asset.path : null,
+        imageUrl: isServerAsset(b.asset) ? (b.asset.url ?? null) : null,
+      };
+    case 'url':
+      return { source: 'url', presetId: null, presetLabel: null, prompt: '', uploadPath: null, imageUrl: b.url };
+    case 'prompt':
+      return { source: 'prompt', presetId: null, presetLabel: null, prompt: b.prompt, uploadPath: null, imageUrl: null };
+  }
+}
+
+/** Schema-typed `Voice` → the legacy provenance shape (`source`,
+ * `voiceId`, `voiceName`, `script`, plus advanced settings). The
+ * backend manifest + `ProvenanceCard` consume this exact key set —
+ * the schema's tagged-union layout doesn't reach the wire. */
+function voiceProvenance(v: unknown): {
+  source: string | null;
+  voiceId: string | null;
+  voiceName: string | null;
+  script: string;
+  stability: number | null;
+  style: number | null;
+  similarity: number | null;
+  speed: number | null;
+} {
+  const voice = (v ?? null) as Voice | null;
+  if (!voice || typeof voice !== 'object' || !('source' in voice)) {
+    return {
+      source: null, voiceId: null, voiceName: null, script: '',
+      stability: null, style: null, similarity: null, speed: null,
+    };
+  }
+  // Provenance can outrun the 5000-char TTS limit (a long script is
+  // legal in upload mode), so use a generous cap rather than the
+  // default that throws.
+  const script = paragraphsToScript(voice.script.paragraphs, {
+    source: voice.source === 'upload' ? 'upload' : 'tts',
+    maxChars: Number.MAX_SAFE_INTEGER,
+  });
+  switch (voice.source) {
+    case 'tts':
+      return {
+        source: 'tts',
+        voiceId: voice.voiceId,
+        voiceName: voice.voiceName,
+        script,
+        stability: voice.advanced.stability,
+        style: voice.advanced.style,
+        similarity: voice.advanced.similarity,
+        speed: voice.advanced.speed,
+      };
+    case 'clone':
+      return {
+        source: 'clone',
+        voiceId: voice.sample.state === 'cloned' ? voice.sample.voiceId : null,
+        voiceName: voice.sample.state === 'cloned' ? voice.sample.name : null,
+        script,
+        stability: voice.advanced.stability,
+        style: voice.advanced.style,
+        similarity: voice.advanced.similarity,
+        speed: voice.advanced.speed,
+      };
+    case 'upload':
+      return {
+        source: 'upload',
+        voiceId: null,
+        voiceName: null,
+        script,
+        stability: null,
+        style: null,
+        similarity: null,
+        speed: null,
+      };
+  }
 }
