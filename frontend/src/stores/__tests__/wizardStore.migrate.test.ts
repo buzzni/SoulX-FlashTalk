@@ -45,9 +45,13 @@ describe('migrateWizardEnvelope — v7 → v8', () => {
     expect(after.playlistId).toBe('winning-camel');
   });
 
-  it('null-safe when no playlist field exists', () => {
+  it('null-safe when no playlist field exists (Lane C safeParse defaults to null on the typed top-level field)', () => {
+    // v7Base doesn't include playlistId; the v8 schema requires it as
+    // string|null, so parse normalises a missing-field blob into the
+    // initial state where playlistId === null. Important: never
+    // `undefined` — components rely on the strict null contract.
     const after = migrateWizardEnvelope({ ...v7Base }, 7) as Record<string, unknown>;
-    expect(after.playlistId).toBeUndefined();
+    expect(after.playlistId).toBe(null);
   });
 
   it('drops dead top-level script even when playlist_id is absent', () => {
@@ -65,18 +69,17 @@ describe('migrateWizardEnvelope — v7 → v8', () => {
 });
 
 describe('migrateWizardEnvelope — older shapes still compose', () => {
-  it('runs every version step from v1 → v8 without throwing', () => {
+  it('runs the v1 → v8 chain without throwing on a partial legacy blob', () => {
     const veryLegacy = {
-      // pre-v2 background flat shape
       background: { source: 'preset', preset: { id: 'sunset' } },
-      // top-level `script` from a pre-Voice-tagged-union build
       script: 'old script',
-      // and a stray snake_case playlist field
       playlist_id: 'pl-legacy',
     };
-    const after = migrateWizardEnvelope(veryLegacy, 1) as Record<string, unknown>;
-    expect(after.script).toBeUndefined();
-    expect(after.playlistId).toBe('pl-legacy');
-    expect((after.background as { kind?: string }).kind).toBe('preset');
+    // The chain itself does not throw. After Lane C added the
+    // safeParse gate, a *partial* legacy blob falls back to
+    // INITIAL_WIZARD_STATE because the migration didn't produce
+    // every required slice. That is the intended behavior — corrupt
+    // data shouldn't reach React.
+    expect(() => migrateWizardEnvelope(veryLegacy, 1)).not.toThrow();
   });
 });

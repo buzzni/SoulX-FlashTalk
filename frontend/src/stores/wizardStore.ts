@@ -33,6 +33,7 @@ import {
   INITIAL_COMPOSITION,
   INITIAL_HOST,
   INITIAL_VOICE,
+  WizardStateSerializedSchema,
 } from '../wizard/schema';
 import {
   migrateLegacy as migrateLegacyToSchema,
@@ -274,7 +275,26 @@ export function migrateWizardEnvelope(
     delete p.playlist_id;
     delete p.script;
   }
-  return p as unknown as WizardState;
+  // Lane C: validate the migrated blob against the canonical persisted
+  // schema. If it fails, reset to INITIAL_WIZARD_STATE rather than
+  // letting a half-migrated/legacy-corrupted shape reach React (which
+  // would crash deep in a step page).
+  const parsed = WizardStateSerializedSchema.safeParse(p);
+  if (!parsed.success) {
+    if (typeof console !== 'undefined') {
+      // eslint-disable-next-line no-console
+      console.warn(
+        '[wizardStore] persisted blob failed schema parse — falling back to INITIAL_WIZARD_STATE',
+        parsed.error.issues.slice(0, 5),
+      );
+    }
+    return INITIAL_WIZARD_STATE;
+  }
+  // The serialized schema and the runtime schema agree on every field
+  // that survives JSON round-trip; LocalAsset slots that the runtime
+  // shape allows (File handles, blob URLs) are filtered to null/empty
+  // by the persisted schema. The runtime cast is therefore safe.
+  return parsed.data as unknown as WizardState;
 }
 
 // ────────────────────────────────────────────────────────────────────
@@ -366,6 +386,22 @@ export const useWizardStore = create<WizardStore>()(
       //       `safeParse`-on-hydrate hardening on top.
       version: 8,
       migrate: (persisted, fromVersion) => migrateWizardEnvelope(persisted, fromVersion),
+      // Lane C — onRehydrateStorage scrub. After zustand merges the
+      // hydrated blob into the live store, run the same transient-state
+      // scrub used at save time (streaming / failed → idle for host
+      // and composition; generating / failed → idle for voice; clone
+      // 'pending' sample → 'empty'). 'ready' is intentionally preserved
+      // — selected variants and generated assets are reloadable server
+      // paths, not transient streams. Without this, a crashed-mid-
+      // stream blob that slipped past partialize would resurrect the
+      // 'streaming' state on next page load with no live SSE behind it.
+      onRehydrateStorage: () => (state) => {
+        if (!state) return;
+        state.host = persistHost(state.host);
+        state.background = persistBackground(state.background);
+        state.composition = persistComposition(state.composition);
+        state.voice = persistVoice(state.voice);
+      },
     },
   ),
 );
