@@ -23,7 +23,12 @@ jobs:
           # deps (torch, transformers, flash-attn, etc.) stay out —
           # individual tests that need them use pytest.importorskip or
           # are marked with phase markers skipped in CI.
-          python -m pip install fastapi httpx python-multipart Pillow python-dotenv uvicorn google-genai pyyaml
+          # motor + pymongo: studio_*_repo tests (playlist, result,
+          # saved_host, user) import AsyncIOMotorClient at module level
+          # so collection fails without them.
+          # bcrypt + pyjwt: auth tests import modules.auth which uses
+          # both at module load.
+          python -m pip install fastapi httpx python-multipart Pillow python-dotenv uvicorn google-genai pyyaml motor pymongo bcrypt PyJWT
       - name: Run pytest (skipped tests count as green)
         run: pytest -v
 
