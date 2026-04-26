@@ -72,6 +72,10 @@ export interface WizardState {
    * "처음부터 다시" forces a remount, clearing hook-local state (variants,
    * prevSelected, etc.) without requiring a page refresh. */
   wizardEpoch: number;
+  /** ms since epoch of the last successful slice write. Drives
+   * <AutoSaveIndicator />. Null until the first user edit (so the
+   * "방금 전 저장됨" badge doesn't flash on a fresh wizard). */
+  lastSavedAt: number | null;
 }
 
 // ────────────────────────────────────────────────────────────────────
@@ -90,6 +94,7 @@ export const INITIAL_WIZARD_STATE: WizardState = {
   imageQuality: '1K',
   playlistId: null,
   wizardEpoch: 0,
+  lastSavedAt: null,
 };
 
 // The store holds WizardState + the action verbs. Keeping actions on
@@ -107,6 +112,11 @@ export interface WizardActions {
   setResolution: (r: ResolutionKey) => void;
   setImageQuality: (q: string) => void;
   setPlaylistId: (id: string | null) => void;
+  /** Stamp lastSavedAt = Date.now() — RHF/debounced sync hooks call
+   * this directly when they want to surface the "방금 전 저장됨" badge
+   * without a slice write. Most callers don't need it; setHost/etc.
+   * already stamp internally. */
+  touchLastSavedAt: () => void;
   /** Whole-tree replace-or-patch. Used by step pages still on the
    * legacy `{state, update}` props pattern. To be replaced by per-slice
    * selectors when Phase 3 lands. */
@@ -318,6 +328,7 @@ export const useWizardStore = create<WizardStore>()(
       setHost: (next) =>
         set((s) => ({
           host: typeof next === 'function' ? next(s.host) : next,
+          lastSavedAt: Date.now(),
         })),
       setProducts: (updater) =>
         set((s) => ({
@@ -325,22 +336,27 @@ export const useWizardStore = create<WizardStore>()(
             typeof updater === 'function'
               ? (updater as (p: WizardState['products']) => WizardState['products'])(s.products)
               : updater,
+          lastSavedAt: Date.now(),
         })),
       setBackground: (next) =>
         set((s) => ({
           background: typeof next === 'function' ? next(s.background) : next,
+          lastSavedAt: Date.now(),
         })),
       setComposition: (next) =>
         set((s) => ({
           composition: typeof next === 'function' ? next(s.composition) : next,
+          lastSavedAt: Date.now(),
         })),
       setVoice: (next) =>
         set((s) => ({
           voice: typeof next === 'function' ? next(s.voice) : next,
+          lastSavedAt: Date.now(),
         })),
-      setResolution: (resolution) => set({ resolution }),
-      setImageQuality: (imageQuality) => set({ imageQuality }),
-      setPlaylistId: (playlistId) => set({ playlistId }),
+      setResolution: (resolution) => set({ resolution, lastSavedAt: Date.now() }),
+      setImageQuality: (imageQuality) => set({ imageQuality, lastSavedAt: Date.now() }),
+      setPlaylistId: (playlistId) => set({ playlistId, lastSavedAt: Date.now() }),
+      touchLastSavedAt: () => set({ lastSavedAt: Date.now() }),
 
       updateState: (updater) =>
         set((s) => {
@@ -425,6 +441,7 @@ export const useResolution = (): ResolutionKey => useWizardStore((s) => s.resolu
 export const useImageQuality = (): string => useWizardStore((s) => s.imageQuality);
 export const usePlaylistId = (): string | null => useWizardStore((s) => s.playlistId);
 export const useWizardEpoch = (): number => useWizardStore((s) => s.wizardEpoch);
+export const useLastSavedAt = (): number | null => useWizardStore((s) => s.lastSavedAt);
 
 export interface WizardActionsRef {
   setHost: WizardActions['setHost'];
@@ -435,6 +452,7 @@ export interface WizardActionsRef {
   setResolution: WizardActions['setResolution'];
   setImageQuality: WizardActions['setImageQuality'];
   setPlaylistId: WizardActions['setPlaylistId'];
+  touchLastSavedAt: WizardActions['touchLastSavedAt'];
   reset: WizardActions['reset'];
 }
 
@@ -454,6 +472,7 @@ export function useWizardActions(): WizardActionsRef {
     setResolution: s.setResolution,
     setImageQuality: s.setImageQuality,
     setPlaylistId: s.setPlaylistId,
+    touchLastSavedAt: s.touchLastSavedAt,
     reset: s.reset,
   };
 }

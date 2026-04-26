@@ -444,6 +444,7 @@ export function migrateLegacy(raw: unknown): WizardState {
     imageQuality: migrateImageQuality(r.imageQuality),
     playlistId: typeof r.playlist_id === 'string' ? r.playlist_id : typeof r.playlistId === 'string' ? r.playlistId : null,
     wizardEpoch: asNumber(r.wizardEpoch, 0),
+    lastSavedAt: typeof r.lastSavedAt === 'number' ? r.lastSavedAt : null,
   };
 }
 

@@ -344,6 +344,10 @@ export const WizardStateSchema = z.object({
   playlistId: z.string().nullable(),
   /** Bumped on reset — step pages use this as a React key to remount. */
   wizardEpoch: z.number(),
+  /** ms since epoch of the last successful slice write. Optional in
+   * the schema so v8 blobs without it (the field landed in Lane D)
+   * still parse. */
+  lastSavedAt: z.number().nullable().default(null),
 });
 export type WizardState = z.infer<typeof WizardStateSchema>;
 
@@ -436,6 +440,7 @@ export const WizardStateSerializedSchema = z.object({
   imageQuality: ImageQualitySchema,
   playlistId: z.string().nullable(),
   wizardEpoch: z.number(),
+  lastSavedAt: z.number().nullable().default(null),
 });
 export type WizardStateSerialized = z.infer<typeof WizardStateSerializedSchema>;
 
@@ -490,6 +495,7 @@ export const INITIAL_WIZARD_STATE: WizardState = {
   imageQuality: '1K',
   playlistId: null,
   wizardEpoch: 0,
+  lastSavedAt: null,
 };
 
 // ────────────────────────────────────────────────────────────────────
