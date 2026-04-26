@@ -74,3 +74,19 @@ jobs:
       - run: npm run test -- --run
       - run: npm audit --audit-level=high
         continue-on-error: true
+
+  size-limit:
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: andresz1/size-limit-action@v1
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          directory: frontend
+          package_manager: npm
+          build_script: build
+          script: size
