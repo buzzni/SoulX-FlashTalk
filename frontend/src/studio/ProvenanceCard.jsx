@@ -33,11 +33,18 @@ const VOICE_SOURCE_LABELS = {
   clone: '내 목소리 복제',
   upload: '녹음 파일 업로드',
 };
+// Phase 2c.4: schema collapsed to close|medium|far, UI labels use
+// Korean film-industry standards (클로즈업/미디엄샷/풀샷). Legacy
+// manifests may carry 'closeup', 'bust', 'medium', 'full' — each
+// gets its own industry term so historical data stays distinct
+// (바스트샷 ≠ 미디엄샷). New jobs only ever store close/medium/far.
 const SHOT_LABELS = {
   closeup: '클로즈업',
-  bust: '상반신',
-  medium: '미디엄',
+  close: '클로즈업',
+  bust: '바스트샷',
+  medium: '미디엄샷',
   full: '풀샷',
+  far: '풀샷',
 };
 const QUALITY_LABELS = {
   '4K': '초고화질 (4K)',

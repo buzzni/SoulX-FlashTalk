@@ -29,20 +29,20 @@ export interface CompositionControlsProps {
   onGenerate: () => void;
 }
 
-// Phase 2c: schema's CompositionShot is just close|medium|far
-// (mapped to closeup|bust|medium|full historically). Keep the four
-// historical options visible — they collapse internally to the
-// schema's three values via the mapping below if needed.
+// Phase 2c: schema's CompositionShot is close|medium|far. Labels use
+// Korean film-industry standards (클로즈업/미디엄샷/풀샷). Tooltips
+// describe the framing range so users don't have to know the jargon.
+// Pre-2c.4 the UI had 4 buttons with 상반신 and 미디엄 both wired to
+// 'medium' — collapsed to match the schema, which only has 3 values.
 const SHOT_OPTS = [
-  { v: 'close' as const, label: '클로즈업' },
-  { v: 'medium' as const, label: '상반신' },
-  { v: 'medium' as const, label: '미디엄' },
-  { v: 'far' as const, label: '풀샷' },
+  { v: 'close' as const, label: '클로즈업', desc: '얼굴 중심 (Close-Up)' },
+  { v: 'medium' as const, label: '미디엄샷', desc: '머리~허리 (Medium Shot)' },
+  { v: 'far' as const, label: '풀샷', desc: '전신 (Full Shot)' },
 ];
 const ANGLE_OPTS = [
-  { v: 'eye' as const, label: '정면' },
-  { v: 'low' as const, label: '살짝 아래에서' },
-  { v: 'high' as const, label: '살짝 위에서' },
+  { v: 'eye' as const, label: '정면', desc: '아이레벨 — 같은 눈높이' },
+  { v: 'low' as const, label: '살짝 아래에서', desc: '로우앵글 — 인물이 더 커 보임' },
+  { v: 'high' as const, label: '살짝 위에서', desc: '하이앵글 — 인물이 더 작아 보임' },
 ];
 
 const DIRECTION_EXAMPLES = [
@@ -200,6 +200,7 @@ export function CompositionControls({
                 key={o.v}
                 on={settings.shot === o.v}
                 onClick={() => onSettingsChange({ shot: o.v })}
+                title={o.desc}
               >
                 {o.label}
               </Chip>
@@ -213,6 +214,7 @@ export function CompositionControls({
                 key={o.v}
                 on={settings.angle === o.v}
                 onClick={() => onSettingsChange({ angle: o.v })}
+                title={o.desc}
               >
                 {o.label}
               </Chip>
