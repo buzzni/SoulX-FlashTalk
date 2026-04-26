@@ -24,7 +24,7 @@
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import { storageKey } from './storageKey';
-import type { Background, Host, ResolutionKey } from '../wizard/schema';
+import type { Background, Host, Product, ResolutionKey } from '../wizard/schema';
 import { INITIAL_BACKGROUND, INITIAL_HOST } from '../wizard/schema';
 import {
   migrateLegacy as migrateLegacyToSchema,
@@ -54,7 +54,9 @@ export interface WizardState {
    * generation is a state machine (idle | streaming | ready | failed),
    * temperature shared across modes. */
   host: Host;
-  products: WizardSlice[];
+  /** Schema-typed (Phase 2c). Each product carries a tagged
+   * `source: ProductSource` (empty | localFile | uploaded | url). */
+  products: Product[];
   /** Schema-typed (Phase 2a). Tagged union — kind = preset | upload |
    * url | prompt. */
   background: Background;
@@ -121,7 +123,7 @@ export interface WizardActions {
    * union, generation is a state machine. Callers hand a full Host or
    * a deriver function. */
   setHost: (next: Host | ((prev: Host) => Host)) => void;
-  setProducts: (updater: WizardSlice[] | ((p: WizardSlice[]) => WizardSlice[])) => void;
+  setProducts: (updater: Product[] | ((p: Product[]) => Product[])) => void;
   /** Schema-typed (Phase 2a). Replace-style: callers pass the next
    * full Background or a function that derives it from the previous
    * value. No partial-patch — tagged unions don't compose with `Partial`. */
@@ -171,9 +173,8 @@ function migrateLegacyStateOnce(): void {
       // Phase 2b: host is schema-typed (input + generation tagged
       // unions). Run the schema migrator on the legacy raw value.
       host: migrateLegacyToSchema({ host: legacy.host }).host,
-      products: Array.isArray(legacy.products)
-        ? (legacy.products as WizardState['products'])
-        : INITIAL_WIZARD_STATE.products,
+      // Phase 2c: products → schema with tagged ProductSource.
+      products: migrateLegacyToSchema({ products: legacy.products }).products,
       // Phase 2a: background is now schema-typed (tagged union). Run
        // the schema migrator on the legacy raw value rather than spreading
        // optional fields into a Background that wouldn't satisfy any kind.
@@ -199,7 +200,7 @@ function migrateLegacyStateOnce(): void {
     // schema-shaped (host + background through migrateLegacyToSchema),
     // so we tag it with the current persist version (3) — Zustand's
     // own migrate() then sees a matching version and skips re-migration.
-    const envelope = { state: partializeForPersist(merged), version: 4 };
+    const envelope = { state: partializeForPersist(merged), version: 5 };
     localStorage.setItem(storageKey('wizard'), JSON.stringify(envelope));
 
     // Preserve the step the user was on. Without this, a user upgrading
@@ -284,15 +285,14 @@ function partializeForPersist(s: WizardState): WizardState {
   // Phase 2a: background uses schema-typed persist — drops LocalAsset
   // (File handle + blob URL) but keeps ServerAsset.
   const cleanBackground: Background = persistBackground(s.background);
-  const cleanProducts: WizardSlice[] = (Array.isArray(s.products) ? s.products : []).map((p) => {
-    // Strip `_file` (a File handle) and transient blob URLs; keep the
-    // server `path` so uploads survive reload.
-    const { _file: _drop, ...rest } = p as Record<string, unknown> & { _file?: unknown };
-    void _drop;
-    return {
-      ...rest,
-      url: dropTransient(rest.url),
-    };
+  // Phase 2c: products are schema-typed. localFile rows (transient
+  // File handle + blob/data: URL preview) collapse to empty so the
+  // user sees a fresh slot to re-upload after reload.
+  const cleanProducts: Product[] = s.products.map((p) => {
+    if (p.source.kind === 'localFile') {
+      return { ...p, source: { kind: 'empty' as const } };
+    }
+    return p;
   });
   const cleanVoice: WizardSlice = {
     ...voice,
@@ -400,7 +400,10 @@ export const useWizardStore = create<WizardStore>()(
       //   v4: resolution → key string only (was {key, label, width,
       //       height, size, speed, default} object — meta derived via
       //       resolutionMeta(key))
-      version: 4,
+      //   v5: products → tagged-union source (empty | localFile |
+      //       uploaded | url). Was a flat object with optional
+      //       url/_file/path/source/urlInput fields.
+      version: 5,
       migrate: (persisted, fromVersion) => {
         if (!persisted || typeof persisted !== 'object') return persisted as WizardState;
         const p = persisted as Record<string, unknown>;
@@ -412,6 +415,9 @@ export const useWizardStore = create<WizardStore>()(
         }
         if (fromVersion < 4) {
           p.resolution = migrateLegacyToSchema({ resolution: p.resolution }).resolution;
+        }
+        if (fromVersion < 5) {
+          p.products = migrateLegacyToSchema({ products: p.products }).products;
         }
         return p as WizardState;
       },

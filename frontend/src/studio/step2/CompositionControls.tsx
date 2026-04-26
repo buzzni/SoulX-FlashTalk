@@ -155,11 +155,23 @@ export function CompositionControls({
               title={`${i + 1}번 상품 입력`}
             >
               <span className="product-ref-thumb">
-                {p.url ? (
-                  <img src={p.url} alt="" />
-                ) : (
-                  <span className="product-ref-thumb__empty" />
-                )}
+                {(() => {
+                  // Schema-typed Product (Phase 2c). Derive preview URL
+                  // from the source discriminator.
+                  const url =
+                    p.source.kind === 'localFile'
+                      ? p.source.asset.previewUrl
+                      : p.source.kind === 'uploaded'
+                        ? p.source.asset.url
+                        : p.source.kind === 'url'
+                          ? p.source.url
+                          : null;
+                  return url ? (
+                    <img src={url} alt="" />
+                  ) : (
+                    <span className="product-ref-thumb__empty" />
+                  );
+                })()}
               </span>
               <span className="product-ref-text">
                 <strong>{i + 1}</strong>번

@@ -79,28 +79,35 @@ export default function Step2Composite({ state, update }: Step2CompositeProps) {
 
   const bgReady = isBackgroundReady(background);
   const productsReady =
-    products.length > 0 &&
-    products.some((p) => p.url || p.urlInput || p._file || p.path);
+    products.length > 0 && products.some((p) => p.source.kind !== 'empty');
   const canGenerate = bgReady && productsReady;
   const missingReason = !canGenerate
     ? `${!productsReady ? '제품 사진을 먼저 올려주세요. ' : ''}${!bgReady ? '배경을 선택해주세요.' : ''}`
     : null;
 
-  // Kicks product uploads for any row that has `_file` but no `path`,
-  // same for the background. We do this inside the generate click
-  // so uploads stale-reject correctly — a user hammering "합성" then
-  // swapping files shouldn't see A's upload override B's state.
+  // Kicks product uploads for any LocalAsset row, same for the
+  // background. We do this inside the generate click so uploads
+  // stale-reject correctly — a user hammering "합성" then swapping files
+  // shouldn't see A's upload override B's state.
   const generate = async () => {
     const attempt = attemptsRef.current;
     const seeds = attempt === 0 ? undefined : makeRandomSeeds(4);
     attemptsRef.current = attempt + 1;
 
-    // Upload missing product paths.
-    const uploaded = await Promise.all(
-      products.map(async (p) => {
-        if (p.path || !p._file) return p;
-        const r = await productUpload.upload(p._file);
-        return r ? { ...p, path: r.path ?? undefined } : p;
+    // Upload pending product files. Schema discriminator handles all
+    // four source modes.
+    const uploaded: Product[] = await Promise.all(
+      products.map(async (p): Promise<Product> => {
+        if (p.source.kind !== 'localFile') return p;
+        const r = await productUpload.upload(p.source.asset.file);
+        if (!r?.path) return p;
+        return {
+          ...p,
+          source: {
+            kind: 'uploaded',
+            asset: { path: r.path, url: r.url, name: p.source.asset.name },
+          },
+        };
       }),
     );
     update((s) => ({ ...s, products: uploaded }));
@@ -125,10 +132,18 @@ export default function Step2Composite({ state, update }: Step2CompositeProps) {
         ? state.host.generation.selected?.path ?? null
         : null;
 
+    // Schema Products → composite API's product shape (path-only).
+    const apiProducts = uploaded
+      .map((p): { path: string } | null => {
+        if (p.source.kind === 'uploaded') return { path: p.source.asset.path };
+        return null;
+      })
+      .filter((x): x is { path: string } => x !== null);
+
     await gen.regenerate(
       {
         host: { selectedPath: hostSelectedPath },
-        products: uploaded.filter((p) => p.path) as CompositeInputProducts,
+        products: apiProducts,
         background: backgroundToLegacyApi(bg),
         composition: composition as unknown as CompositeInputComp,
         imageSize: (state.imageQuality as '1K' | '2K' | '4K') ?? '1K',
@@ -223,7 +238,7 @@ export default function Step2Composite({ state, update }: Step2CompositeProps) {
               onClick={() =>
                 setProducts((ps) => [
                   ...ps,
-                  { id: Date.now().toString(36), url: null, source: 'upload' },
+                  { id: Date.now().toString(36), source: { kind: 'empty' } },
                 ])
               }
             >
@@ -372,12 +387,9 @@ function CompositeCanvas({
   );
 }
 
-// Local-only type aliases used by the regenerate() call above —
-// avoids yet more indirection through imported types.
-type CompositeInputProducts = React.ComponentProps<
-  typeof ProductList
->['products'];
-type CompositeInputBg = React.ComponentProps<typeof BackgroundPicker>['background'];
+// Local-only type alias used by the regenerate() call above —
+// composition is the only remaining slice that hasn't fully migrated
+// to schema yet (Phase 2c.3).
 type CompositeInputComp = React.ComponentProps<
   typeof CompositionControls
 >['composition'];
