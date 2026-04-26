@@ -71,7 +71,7 @@ describe('wizardStore — legacy showhost_state migration', () => {
     const raw = localStorage.getItem(storageKey('wizard'));
     expect(raw).toBeTruthy();
     const envelope = JSON.parse(raw);
-    expect(envelope.version).toBe(3);
+    expect(envelope.version).toBe(4);
     expect(envelope.state.host.input.kind).toBe('text');
     expect(envelope.state.host.input.prompt).toBe('소개 영상');
     expect(envelope.state.host.generation.state).toBe('ready');

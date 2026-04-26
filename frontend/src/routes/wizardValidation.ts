@@ -29,11 +29,12 @@ export function computeValidity(state: any): WizardValidity {
     state?.host?.generation?.state === 'ready' &&
     state?.host?.generation?.selected != null;
   v[2] = v[1] && !!state?.composition?.generated;
+  // Phase 2c: resolution is a ResolutionKey string now (was object).
   v[3] =
     v[2] &&
     !!(state?.voice?.generated || state?.voice?.uploadedAudio) &&
     !!state?.voice?.script &&
-    !!state?.resolution?.key;
+    typeof state?.resolution === 'string';
   return v;
 }
 

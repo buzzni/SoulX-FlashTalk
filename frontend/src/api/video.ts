@@ -13,7 +13,8 @@
 
 import { API_BASE, getAuthHeaders, parseResponse } from './http';
 import { stringifyResolution } from './mapping';
-import type { Background, Host } from '../wizard/schema';
+import type { Background, Host, ResolutionKey } from '../wizard/schema';
+import { RESOLUTION_META } from '../wizard/schema';
 import { isServerAsset } from '../wizard/normalizers';
 
 export interface GenerateVideoInput {
@@ -44,7 +45,9 @@ export interface GenerateVideoInput {
       similarity?: number | null;
       speed?: number | null;
     } | null;
-    resolution: { width?: number; height?: number; label?: string };
+    /** Schema-typed (Phase 2c). Just the key — meta lookup via
+     * RESOLUTION_META[resKey]. */
+    resolution: ResolutionKey | null;
     imageQuality?: string;
     playlist_id?: string | null;
   };
@@ -77,7 +80,10 @@ export async function generateVideo(
   if (composite) body.append('host_image_path', composite);
   body.append('audio_path', audio.audio_path);
   body.append('audio_source', 'upload');
-  body.append('resolution', stringifyResolution(state.resolution));
+  // Phase 2c: resolution is just a ResolutionKey now — pull
+  // width/height from the canonical meta table.
+  const resKey = (state.resolution ?? '448p') as ResolutionKey;
+  body.append('resolution', stringifyResolution(RESOLUTION_META[resKey]));
   // Playlist assignment (per docs/playlist-feature-plan.md decision #3).
   // Empty string is the "미지정" signal the backend understands.
   if (state.playlist_id) body.append('playlist_id', state.playlist_id);
@@ -129,7 +135,7 @@ export async function generateVideo(
   } else if (state.voice?.voiceName) {
     labelParts.push(`목소리: ${state.voice.voiceName}`);
   }
-  if (state.resolution?.label) labelParts.push(state.resolution.label);
+  if (state.resolution) labelParts.push(RESOLUTION_META[state.resolution].label);
   if (labelParts.length) body.append('queue_label', labelParts.join(' · '));
 
   const res = await fetch(`${API_BASE}/api/generate`, {

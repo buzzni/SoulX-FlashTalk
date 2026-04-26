@@ -493,7 +493,9 @@ describe('api.js — generateVideo attaches full provenance meta', () => {
       // BG_PRESETS) so the provenance carries presetId only.
       background: { kind: 'preset', presetId: 'living_cozy' },
       voice: { source: 'tts', voiceId: 'v_minji', voiceName: '민지', script: '안녕하세요' },
-      resolution: { width: 720, height: 1280 },
+      // Phase 2c: schema-shaped resolution is just the key — meta
+      // (width/height/label) derived via RESOLUTION_META.
+      resolution: '720p',
       imageQuality: '2K',
     };
     await generateVideo({ state, audio: { audio_path: '/srv/a.wav' } });

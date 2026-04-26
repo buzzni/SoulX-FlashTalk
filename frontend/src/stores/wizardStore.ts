@@ -24,7 +24,7 @@
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import { storageKey } from './storageKey';
-import type { Background, Host } from '../wizard/schema';
+import type { Background, Host, ResolutionKey } from '../wizard/schema';
 import { INITIAL_BACKGROUND, INITIAL_HOST } from '../wizard/schema';
 import {
   migrateLegacy as migrateLegacyToSchema,
@@ -61,7 +61,10 @@ export interface WizardState {
   composition: WizardSlice;
   voice: WizardSlice;
   script: string;
-  resolution: unknown;
+  /** Schema-typed (Phase 2c). Just the key — full meta
+   * (width/height/size/speed/label) is derived via `resolutionMeta`
+   * from wizard/schema. Was a redundant 6-field object. */
+  resolution: ResolutionKey;
   imageQuality: string;
   /** Bumped on every `reset()`. Step pages use this as a React key so
    * "처음부터 다시" forces a remount, clearing hook-local state (variants,
@@ -104,15 +107,7 @@ export const INITIAL_WIZARD_STATE: WizardState = {
     cloneSample: null,
   },
   script: '',
-  resolution: {
-    key: '448p',
-    label: '448p',
-    width: 448,
-    height: 768,
-    size: '~8MB',
-    speed: '빠름',
-    default: true,
-  },
+  resolution: '448p',
   imageQuality: '1K',
   wizardEpoch: 0,
 };
@@ -134,7 +129,9 @@ export interface WizardActions {
   setComposition: (patch: WizardSlice) => void;
   setVoice: (patch: WizardSlice) => void;
   setScript: (s: string) => void;
-  setResolution: (r: unknown) => void;
+  /** Schema-typed (Phase 2c). Pass only the key — full meta is
+   * derived via `resolutionMeta(key)`. */
+  setResolution: (r: ResolutionKey) => void;
   setImageQuality: (q: string) => void;
   /** Replace-or-patch the entire wizard tree — used by HostStudio's
    * legacy `update(fn)` callback style during Phase 2b. Steps pass
@@ -190,12 +187,9 @@ function migrateLegacyStateOnce(): void {
         ...(legacy.voice as Record<string, unknown> | undefined),
       },
       script: typeof legacy.script === 'string' ? legacy.script : '',
-      // Resolution is stored as an object ({key, label, width, height,
-      // size, speed}) in both legacy and new formats — preserve the
-      // whole thing so Step 3's picker keeps working unchanged. Phase
-      // 4 may tighten to a preset key, at which point we'd translate
-      // here, but today verbatim-pass is the safe move.
-      resolution: legacy.resolution ?? INITIAL_WIZARD_STATE.resolution,
+      // Phase 2c: resolution → schema key string (lookup via
+      // resolutionMeta).
+      resolution: migrateLegacyToSchema({ resolution: legacy.resolution }).resolution,
       imageQuality:
         (typeof legacy.imageQuality === 'string' ? legacy.imageQuality : INITIAL_WIZARD_STATE.imageQuality),
     };
@@ -205,7 +199,7 @@ function migrateLegacyStateOnce(): void {
     // schema-shaped (host + background through migrateLegacyToSchema),
     // so we tag it with the current persist version (3) — Zustand's
     // own migrate() then sees a matching version and skips re-migration.
-    const envelope = { state: partializeForPersist(merged), version: 3 };
+    const envelope = { state: partializeForPersist(merged), version: 4 };
     localStorage.setItem(storageKey('wizard'), JSON.stringify(envelope));
 
     // Preserve the step the user was on. Without this, a user upgrading
@@ -403,7 +397,10 @@ export const useWizardStore = create<WizardStore>()(
       //   v2: background → tagged union {kind: preset|upload|url|prompt}
       //   v3: host → schema {input (tagged), temperature, generation
       //       (state machine)}
-      version: 3,
+      //   v4: resolution → key string only (was {key, label, width,
+      //       height, size, speed, default} object — meta derived via
+      //       resolutionMeta(key))
+      version: 4,
       migrate: (persisted, fromVersion) => {
         if (!persisted || typeof persisted !== 'object') return persisted as WizardState;
         const p = persisted as Record<string, unknown>;
@@ -412,6 +409,9 @@ export const useWizardStore = create<WizardStore>()(
         }
         if (fromVersion < 3) {
           p.host = migrateLegacyToSchema({ host: p.host }).host;
+        }
+        if (fromVersion < 4) {
+          p.resolution = migrateLegacyToSchema({ resolution: p.resolution }).resolution;
         }
         return p as WizardState;
       },

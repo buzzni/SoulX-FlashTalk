@@ -24,6 +24,7 @@ import { getVideoMeta } from '../../api/file';
 import { humanizeError } from '../../api/http';
 import { useRenderJob } from '../../hooks/useRenderJob';
 import { useQueuePosition } from '../../stores/queueStore';
+import { RESOLUTION_META } from '../../wizard/schema';
 import { formatTaskTitle } from '../taskFormat.js';
 import RenderHistory from '../RenderHistory.jsx';
 import { Confetti } from '../shared/Confetti';
@@ -188,8 +189,12 @@ export default function RenderDashboard({
         return { width: Number(w), height: Number(h), label: `${w}×${h}` };
       }
     }
-    const r = state.resolution;
-    return r ? { width: r.width, height: r.height, label: r.label } : null;
+    // Phase 2c: state.resolution is a ResolutionKey now — look up
+    // dimensions via RESOLUTION_META.
+    const key = state.resolution;
+    if (!key) return null;
+    const meta = RESOLUTION_META[key as keyof typeof RESOLUTION_META];
+    return meta ? { width: meta.width, height: meta.height, label: meta.label } : null;
   })();
 
   // Overall status — aggregates dispatchError, useRenderJob flags, and the

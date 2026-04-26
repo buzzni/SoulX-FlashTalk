@@ -30,7 +30,9 @@ import { VoiceCloner, type CloneSample } from './VoiceCloner';
 import { AudioUploader, type UploadedAudio } from './AudioUploader';
 import { ScriptEditor, buildScript } from './ScriptEditor';
 import { VoiceAdvancedSettings } from './VoiceAdvancedSettings';
-import { ResolutionPicker, type ResolutionPreset } from './ResolutionPicker';
+import { ResolutionPicker } from './ResolutionPicker';
+import type { ResolutionKey } from '@/wizard/schema';
+import { RESOLUTION_META } from '@/wizard/schema';
 import { PlaylistPicker } from './PlaylistPicker';
 import { WizardTabs, WizardTab } from '@/components/wizard-tabs';
 import { Sparkles, Mic, Copy, MicVocal, Film, Volume2, FileText, Monitor } from 'lucide-react';
@@ -64,7 +66,7 @@ export default function Step3Audio({ state, update }: Step3AudioProps) {
     uploadedAudio?: UploadedAudio | null;
     cloneSample?: CloneSample | null;
   };
-  const resolution = state.resolution as { key: string };
+  const resolution = state.resolution as ResolutionKey;
 
   const voiceList = useVoiceList();
   const tts = useTTSGeneration();
@@ -79,7 +81,7 @@ export default function Step3Audio({ state, update }: Step3AudioProps) {
   const setV = (patch: Partial<typeof voice>) =>
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     update((s: any) => ({ ...s, voice: { ...s.voice, ...patch } }));
-  const setR = (r: ResolutionPreset) =>
+  const setR = (r: ResolutionKey) =>
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     update((s: any) => ({ ...s, resolution: r }));
 
@@ -304,7 +306,7 @@ export default function Step3Audio({ state, update }: Step3AudioProps) {
       )}
 
       <Card title="영상 화질" subtitle="세로 영상 · 어디에 올릴지에 맞춰서 고르세요">
-        <ResolutionPicker selectedKey={resolution.key} onSelect={setR} />
+        <ResolutionPicker selectedKey={resolution} onSelect={setR} />
       </Card>
 
       <Card title="플레이리스트" subtitle="만들어진 영상을 묶어두는 폴더예요. 비워두면 미지정에 저장됩니다.">
@@ -365,9 +367,10 @@ function RenderBooth({ state, estDuration }: RenderBoothProps) {
           ? `AI 음성 · ${voice.voiceName}`
           : 'AI 음성 — 목소리 미선택';
   const scriptLen = (voice.script ?? '').length;
-  const resolution = state.resolution ?? {};
-  const resLine = resolution.key
-    ? `${resolutionLabel(resolution.key)} · ${resolution.key} · ${resolution.width}×${resolution.height}`
+  const resolution = state.resolution as ResolutionKey | null;
+  const resMeta = resolution ? RESOLUTION_META[resolution] : null;
+  const resLine = resMeta
+    ? `${resMeta.label} · ${resMeta.key} · ${resMeta.width}×${resMeta.height}`
     : '화질 미선택';
 
   return (

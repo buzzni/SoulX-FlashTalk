@@ -1,48 +1,39 @@
 /**
  * ResolutionPicker — 4-tile video-quality picker.
  *
- * Compact tile: label · dimensions · time hint · file size. The 4K tile
- * gets an amber color on the time hint to flag the cost.
+ * Phase 2c: schema-typed. Emits a `ResolutionKey` string only — the
+ * full meta (width/height/size/speed/label) is derived via
+ * `resolutionMeta(key)` from wizard/schema, so consumers don't have
+ * to copy-paste an object that's already in the canonical table.
  */
 import { Clock } from 'lucide-react';
+import type { ResolutionKey } from '@/wizard/schema';
+import { RESOLUTION_META } from '@/wizard/schema';
 
-export interface ResolutionPreset {
-  key: string;
-  label: string;
-  tag: string;
-  width: number;
-  height: number;
-  size: string;
-  speed: string;
-  default?: boolean;
-}
+const RES_DISPLAY: Record<ResolutionKey, { time: string; warn?: boolean }> = {
+  '448p': { time: '~30초' },
+  '480p': { time: '~35초' },
+  '720p': { time: '~1분' },
+  '1080p': { time: '~2분', warn: true },
+};
 
-export const RES_OPTIONS: (ResolutionPreset & { time: string; warn?: boolean })[] = [
-  { key: '448p', label: '보통 화질', tag: '448p', width: 448, height: 768, size: '약 8MB', speed: '가장 빠름', time: '~30초', default: true },
-  { key: '480p', label: '기본 화질', tag: '480p', width: 480, height: 832, size: '약 14MB', speed: '빠름', time: '~35초' },
-  { key: '720p', label: '고화질(HD)', tag: '720p', width: 720, height: 1280, size: '약 28MB', speed: '보통', time: '~1분' },
-  { key: '1080p', label: '최고 화질(FHD)', tag: '1080p', width: 1080, height: 1920, size: '약 62MB', speed: '느림', time: '~2분', warn: true },
-];
+const RES_OPTION_KEYS: ResolutionKey[] = ['448p', '480p', '720p', '1080p'];
 
 export interface ResolutionPickerProps {
-  selectedKey: string;
-  onSelect: (preset: ResolutionPreset) => void;
+  selectedKey: ResolutionKey;
+  onSelect: (key: ResolutionKey) => void;
 }
 
 export function ResolutionPicker({ selectedKey, onSelect }: ResolutionPickerProps) {
   return (
     <div className="res-grid">
-      {RES_OPTIONS.map((r) => (
+      {RES_OPTION_KEYS.map((key) => {
+        const r = { ...RESOLUTION_META[key], ...RES_DISPLAY[key], tag: key };
+        return (
         <button
           key={r.key}
           className={`res-tile ${selectedKey === r.key ? 'on' : ''}`}
-          onClick={() =>
-            onSelect({
-              key: r.key, label: r.label, tag: r.tag,
-              width: r.width, height: r.height, size: r.size, speed: r.speed,
-              default: r.default,
-            })
-          }
+          onClick={() => onSelect(r.key)}
         >
           <div className="res-label" style={{ marginBottom: 2 }}>
             {r.label}
@@ -58,7 +49,8 @@ export function ResolutionPicker({ selectedKey, onSelect }: ResolutionPickerProp
             <span>{r.size}</span>
           </div>
         </button>
-      ))}
+        );
+      })}
     </div>
   );
 }
