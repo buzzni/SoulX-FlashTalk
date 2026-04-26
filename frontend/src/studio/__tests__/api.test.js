@@ -511,7 +511,18 @@ describe('api.js — generateVideo attaches full provenance meta', () => {
       // from the schema (it's a derived UI field, looked up from
       // BG_PRESETS) so the provenance carries presetId only.
       background: { kind: 'preset', presetId: 'living_cozy' },
-      voice: { source: 'tts', voiceId: 'v_minji', voiceName: '민지', script: '안녕하세요' },
+      // Phase 2c.4: schema-shaped voice (tagged union over source).
+      // tts/clone carry generation state machine + advanced settings;
+      // upload bypasses TTS. voiceProvenance flattens this back to the
+      // legacy provenance keys the backend manifest expects.
+      voice: {
+        source: 'tts',
+        voiceId: 'v_minji',
+        voiceName: '민지',
+        advanced: { speed: 1, stability: 0.5, style: 0.3, similarity: 0.75 },
+        script: { paragraphs: ['안녕하세요'] },
+        generation: { state: 'ready', audio: { path: '/srv/a.wav' } },
+      },
       // Phase 2c: schema-shaped resolution is just the key — meta
       // (width/height/label) derived via RESOLUTION_META.
       resolution: '720p',

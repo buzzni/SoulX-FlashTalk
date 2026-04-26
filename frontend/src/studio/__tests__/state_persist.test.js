@@ -130,19 +130,33 @@ describe('wizardStore persistence', () => {
     expect(restored.products[1].path).toBe('/srv/p2.png');
   });
 
-  it('keeps voice.uploadedAudio when a server path exists, drops when only a File', () => {
+  it('keeps upload-mode voice.audio when a server path exists, drops LocalAsset uploads', () => {
+    // Phase 2c.4: voice is schema-typed. Upload-mode audio lives on
+    // `voice.audio` as ServerAsset | LocalAsset | null. ServerAsset
+    // (has a real path) survives reload; LocalAsset (File handle +
+    // blob URL) gets dropped to null because the File is gone after
+    // a refresh.
     const withPath = {
       ...INITIAL_WIZARD_STATE,
-      voice: { ...INITIAL_WIZARD_STATE.voice, uploadedAudio: { path: '/srv/tts.wav', name: 'tts.wav', _file: {} } },
+      voice: {
+        source: 'upload',
+        audio: { path: '/srv/tts.wav', name: 'tts.wav' },
+        script: { paragraphs: ['caption'] },
+      },
     };
-    expect(roundtrip(withPath).voice.uploadedAudio.path).toBe('/srv/tts.wav');
-    expect(roundtrip(withPath).voice.uploadedAudio._file).toBeUndefined();
+    const restoredWithPath = roundtrip(withPath);
+    expect(restoredWithPath.voice.audio.path).toBe('/srv/tts.wav');
+    expect(restoredWithPath.voice.audio.file).toBeUndefined();
 
     const onlyFile = {
       ...INITIAL_WIZARD_STATE,
-      voice: { ...INITIAL_WIZARD_STATE.voice, uploadedAudio: { name: 'tts.wav', _file: {} } },
+      voice: {
+        source: 'upload',
+        audio: { file: {}, previewUrl: 'blob:http://localhost/x', name: 'tts.wav' },
+        script: { paragraphs: ['caption'] },
+      },
     };
-    expect(roundtrip(onlyFile).voice.uploadedAudio).toBeNull();
+    expect(roundtrip(onlyFile).voice.audio).toBeNull();
   });
 
   it('restores image quality, resolution, and other top-level knobs', () => {

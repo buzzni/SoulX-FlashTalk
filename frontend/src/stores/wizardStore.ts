@@ -30,35 +30,27 @@ import type {
   Host,
   Product,
   ResolutionKey,
+  Voice,
 } from '../wizard/schema';
 import {
   INITIAL_BACKGROUND,
   INITIAL_COMPOSITION,
   INITIAL_HOST,
+  INITIAL_VOICE,
 } from '../wizard/schema';
 import {
   migrateLegacy as migrateLegacyToSchema,
   persistBackground,
   persistComposition,
   persistHost,
+  persistVoice,
 } from '../wizard/normalizers';
 
 // ────────────────────────────────────────────────────────────────────
-// Wizard state shape
-//
-// Intentionally typed loosely here (`Record<string, unknown>` on each
-// slice) because existing Step1/Step2/Step3 components read and write
-// ~40 fields that haven't been formally catalogued yet. Phase 4
-// component decomposition will tighten these types as each Step
-// gets split. Until then, matching the legacy shape verbatim keeps
-// the components working with zero prop changes.
-//
-// The typed surface in src/types/app.d.ts (WizardHost, WizardProduct,
-// etc.) documents the canonical subset; anything beyond that is
-// allowed to pass through the store unchanged.
+// Wizard state shape — every slice is schema-typed (Phase 2c.4
+// completes the migration). Adding a new field on a slice requires
+// updating the schema, normalizers (migrate + persist), and api-mappers.
 // ────────────────────────────────────────────────────────────────────
-
-export type WizardSlice = Record<string, unknown>;
 
 export interface WizardState {
   /** Schema-typed (Phase 2b). input is a tagged union (text | image),
@@ -75,7 +67,12 @@ export interface WizardState {
    * temperature, rembg) + generation (state machine: idle |
    * streaming | ready | failed). */
   composition: Composition;
-  voice: WizardSlice;
+  /** Schema-typed (Phase 2c.4). Tagged union — source = tts | clone |
+   * upload. tts/clone carry a `generation` state machine (idle |
+   * generating | ready | failed); clone has a separate `sample` state
+   * machine (empty | pending | cloned). upload bypasses TTS — `audio`
+   * is the user-supplied recording. */
+  voice: Voice;
   script: string;
   /** Schema-typed (Phase 2c). Just the key — full meta
    * (width/height/size/speed/label) is derived via `resolutionMeta`
@@ -90,9 +87,9 @@ export interface WizardState {
 }
 
 // ────────────────────────────────────────────────────────────────────
-// Initial state — byte-for-byte compatible with the legacy
-// INITIAL_STATE that used to live in HostStudio.jsx so no Step
-// component sees a shape change in Phase 2b.
+// Initial state — derived from the per-slice INITIAL_* constants in
+// wizard/schema.ts so the store and the schema can never disagree on
+// what "fresh" means.
 // ────────────────────────────────────────────────────────────────────
 
 export const INITIAL_WIZARD_STATE: WizardState = {
@@ -100,20 +97,7 @@ export const INITIAL_WIZARD_STATE: WizardState = {
   products: [],
   background: INITIAL_BACKGROUND,
   composition: INITIAL_COMPOSITION,
-  voice: {
-    source: 'tts',
-    voiceId: null,
-    voiceName: null,
-    paragraphs: [''],
-    script: '',
-    stability: 0.5,
-    style: 0.3,
-    similarity: 0.75,
-    speed: 1,
-    generated: false,
-    uploadedAudio: null,
-    cloneSample: null,
-  },
+  voice: INITIAL_VOICE,
   script: '',
   resolution: '448p',
   imageQuality: '1K',
@@ -137,7 +121,10 @@ export interface WizardActions {
   /** Schema-typed (Phase 2c). Replace-style — settings + generation
    * are tagged unions, no Partial composition. */
   setComposition: (next: Composition | ((prev: Composition) => Composition)) => void;
-  setVoice: (patch: WizardSlice) => void;
+  /** Schema-typed (Phase 2c.4). Replace-style — Voice is a tagged
+   * union, no Partial composition. Callers either pass a full Voice or
+   * a deriver function. */
+  setVoice: (next: Voice | ((prev: Voice) => Voice)) => void;
   setScript: (s: string) => void;
   /** Schema-typed (Phase 2c). Pass only the key — full meta is
    * derived via `resolutionMeta(key)`. */
@@ -190,10 +177,9 @@ function migrateLegacyStateOnce(): void {
       // Phase 2c: composition is schema-typed (settings + generation
       // state machine).
       composition: migrateLegacyToSchema({ composition: legacy.composition }).composition,
-      voice: {
-        ...INITIAL_WIZARD_STATE.voice,
-        ...(legacy.voice as Record<string, unknown> | undefined),
-      },
+      // Phase 2c.4: voice is schema-typed (tagged union over source +
+      // sample/generation state machines).
+      voice: migrateLegacyToSchema({ voice: legacy.voice }).voice,
       script: typeof legacy.script === 'string' ? legacy.script : '',
       // Phase 2c: resolution → schema key string (lookup via
       // resolutionMeta).
@@ -204,10 +190,10 @@ function migrateLegacyStateOnce(): void {
 
     // Write to the new key using Zustand's persist envelope shape so
     // the middleware picks it up on first read. `merged` is already
-    // schema-shaped (host + background through migrateLegacyToSchema),
-    // so we tag it with the current persist version (3) — Zustand's
+    // schema-shaped (every slice run through migrateLegacyToSchema),
+    // so we tag it with the current persist version (7) — Zustand's
     // own migrate() then sees a matching version and skips re-migration.
-    const envelope = { state: partializeForPersist(merged), version: 6 };
+    const envelope = { state: partializeForPersist(merged), version: 7 };
     localStorage.setItem(storageKey('wizard'), JSON.stringify(envelope));
 
     // Preserve the step the user was on. Without this, a user upgrading
@@ -250,35 +236,7 @@ function migrateLegacyStateOnce(): void {
 //     reload happens the stream is gone).
 // ────────────────────────────────────────────────────────────────────
 
-function isTransientUrl(u: unknown): boolean {
-  return typeof u === 'string' && (u.startsWith('blob:') || u.startsWith('data:'));
-}
-
-// Variants carry their own URL under either `imageUrl` (host) or `url`
-// (composition). We only keep entries whose display URL is a real
-// server URL — placeholder/error rows and any transient blob/data
-// URLs get dropped so localStorage never holds a URL that won't
-// resolve after a refresh.
-function cleanVariantRow(row: unknown): unknown {
-  if (!row || typeof row !== 'object') return null;
-  const r = row as { url?: unknown; imageUrl?: unknown; placeholder?: unknown; error?: unknown };
-  if (r.placeholder || r.error) return null;
-  const urlish = (typeof r.url === 'string' && r.url) || (typeof r.imageUrl === 'string' && r.imageUrl);
-  if (!urlish || isTransientUrl(urlish)) return null;
-  return row;
-}
-function cleanVariantsList(arr: unknown): unknown[] {
-  if (!Array.isArray(arr)) return [];
-  return arr.map(cleanVariantRow).filter((v) => v !== null);
-}
-
-function dropTransient(u: unknown): unknown {
-  return isTransientUrl(u) ? null : u;
-}
-
 function partializeForPersist(s: WizardState): WizardState {
-  const voice = s.voice ?? {};
-
   // Phase 2b: host uses schema-typed persist — drops mid-stream
   // generation states (streaming/failed → idle), strips LocalAsset
   // refs from image-mode input.
@@ -297,28 +255,10 @@ function partializeForPersist(s: WizardState): WizardState {
     }
     return p;
   });
-  const cleanVoice: WizardSlice = {
-    ...voice,
-    // Uploaded audio is safe if we have a server path — drop the
-    // transient File handle embedded in it.
-    uploadedAudio:
-      (voice.uploadedAudio as { path?: string } | null)?.path
-        ? {
-            path: (voice.uploadedAudio as { path?: string }).path,
-            name: (voice.uploadedAudio as { name?: string }).name,
-          }
-        : null,
-    // Clone sample only survives if it carries a voiceId (the server
-    // side of the clone call returned one) — otherwise it was just a
-    // staged File that's gone after reload.
-    cloneSample:
-      (voice.cloneSample as { voiceId?: string } | null)?.voiceId
-        ? {
-            voiceId: (voice.cloneSample as { voiceId?: string }).voiceId,
-            name: (voice.cloneSample as { name?: string }).name,
-          }
-        : null,
-  };
+  // Phase 2c.4: voice is schema-typed. Drops transient generation
+  // states, pending clone samples (the staged File can't reload), and
+  // LocalAsset audio uploads (only ServerAsset survives).
+  const cleanVoice: Voice = persistVoice(s.voice);
 
   return {
     ...s,
@@ -328,13 +268,6 @@ function partializeForPersist(s: WizardState): WizardState {
     products: cleanProducts,
     voice: cleanVoice,
   };
-}
-
-function cleanRefHandle(ref: unknown): unknown {
-  if (!ref || typeof ref !== 'object') return null;
-  const r = ref as { url?: unknown; name?: string; size?: number; type?: string };
-  if (typeof r.url !== 'string' || isTransientUrl(r.url)) return null;
-  return { name: r.name, size: r.size, type: r.type, url: r.url };
 }
 
 // ────────────────────────────────────────────────────────────────────
@@ -374,8 +307,10 @@ export const useWizardStore = create<WizardStore>()(
         set((s) => ({
           composition: typeof next === 'function' ? next(s.composition) : next,
         })),
-      setVoice: (patch) =>
-        set((s) => ({ voice: { ...s.voice, ...patch } })),
+      setVoice: (next) =>
+        set((s) => ({
+          voice: typeof next === 'function' ? next(s.voice) : next,
+        })),
       setScript: (script) => set({ script }),
       setResolution: (resolution) => set({ resolution }),
       setImageQuality: (imageQuality) => set({ imageQuality }),
@@ -411,7 +346,12 @@ export const useWizardStore = create<WizardStore>()(
       //   v6: composition → schema {settings, generation} state
       //       machine. Was flat {direction, shot, angle, temperature,
       //       generated, selectedSeed/Path/Url/ImageId, variants}.
-      version: 6,
+      //   v7: voice → tagged union over source (tts | clone | upload),
+      //       with `generation` state machine and (clone-only) `sample`
+      //       state machine. Was a flat object with `generated`,
+      //       `generatedAudioPath/Url`, `cloneSample`, `uploadedAudio`,
+      //       `paragraphs`, `script`, plus advanced sliders.
+      version: 7,
       migrate: (persisted, fromVersion) => {
         if (!persisted || typeof persisted !== 'object') return persisted as WizardState;
         const p = persisted as Record<string, unknown>;
@@ -429,6 +369,9 @@ export const useWizardStore = create<WizardStore>()(
         }
         if (fromVersion < 6) {
           p.composition = migrateLegacyToSchema({ composition: p.composition }).composition;
+        }
+        if (fromVersion < 7) {
+          p.voice = migrateLegacyToSchema({ voice: p.voice }).voice;
         }
         return p as WizardState;
       },

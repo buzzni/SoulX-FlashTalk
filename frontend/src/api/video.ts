@@ -13,7 +13,7 @@
 
 import { API_BASE, getAuthHeaders, parseResponse } from './http';
 import { stringifyResolution } from './mapping';
-import type { Background, Composition, Host, ResolutionKey } from '../wizard/schema';
+import type { Background, Composition, Host, ResolutionKey, Voice } from '../wizard/schema';
 import { RESOLUTION_META } from '../wizard/schema';
 import { isServerAsset } from '../wizard/normalizers';
 
@@ -29,16 +29,8 @@ export interface GenerateVideoInput {
     /** Schema-typed (Phase 2a) — see wizard/schema.ts Background.
      * Provenance snapshot is built via `backgroundProvenance` below. */
     background?: Background | null;
-    voice?: {
-      source?: string | null;
-      voiceId?: string | null;
-      voiceName?: string | null;
-      script?: string;
-      stability?: number | null;
-      style?: number | null;
-      similarity?: number | null;
-      speed?: number | null;
-    } | null;
+    /** Schema-typed (Phase 2c.4). Tagged union over source. */
+    voice?: Voice | null;
     /** Schema-typed (Phase 2c). Just the key — meta lookup via
      * RESOLUTION_META[resKey]. */
     resolution: ResolutionKey | null;
@@ -100,16 +92,7 @@ export async function generateVideo(
       url: p.url || '',
     })),
     background: backgroundProvenance(state.background),
-    voice: {
-      source: state.voice?.source || null,
-      voiceId: state.voice?.voiceId || null,
-      voiceName: state.voice?.voiceName || null,
-      script: state.voice?.script || '',
-      stability: state.voice?.stability ?? null,
-      style: state.voice?.style ?? null,
-      similarity: state.voice?.similarity ?? null,
-      speed: state.voice?.speed ?? null,
-    },
+    voice: voiceProvenance(state.voice),
     imageQuality: state.imageQuality || '1K',
   };
   body.append('meta', JSON.stringify(meta));
@@ -117,15 +100,16 @@ export async function generateVideo(
   // Queue label — human-readable row title in the queue dropdown. Priority:
   // explicit script preview > voice id > generic. Prevents every job from
   // showing as "Video generation".
-  const scriptPreview = (state.voice?.script || '')
+  const voiceProv = meta.voice;
+  const scriptPreview = (voiceProv.script || '')
     .replace(/\[breath\]/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
   const labelParts: string[] = [];
   if (scriptPreview) {
     labelParts.push(scriptPreview.slice(0, 60));
-  } else if (state.voice?.voiceName) {
-    labelParts.push(`목소리: ${state.voice.voiceName}`);
+  } else if (voiceProv.voiceName) {
+    labelParts.push(`목소리: ${voiceProv.voiceName}`);
   }
   if (state.resolution) labelParts.push(RESOLUTION_META[state.resolution].label);
   if (labelParts.length) body.append('queue_label', labelParts.join(' · '));
@@ -247,5 +231,76 @@ function backgroundProvenance(bg: unknown): {
       return { source: 'url', presetId: null, presetLabel: null, prompt: '', uploadPath: null, imageUrl: b.url };
     case 'prompt':
       return { source: 'prompt', presetId: null, presetLabel: null, prompt: b.prompt, uploadPath: null, imageUrl: null };
+  }
+}
+
+/** Schema-typed `Voice` → the legacy provenance shape (`source`,
+ * `voiceId`, `voiceName`, `script`, plus advanced settings). The
+ * backend manifest + `ProvenanceCard` consume this exact key set —
+ * the schema's tagged-union layout doesn't reach the wire. */
+function voiceProvenance(v: unknown): {
+  source: string | null;
+  voiceId: string | null;
+  voiceName: string | null;
+  script: string;
+  stability: number | null;
+  style: number | null;
+  similarity: number | null;
+  speed: number | null;
+} {
+  const voice = (v ?? null) as Voice | null;
+  if (!voice || typeof voice !== 'object' || !('source' in voice)) {
+    return {
+      source: null, voiceId: null, voiceName: null, script: '',
+      stability: null, style: null, similarity: null, speed: null,
+    };
+  }
+  // Script is the breath-joined paragraphs string the backend expects
+  // — same convention paragraphsToScript uses for /api/elevenlabs/generate.
+  const script = voice.script.paragraphs
+    .map((p) => p.trim())
+    .filter((p) => p.length > 0)
+    .join(' [breath] ');
+  switch (voice.source) {
+    case 'tts':
+      return {
+        source: 'tts',
+        voiceId: voice.voiceId,
+        voiceName: voice.voiceName,
+        script,
+        stability: voice.advanced.stability,
+        style: voice.advanced.style,
+        similarity: voice.advanced.similarity,
+        speed: voice.advanced.speed,
+      };
+    case 'clone':
+      return {
+        source: 'clone',
+        voiceId: voice.sample.state === 'cloned' ? voice.sample.voiceId : null,
+        voiceName: voice.sample.state === 'cloned' ? voice.sample.name : null,
+        script,
+        stability: voice.advanced.stability,
+        style: voice.advanced.style,
+        similarity: voice.advanced.similarity,
+        speed: voice.advanced.speed,
+      };
+    case 'upload':
+      return {
+        source: 'upload',
+        voiceId: null,
+        voiceName: null,
+        // upload-mode `script` is subtitle text — same string format
+        // (paragraphs joined) but no [breath] tags since there's no
+        // TTS run. paragraphsToScript with `source: 'upload'` would
+        // use \n\n — keeping that for the on-screen subtitle line.
+        script: voice.script.paragraphs
+          .map((p) => p.trim())
+          .filter((p) => p.length > 0)
+          .join('\n\n'),
+        stability: null,
+        style: null,
+        similarity: null,
+        speed: null,
+      };
   }
 }

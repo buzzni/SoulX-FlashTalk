@@ -128,7 +128,11 @@ export function persistComposition(comp: Composition): Composition {
   return { ...comp, generation };
 }
 
-function persistVoice(voice: Voice): Voice {
+/** Drop transient generation states (generating/failed → idle), pending
+ * clone samples (the staged File can't survive reload), and LocalAsset
+ * audio uploads. Exported for per-slice persisters in wizardStore —
+ * Phase 2c.4. */
+export function persistVoice(voice: Voice): Voice {
   if (voice.source === 'upload') {
     return {
       source: 'upload',

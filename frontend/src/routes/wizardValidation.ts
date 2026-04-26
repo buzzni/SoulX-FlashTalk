@@ -14,6 +14,9 @@
  * redirect deep-links that would otherwise show empty/broken UIs.
  */
 
+import { isVoiceReady } from '../wizard/schema';
+import type { Voice } from '../wizard/schema';
+
 export interface WizardValidity {
   1: boolean;
   2: boolean;
@@ -34,11 +37,14 @@ export function computeValidity(state: any): WizardValidity {
     v[1] &&
     state?.composition?.generation?.state === 'ready' &&
     state?.composition?.generation?.selected != null;
-  // Phase 2c: resolution is a ResolutionKey string now (was object).
+  // Phase 2c.4: voice is schema-typed. `isVoiceReady` covers all three
+  // source modes — tts/clone need a generated audio + voice_id; upload
+  // needs a server-side audio asset. Resolution stays a key string.
+  const voice = state?.voice as Voice | undefined;
   v[3] =
     v[2] &&
-    !!(state?.voice?.generated || state?.voice?.uploadedAudio) &&
-    !!state?.voice?.script &&
+    !!voice &&
+    isVoiceReady(voice) &&
     typeof state?.resolution === 'string';
   return v;
 }

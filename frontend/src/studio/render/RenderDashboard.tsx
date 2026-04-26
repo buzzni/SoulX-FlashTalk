@@ -89,8 +89,22 @@ export default function RenderDashboard({
 
     (async () => {
       try {
-        const audio_path =
-          state.voice?.generatedAudioPath || state.voice?.uploadedAudio?.path || '';
+        // Phase 2c.4: voice is schema-typed. Audio path lives on
+        // `voice.generation.audio.path` (tts/clone) or
+        // `voice.audio.path` if it's a server-side ServerAsset
+        // (upload). LocalAsset upload-mode = still uploading,
+        // surface the same "missing audio" error.
+        const audio_path = (() => {
+          const v = state.voice;
+          if (!v || typeof v !== 'object') return '';
+          if (v.source === 'upload') {
+            const a = v.audio;
+            return a && typeof a === 'object' && 'path' in a ? (a.path as string) : '';
+          }
+          const gen = v.generation;
+          if (gen && gen.state === 'ready' && gen.audio?.path) return gen.audio.path as string;
+          return '';
+        })();
         if (!audio_path) {
           throw new Error('음성 파일 경로를 찾을 수 없어요 (3단계에서 다시 만들기)');
         }

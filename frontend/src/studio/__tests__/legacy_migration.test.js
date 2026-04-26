@@ -71,7 +71,7 @@ describe('wizardStore — legacy showhost_state migration', () => {
     const raw = localStorage.getItem(storageKey('wizard'));
     expect(raw).toBeTruthy();
     const envelope = JSON.parse(raw);
-    expect(envelope.version).toBe(6);
+    expect(envelope.version).toBe(7);
     expect(envelope.state.host.input.kind).toBe('text');
     expect(envelope.state.host.input.prompt).toBe('소개 영상');
     expect(envelope.state.host.generation.state).toBe('ready');
@@ -79,6 +79,9 @@ describe('wizardStore — legacy showhost_state migration', () => {
     expect(envelope.state.host.generation.variants).toHaveLength(1);
     expect(envelope.state.background).toEqual({ kind: 'preset', presetId: 'cafe' });
     expect(envelope.state.products).toHaveLength(1);
+    // Phase 2c.4: voice is schema-typed. Legacy `voice.voiceId` lives
+    // on the tts-source variant directly; tagged union narrows by source.
+    expect(envelope.state.voice.source).toBe('tts');
     expect(envelope.state.voice.voiceId).toBe('v_abc');
     expect(envelope.state.imageQuality).toBe('1K');
 

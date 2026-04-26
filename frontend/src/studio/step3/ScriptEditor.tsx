@@ -16,6 +16,7 @@
 import { Fragment } from 'react';
 import Icon from '../Icon.jsx';
 import { Field } from '@/components/field';
+import type { Script } from '@/wizard/schema';
 const BREATH_TAG = ' [breath] ';
 export const SCRIPT_LIMIT = 5000;
 
@@ -30,11 +31,13 @@ export function buildScript(paragraphs: string[]): string {
 }
 
 export interface ScriptEditorProps {
-  paragraphs: string[];
-  onParagraphsChange: (next: string[]) => void;
+  script: Script;
+  onScriptChange: (script: Script) => void;
 }
 
-export function ScriptEditor({ paragraphs, onParagraphsChange }: ScriptEditorProps) {
+export function ScriptEditor({ script, onScriptChange }: ScriptEditorProps) {
+  const paragraphs = script.paragraphs.length > 0 ? script.paragraphs : [''];
+  const onParagraphsChange = (next: string[]) => onScriptChange({ paragraphs: next });
   const combined = buildScript(paragraphs);
   const totalLen = combined.length;
   const remaining = SCRIPT_LIMIT - totalLen;

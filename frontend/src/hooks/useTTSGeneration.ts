@@ -1,20 +1,26 @@
 /**
- * useTTSGeneration — ElevenLabs TTS generation for the current
- * wizard voice slice.
+ * useTTSGeneration — ElevenLabs TTS generation driving the schema
+ * voice.generation state machine.
  *
- * Reads `voice` from `wizardStore.getState()` at call time (no
- * subscription — keeps the callback identity stable across
- * keystrokes), calls `api.voice.generateVoice`, writes the
- * resulting audio path back to `wizardStore.voice.uploadedAudio`
- * so Step 3's "내 오디오" row picks it up without a follow-up
- * upload step.
+ * Phase 2c.4: voice is schema-typed. The hook reads `voice` from the
+ * store at call time (no subscription — keeps the callback identity
+ * stable across keystrokes), maps to the API request via
+ * `toVoiceGenerateRequest`, then transitions
+ *
+ *   idle → generating → (ready | failed)
+ *
+ * on the store's voice.generation field. Upload-mode voices have no
+ * generation step — calling generate() in upload mode is a no-op that
+ * surfaces an error.
  */
 
 import { useCallback, useState } from 'react';
-import { generateVoice, type GenerateVoiceInput } from '../api/voice';
+import { generateVoice } from '../api/voice';
 import { humanizeError } from '../api/http';
 import { useWizardStore } from '../stores/wizardStore';
 import { useAbortableRequest } from './useAbortableRequest';
+import { toVoiceGenerateRequest } from '../wizard/api-mappers';
+import type { ServerAsset } from '../wizard/schema';
 
 export interface TTSResult {
   audio_path?: string;
@@ -42,22 +48,47 @@ export function useTTSGeneration(): UseTTSGenerationReturn {
 
   const generate = useCallback(async (): Promise<TTSResult | null> => {
     const { signal, isCurrent } = run();
-    const voice = useWizardStore.getState().voice as GenerateVoiceInput['voice'];
+    const voice = useWizardStore.getState().voice;
+
+    if (voice.source === 'upload') {
+      // Upload mode bypasses TTS entirely — caller shouldn't reach
+      // this. Surface a clean error rather than silently no-op.
+      const msg = '내 녹음 모드에서는 음성을 생성할 수 없어요';
+      setError(msg);
+      return null;
+    }
 
     setIsLoading(true);
     setError(null);
+
+    // Transition the store's voice.generation to `generating`. Phase
+    // 2c.4: this is the persisted side-effect at stream start;
+    // selection of voiceId / sample / advanced settings are user
+    // edits committed earlier.
+    useWizardStore.getState().setVoice((prev) => {
+      if (prev.source === 'upload') return prev; // narrowed-out
+      return { ...prev, generation: { state: 'generating' } };
+    });
+
     try {
-      const res = (await generateVoice({ voice }, { signal })) as TTSResult;
+      const req = toVoiceGenerateRequest(voice);
+      const res = (await generateVoice(req, { signal })) as TTSResult;
       if (!isCurrent()) return null;
       setResult(res);
       setIsLoading(false);
 
-      // Stash the audio_path on the voice slice so downstream steps
-      // (video dispatch) can read it without passing the result
-      // object around.
-      if (res?.audio_path) {
-        useWizardStore.getState().setVoice({
-          uploadedAudio: { path: res.audio_path, name: 'tts.wav' },
+      // Commit the result to voice.generation. Audio path is the
+      // canonical persisted identifier; URL is best-effort (the
+      // backend may or may not return one).
+      const audio: ServerAsset = {
+        path: res.audio_path ?? '',
+        url: typeof res.url === 'string' ? res.url : undefined,
+        name: 'tts.wav',
+      };
+      if (audio.path) {
+        useWizardStore.getState().setVoice((prev) => {
+          if (prev.source === 'upload') return prev;
+          return { ...prev, generation: { state: 'ready', audio } };
         });
       }
       return res;
@@ -66,10 +97,20 @@ export function useTTSGeneration(): UseTTSGenerationReturn {
       const name = (err as { name?: string } | null)?.name;
       if (name === 'AbortError') {
         setIsLoading(false);
+        // Abort returns generation to idle so the next attempt starts clean.
+        useWizardStore.getState().setVoice((prev) => {
+          if (prev.source === 'upload') return prev;
+          return { ...prev, generation: { state: 'idle' } };
+        });
         return null;
       }
       setIsLoading(false);
-      setError(humanizeError(err));
+      const msg = humanizeError(err);
+      setError(msg);
+      useWizardStore.getState().setVoice((prev) => {
+        if (prev.source === 'upload') return prev;
+        return { ...prev, generation: { state: 'failed', error: msg } };
+      });
       return null;
     }
   }, [run]);

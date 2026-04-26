@@ -17,7 +17,7 @@ import {
   isProductReady,
   isVoiceReady,
 } from '../schema';
-import { migrateLegacy, toPersistable } from '../normalizers';
+import { migrateLegacy, persistVoice, toPersistable } from '../normalizers';
 
 describe('migrateLegacy', () => {
   it('returns INITIAL_WIZARD_STATE for null/undefined/garbage', () => {
@@ -201,6 +201,71 @@ describe('toPersistable', () => {
       },
     });
     expect(out.host.generation.state).toBe('idle');
+  });
+
+  it('drops generating/failed voice generation states to idle (tts)', () => {
+    const out = persistVoice({
+      source: 'tts',
+      voiceId: 'v',
+      voiceName: 'V',
+      advanced: { speed: 1, stability: 0.5, style: 0.3, similarity: 0.75 },
+      script: { paragraphs: ['hi'] },
+      generation: { state: 'generating' },
+    });
+    if (out.source !== 'tts') throw new Error('narrowing');
+    expect(out.generation.state).toBe('idle');
+  });
+
+  it('keeps ready voice generation across reloads (tts)', () => {
+    const out = persistVoice({
+      source: 'tts',
+      voiceId: 'v',
+      voiceName: 'V',
+      advanced: { speed: 1, stability: 0.5, style: 0.3, similarity: 0.75 },
+      script: { paragraphs: ['hi'] },
+      generation: { state: 'ready', audio: { path: 'a/b.wav' } },
+    });
+    if (out.source !== 'tts') throw new Error('narrowing');
+    expect(out.generation.state).toBe('ready');
+    if (out.generation.state === 'ready') {
+      expect(out.generation.audio.path).toBe('a/b.wav');
+    }
+  });
+
+  it('drops pending clone samples to empty (the staged File cannot reload)', () => {
+    const file = new File(['fake'], 'sample.wav');
+    const out = persistVoice({
+      source: 'clone',
+      sample: { state: 'pending', asset: { file, previewUrl: 'blob:x', name: 'sample.wav' } },
+      advanced: { speed: 1, stability: 0.5, style: 0.3, similarity: 0.75 },
+      script: { paragraphs: ['hi'] },
+      generation: { state: 'idle' },
+    });
+    if (out.source !== 'clone') throw new Error('narrowing');
+    expect(out.sample.state).toBe('empty');
+  });
+
+  it('keeps cloned clone samples across reloads', () => {
+    const out = persistVoice({
+      source: 'clone',
+      sample: { state: 'cloned', voiceId: 'cv_xyz', name: '내 목소리' },
+      advanced: { speed: 1, stability: 0.5, style: 0.3, similarity: 0.75 },
+      script: { paragraphs: ['hi'] },
+      generation: { state: 'idle' },
+    });
+    if (out.source !== 'clone') throw new Error('narrowing');
+    expect(out.sample.state).toBe('cloned');
+  });
+
+  it('drops LocalAsset audio uploads (only ServerAsset survives)', () => {
+    const file = new File(['fake'], 'audio.mp3');
+    const out = persistVoice({
+      source: 'upload',
+      audio: { file, previewUrl: 'blob:y', name: 'audio.mp3' },
+      script: { paragraphs: ['caption'] },
+    });
+    if (out.source !== 'upload') throw new Error('narrowing');
+    expect(out.audio).toBeNull();
   });
 
   it('keeps ready generation state', () => {
