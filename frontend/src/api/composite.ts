@@ -17,6 +17,10 @@ export interface CompositeInput {
     preset?: { id?: string; label?: string } | string | null;
     prompt?: string;
     uploadPath?: string | null;
+    /** External image URL (url-mode). Wire-level handling lives in
+     * buildCompositeBody — currently only preset/upload/prompt are
+     * encoded; url-mode awaits backend support. */
+    url?: string;
   };
   composition?: {
     direction?: string;
