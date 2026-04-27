@@ -61,12 +61,15 @@ export default function QueueStatus() {
     navigate(`/render/${encodeURIComponent(taskId)}`);
   };
 
-  const handleOpenRecent = (taskId: string, status: string) => {
+  const handleOpenRecent = (taskId: string, _status: string) => {
     if (!taskId) return;
     setOpen(false);
-    if (status === 'completed') {
-      navigate(`/result/${encodeURIComponent(taskId)}`);
-    }
+    // All recent statuses (completed / error / cancelled) route to
+    // /result/:id. ResultPage renders success copy for completed and a
+    // failure summary + 재시도 button for the rest. Previously errored
+    // rows were dead-ends — users had to dig the retry control out of
+    // the popover.
+    navigate(`/result/${encodeURIComponent(taskId)}`);
   };
 
   return (

@@ -392,7 +392,9 @@ async def _run_torchrun_inference(
     ]
 
     logger.info(f"Task {task_id}: spawning torchrun (GPUs={gpu_set}, nproc={nproc})")
-    update_task(task_id, "starting_subprocess", 0.10, _phase_message("starting_subprocess", {}))
+    # Keep progress monotonically increasing across stages — child's
+    # first emit is loading_model at 0.10, so cap this stage below it.
+    update_task(task_id, "starting_subprocess", 0.05, _phase_message("starting_subprocess", {}))
 
     proc = await asyncio.create_subprocess_exec(
         *cmd,

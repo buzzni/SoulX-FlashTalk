@@ -17,9 +17,20 @@ export interface StageEntry {
 }
 
 export const STAGES: StageEntry[] = [
-  { key: 'queued', label: '대기열 등록 중', backendKeys: ['queued'] },
+  // `starting_subprocess` is the first stage emitted by the new
+  // FLASHTALK_USE_TORCHRUN_SUBPROCESS path (app.py _run_torchrun_inference)
+  // — same UX bucket as queue-pickup. Without it the bar would freeze on
+  // the queued copy while torchrun spawns its 2 child workers.
+  { key: 'queued', label: '대기열 등록 중', backendKeys: ['queued', 'starting_subprocess'] },
   { key: 'composite', label: '제품·배경 합치는 중', backendKeys: ['compositing_bg'] },
-  { key: 'voice', label: '목소리와 입 모양 맞추는 중', backendKeys: ['loading', 'preparing'] },
+  // `loading_model` (worker pulls 14B weights to GPU) and `compiling`
+  // (torch.compile warmup, 1-3 min on first run) both belong here in the
+  // user's mental model — model is loaded so it can speak in sync.
+  {
+    key: 'voice',
+    label: '목소리와 입 모양 맞추는 중',
+    backendKeys: ['loading', 'preparing', 'loading_model', 'compiling'],
+  },
   { key: 'render', label: '쇼호스트 움직임 만드는 중', backendKeys: ['generating'] },
   { key: 'encode', label: '영상 파일로 만드는 중', backendKeys: ['saving', 'compositing'] },
 ];

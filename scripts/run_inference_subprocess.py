@@ -117,7 +117,9 @@ def main() -> int:
     world_size = int(os.environ.get("WORLD_SIZE", "1"))
 
     try:
-        emit({"type": "progress", "stage": "loading_model", "pct": 0.05})
+        # parent already emitted starting_subprocess at 0.05 — start the
+        # child timeline above that so the bar never goes backward.
+        emit({"type": "progress", "stage": "loading_model", "pct": 0.10})
 
         # cpu_offload=False under USP (handled inside FlashTalkPipeline:78);
         # pass False explicitly so torch.compile path activates too.
@@ -128,7 +130,7 @@ def main() -> int:
             cpu_offload=False,
         )
 
-        emit({"type": "progress", "stage": "compiling", "pct": 0.15})
+        emit({"type": "progress", "stage": "compiling", "pct": 0.20})
 
         pipeline.prepare_params(
             input_prompt=args.input_prompt,

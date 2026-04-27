@@ -15,6 +15,8 @@ import { MemoryRouter, useLocation } from 'react-router-dom';
 vi.mock('../../api/queue', () => ({
   fetchQueue: vi.fn(),
   cancelQueuedTask: vi.fn(),
+  retryFailedTask: vi.fn(),
+  isTaskLive: vi.fn(),
 }));
 
 import { fetchQueue, cancelQueuedTask } from '../../api/queue';
@@ -116,14 +118,16 @@ describe('QueueStatus click-to-navigate', () => {
     });
     await renderAndExpand();
 
-    const finishedRow = screen.getByText('finished clip').closest('button');
+    // Recent rows are now `<div role="button">` (not <button>) so the
+    // retry button can nest inside without invalid HTML.
+    const finishedRow = screen.getByText('finished clip').closest('[role="button"]');
     expect(finishedRow).toBeTruthy();
     expect(finishedRow.getAttribute('title')).toMatch(/결과 영상/);
     fireEvent.click(finishedRow);
     expect(screen.getByTestId('landed').textContent).toBe('LANDED:/result/done-1');
   });
 
-  it('errored recent items are NOT clickable (no result to show)', async () => {
+  it('errored recent items navigate to /result/:taskId so users can read the failure', async () => {
     fetchQueue.mockReset();
     fetchQueue.mockResolvedValue({
       running: [],
@@ -136,7 +140,31 @@ describe('QueueStatus click-to-navigate', () => {
     });
     await renderAndExpand();
 
-    const label = screen.getByText('failed clip');
-    expect(label.closest('button')).toBeNull();
+    // Errored rows used to be a static <div> with no click target. Now
+    // they route to /result/:id (which renders the failure copy + the
+    // retry button on that page) so users have a path forward without
+    // having to dig for the retry control.
+    const erroredRow = screen.getByText('failed clip').closest('[role="button"]');
+    expect(erroredRow).toBeTruthy();
+    expect(erroredRow.getAttribute('title')).toMatch(/실패/);
+    fireEvent.click(erroredRow);
+    expect(screen.getByTestId('landed').textContent).toBe('LANDED:/result/err-1');
+  });
+
+  it('errored recent items still expose an inline retry button', async () => {
+    fetchQueue.mockReset();
+    fetchQueue.mockResolvedValue({
+      running: [],
+      pending: [],
+      recent: [
+        { task_id: 'err-2', type: 'generate', label: 'oom run', status: 'error', completed_at: '2026-04-23T11:02:00' },
+      ],
+      total_running: 0,
+      total_pending: 0,
+    });
+    await renderAndExpand();
+    const retry = screen.getByLabelText('재시도');
+    expect(retry).toBeTruthy();
+    expect(retry.tagName.toLowerCase()).toBe('button');
   });
 });
