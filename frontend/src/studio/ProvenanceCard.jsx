@@ -105,7 +105,7 @@ export default function ProvenanceCard({ result, fallbackMeta = null }) {
   const qualityLabel = QUALITY_LABELS[imageQuality] || '—';
 
   return (
-    <div className="surface-base p-5 mt-4">
+    <div className="surface-base p-5">
       <div className="text-[11px] uppercase tracking-widest font-semibold text-muted-foreground">이렇게 만들었어요</div>
 
       {/* Thumbnails — host (Step 1) + composite (Step 2). What actually
