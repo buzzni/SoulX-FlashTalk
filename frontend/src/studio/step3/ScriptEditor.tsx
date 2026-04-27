@@ -11,12 +11,20 @@
  * Character counting subtracts the BREATH_TAG overhead (9 chars
  * each × N-1 paragraphs) so users can type up to the real 5000-
  * char API limit rather than the padded one.
+ *
+ * Reads/writes through `useFormContext` — paragraphs live at
+ * `voice.script.paragraphs`. Per-paragraph edits use setValue on the
+ * indexed path; add/remove rewrite the whole array via setValue.
+ * useFieldArray would require objects (RHF can't bind primitive
+ * arrays through it), so direct setValue keeps the schema as-is.
  */
 
 import { Fragment } from 'react';
+import { useFormContext, useWatch } from 'react-hook-form';
 import Icon from '../Icon.jsx';
 import { Field } from '@/components/field';
-import type { Script } from '@/wizard/schema';
+import type { Step3FormValues } from '@/wizard/form-mappers';
+
 const BREATH_TAG = ' [breath] ';
 export const SCRIPT_LIMIT = 5000;
 
@@ -30,42 +38,91 @@ export function buildScript(paragraphs: string[]): string {
     .join(BREATH_TAG);
 }
 
-export interface ScriptEditorProps {
-  script: Script;
-  onScriptChange: (script: Script) => void;
+/** Clamp a paragraphs array so buildScript(...).length <= SCRIPT_LIMIT.
+ * Truncates from the END of the over-budget paragraph so earlier
+ * content stays intact. Used when carrying script across mode swaps
+ * (upload subtitle → TTS) and on hydration from stale localStorage
+ * blobs that predate the cap. Runs on every AudioUploader keystroke,
+ * so the loop is O(N) — track `hasNonEmpty` and `used` instead of
+ * re-scanning `out` per iteration. */
+export function clampParagraphs(paragraphs: string[]): string[] {
+  const out: string[] = [];
+  let used = 0;
+  let hasNonEmpty = false;
+  for (let i = 0; i < paragraphs.length; i++) {
+    const p = paragraphs[i] ?? '';
+    const trimmed = p.trim();
+    const sepCost = trimmed.length > 0 && hasNonEmpty ? BREATH_TAG.length : 0;
+    const available = SCRIPT_LIMIT - used - sepCost;
+    if (available <= 0) {
+      out.push('');
+      continue;
+    }
+    if (p.length > available) {
+      const sliced = p.slice(0, available);
+      out.push(sliced);
+      const slicedTrimmedLen = sliced.trim().length;
+      used += sepCost + slicedTrimmedLen;
+      if (slicedTrimmedLen > 0) hasNonEmpty = true;
+    } else {
+      out.push(p);
+      used += sepCost + trimmed.length;
+      if (trimmed.length > 0) hasNonEmpty = true;
+    }
+  }
+  return out;
 }
 
-export function ScriptEditor({ script, onScriptChange }: ScriptEditorProps) {
-  const paragraphs = script.paragraphs.length > 0 ? script.paragraphs : [''];
-  const onParagraphsChange = (next: string[]) => onScriptChange({ paragraphs: next });
+export interface ScriptEditorProps {
+  disabled?: boolean;
+}
+
+export function ScriptEditor({ disabled = false }: ScriptEditorProps) {
+  const { control, setValue, getValues } = useFormContext<Step3FormValues>();
+  const watched = useWatch({
+    control,
+    name: 'voice.script.paragraphs' as const,
+  }) as string[] | undefined;
+  const paragraphs =
+    watched && watched.length > 0 ? watched : [''];
   const combined = buildScript(paragraphs);
   const totalLen = combined.length;
   const remaining = SCRIPT_LIMIT - totalLen;
   const canAddParagraph = remaining >= BREATH_TAG.length + 1;
 
+  const writeAll = (next: string[]) =>
+    setValue(
+      'voice.script' as const,
+      { paragraphs: next },
+      { shouldDirty: true, shouldValidate: true },
+    );
+
   const updateParagraph = (idx: number, value: string) => {
     // Compute what the new combined length would be; if exceeds, clip the input.
-    const next = paragraphs.slice();
-    const others = next
+    const all = (getValues('voice.script.paragraphs' as const) as string[]) ?? [''];
+    const others = all
       .filter((_, i) => i !== idx)
       .map((p) => (p || '').trim())
       .filter((p) => p.length > 0);
     const baseLen = others.join(BREATH_TAG).length + (others.length > 0 ? BREATH_TAG.length : 0);
     const available = SCRIPT_LIMIT - baseLen;
     const trimmedValue = value.length > available ? value.slice(0, Math.max(0, available)) : value;
+    const next = all.slice();
     next[idx] = trimmedValue;
-    onParagraphsChange(next);
+    writeAll(next);
   };
 
   const addParagraph = () => {
     if (!canAddParagraph) return;
-    onParagraphsChange([...paragraphs, '']);
+    const all = (getValues('voice.script.paragraphs' as const) as string[]) ?? [''];
+    writeAll([...all, '']);
   };
 
   const removeParagraph = (idx: number) => {
-    if (idx === 0) return; // first paragraph is required
-    const next = paragraphs.filter((_, i) => i !== idx);
-    onParagraphsChange(next.length > 0 ? next : ['']);
+    if (idx === 0) return;
+    const all = (getValues('voice.script.paragraphs' as const) as string[]) ?? [''];
+    const next = all.filter((_, i) => i !== idx);
+    writeAll(next.length > 0 ? next : ['']);
   };
 
   return (
@@ -115,8 +172,9 @@ export function ScriptEditor({ script, onScriptChange }: ScriptEditorProps) {
                   {idx !== 0 && (
                     <button
                       type="button"
-                      className="paragraph-delete-btn inline-flex items-center gap-1 h-7 px-2.5 rounded-md text-[12px] font-medium text-muted-foreground hover:bg-secondary hover:text-foreground transition-colors"
+                      className="paragraph-delete-btn inline-flex items-center gap-1 h-7 px-2.5 rounded-md text-[12px] font-medium text-muted-foreground hover:bg-secondary hover:text-foreground transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                       onClick={() => removeParagraph(idx)}
+                      disabled={disabled}
                     >
                       <Icon name="trash" size={11} />
                       삭제
@@ -134,6 +192,7 @@ export function ScriptEditor({ script, onScriptChange }: ScriptEditorProps) {
                 }
                 value={p}
                 onChange={(e) => updateParagraph(idx, e.target.value)}
+                disabled={disabled}
               />
             </div>
           </Fragment>
@@ -144,7 +203,7 @@ export function ScriptEditor({ script, onScriptChange }: ScriptEditorProps) {
           type="button"
           className="add-paragraph-btn inline-flex items-center gap-1.5 h-8 px-3 rounded-md text-[12px] font-medium border border-input bg-card text-foreground hover:bg-secondary disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
           onClick={addParagraph}
-          disabled={!canAddParagraph}
+          disabled={disabled || !canAddParagraph}
           title={canAddParagraph ? '문단 추가' : '5000자 한도에 도달했어요'}
         >
           <Icon name="plus" size={12} />

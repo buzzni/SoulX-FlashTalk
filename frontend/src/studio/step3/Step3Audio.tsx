@@ -11,13 +11,26 @@
  *   'tts'    → AI on, stock voice
  *   'clone'  → AI on, cloned voice
  *   'upload' → AI off, raw audio bypass
+ *
+ * Owns a react-hook-form instance whose values mirror the voice slice
+ * MINUS `generation` (the SSE/TTS state machine). Subscribing to
+ * narrow voice fields (source / script / advanced / voiceId / voiceName /
+ * sample / audio — NOT the whole `voice` slice) keeps SSE/TTS
+ * lifecycle mutations from triggering a form.reset that would wipe
+ * in-progress edits. Mode swaps go through the form via setValue;
+ * useDebouncedFormSync flushes back to the store every 300ms idle.
+ *
+ * Resolution and playlistId stay on the legacy `update` prop — they're
+ * top-level wizard state, not voice-slice fields.
  */
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Sparkles, Mic, Copy, MicVocal, Film, Volume2, FileText, Monitor } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
-import Icon from '../Icon.jsx';
+import { FormProvider, useForm, useWatch } from 'react-hook-form';
+import { zodResolver } from '@hookform/resolvers/zod';
 import { WizardBadge as Badge } from '@/components/wizard-badge';
+import { WizardErrorBanner } from '@/components/wizard-error-banner';
 import { WizardCard as Card } from '@/components/wizard-card';
 import { OptionCard } from '@/components/option-card';
 import { humanizeError } from '../../api/http';
@@ -29,7 +42,6 @@ import { useUploadReferenceImage } from '../../hooks/useUploadReferenceImage';
 import { useWizardStore } from '../../stores/wizardStore';
 import { isLocalAsset, isServerAsset } from '@/wizard/normalizers';
 import {
-  INITIAL_VOICE,
   RESOLUTION_META,
   isHostReady,
   isCompositionReady,
@@ -37,17 +49,25 @@ import {
 import type {
   Composition,
   Host,
+  LocalAsset,
   ResolutionKey,
-  Script,
+  ServerAsset,
   Voice,
   VoiceAdvanced,
-  VoiceCloneSample,
 } from '@/wizard/schema';
+import {
+  Step3FormValuesSchema,
+  formValuesToVoiceSlice,
+  type Step3FormValues,
+  type VoiceFormValues,
+} from '@/wizard/form-mappers';
+import { useFormZustandSync } from '@/hooks/wizard/useFormZustandSync';
+import { useDebouncedFormSync } from '@/hooks/wizard/useDebouncedFormSync';
 import { AudioPlayer } from '../shared/AudioPlayer';
 import { VoicePicker } from './VoicePicker';
 import { VoiceCloner } from './VoiceCloner';
 import { AudioUploader } from './AudioUploader';
-import { ScriptEditor, buildScript } from './ScriptEditor';
+import { ScriptEditor, buildScript, SCRIPT_LIMIT, clampParagraphs } from './ScriptEditor';
 import { VoiceAdvancedSettings } from './VoiceAdvancedSettings';
 import { ResolutionPicker } from './ResolutionPicker';
 import { PlaylistPicker } from './PlaylistPicker';
@@ -71,64 +91,83 @@ export interface Step3AudioProps {
   update: UpdateFn;
 }
 
-// ────────────────────────────────────────────────────────────────────
-// Source-mode transitions — materialize a fresh Voice in the target
-// shape while preserving carry-over fields (script, advanced) where
-// the union members agree on them.
-// ────────────────────────────────────────────────────────────────────
+// Source-mode transitions on form values. Script + advanced carry
+// over where the union members agree on them; switching from upload
+// to AI defaults the sliders to schema initial values (the upload
+// variant has no advanced field to carry from).
 
-// Carry-over helpers — script lives on every Voice variant; advanced
-// only on tts/clone. Switching from upload back to AI defaults the
-// sliders to schema initials rather than carrying over (there's
-// nothing to carry from).
-const FALLBACK_ADVANCED: VoiceAdvanced =
-  INITIAL_VOICE.source === 'upload'
+function carryAdvanced(prev: VoiceFormValues): VoiceAdvanced {
+  return prev.source === 'upload'
     ? { speed: 1, stability: 0.5, style: 0.3, similarity: 0.75 }
-    : INITIAL_VOICE.advanced;
-
-function commonScript(prev: Voice): Script {
-  return prev.script;
-}
-function commonAdvanced(prev: Voice): VoiceAdvanced {
-  return prev.source === 'upload' ? FALLBACK_ADVANCED : prev.advanced;
+    : prev.advanced;
 }
 
-function toTTS(prev: Voice): Voice {
+// Carrying script across upload → TTS clamps to SCRIPT_LIMIT — the
+// upload-mode subtitle textarea has no per-paragraph cap, so a long
+// paste must not silently ride into the TTS request.
+function carryScript(prev: VoiceFormValues): { paragraphs: string[] } {
+  return prev.source === 'upload'
+    ? { paragraphs: clampParagraphs(prev.script.paragraphs) }
+    : prev.script;
+}
+
+function toTTSForm(prev: VoiceFormValues): VoiceFormValues {
   if (prev.source === 'tts') return prev;
   return {
     source: 'tts',
     voiceId: null,
     voiceName: null,
-    advanced: commonAdvanced(prev),
-    script: commonScript(prev),
-    generation: { state: 'idle' },
+    advanced: carryAdvanced(prev),
+    script: carryScript(prev),
   };
 }
 
-function toClone(prev: Voice): Voice {
+function toCloneForm(prev: VoiceFormValues): VoiceFormValues {
   if (prev.source === 'clone') return prev;
   return {
     source: 'clone',
     sample: { state: 'empty' },
-    advanced: commonAdvanced(prev),
-    script: commonScript(prev),
-    generation: { state: 'idle' },
+    advanced: carryAdvanced(prev),
+    script: carryScript(prev),
   };
 }
 
-function toUpload(prev: Voice): Voice {
+function toUploadForm(prev: VoiceFormValues): VoiceFormValues {
   if (prev.source === 'upload') return prev;
-  return {
-    source: 'upload',
-    audio: null,
-    script: commonScript(prev),
-  };
+  return { source: 'upload', audio: null, script: prev.script };
 }
+
+const identity = (s: Step3FormValues): Step3FormValues => s;
 
 export default function Step3Audio({ state, update }: Step3AudioProps) {
-  const voice: Voice = state.voice;
   const resolution: ResolutionKey = state.resolution;
   const setVoice = useWizardStore((s) => s.setVoice);
+
+  // Each useWizardStore call subscribes to one narrow field — see
+  // file header for the streaming-event regression this prevents.
+  const source = useWizardStore((s) => s.voice.source);
+  const script = useWizardStore((s) => s.voice.script);
+  const advanced = useWizardStore((s) =>
+    s.voice.source !== 'upload' ? s.voice.advanced : null,
+  );
+  const voiceId = useWizardStore((s) =>
+    s.voice.source === 'tts' ? s.voice.voiceId : null,
+  );
+  const voiceName = useWizardStore((s) =>
+    s.voice.source === 'tts' ? s.voice.voiceName : null,
+  );
+  const sample = useWizardStore((s) =>
+    s.voice.source === 'clone' ? s.voice.sample : null,
+  );
+  const audioFromStore = useWizardStore((s) =>
+    s.voice.source === 'upload' ? s.voice.audio : null,
+  );
+  // voice.generation is internal to the TTS pipeline; subscribed
+  // separately so the audio-player render pulls fresh state without
+  // blowing through the form reset path.
+  const voiceGeneration = useWizardStore((s) =>
+    s.voice.source !== 'upload' ? s.voice.generation : null,
+  );
 
   const voiceList = useVoiceList();
   const tts = useTTSGeneration();
@@ -136,298 +175,370 @@ export default function Step3Audio({ state, update }: Step3AudioProps) {
   const audioUpload = useUploadReferenceImage(uploadAudio);
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [uploadErrorMsg, setUploadErrorMsg] = useState<string | null>(null);
 
-  const isAi = voice.source !== 'upload';
-  const aiSubMode: 'tts' | 'clone' = voice.source === 'clone' ? 'clone' : 'tts';
+  // Form-shaped projection. Memoize on the narrow field refs so
+  // generation mutations don't bubble through.
+  const formValues = useMemo<Step3FormValues>(() => {
+    if (source === 'upload') {
+      return { voice: { source: 'upload', audio: audioFromStore, script } };
+    }
+    if (source === 'clone') {
+      return {
+        voice: {
+          source: 'clone',
+          sample: sample!,
+          advanced: advanced!,
+          script,
+        },
+      };
+    }
+    return {
+      voice: {
+        source: 'tts',
+        voiceId,
+        voiceName,
+        advanced: advanced!,
+        script,
+      },
+    };
+  }, [source, script, advanced, voiceId, voiceName, sample, audioFromStore]);
 
-  // ── Mode switches ────────────────────────────────────────────────
+  const form = useForm<Step3FormValues>({
+    resolver: zodResolver(Step3FormValuesSchema),
+    defaultValues: formValues,
+    mode: 'onBlur',
+  });
+
+  useFormZustandSync(form, formValues, identity);
+
+  const onChange = useCallback(
+    (values: Step3FormValues) => {
+      setVoice((prev) => formValuesToVoiceSlice(values.voice, prev));
+    },
+    [setVoice],
+  );
+  const formSync = useDebouncedFormSync(form, onChange, 300);
+
+  // Narrow per-field watches — broad `useWatch({name: 'voice'})` would
+  // re-render Step3Audio on every keystroke in any nested field
+  // (script paragraphs, advanced sliders, sample) AND emit a fresh
+  // ref each time, which would re-trigger the eager-upload effect
+  // even when audio didn't change.
+  const watchedSource = useWatch({
+    control: form.control,
+    name: 'voice.source',
+    defaultValue: formValues.voice.source,
+  }) as VoiceFormValues['source'];
+  const watchedParagraphs = useWatch({
+    control: form.control,
+    name: 'voice.script.paragraphs',
+    defaultValue: formValues.voice.script.paragraphs,
+  }) as string[];
+  const watchedAudio = useWatch({
+    control: form.control,
+    name: 'voice.audio' as const,
+  }) as ServerAsset | LocalAsset | null | undefined;
+  const watchedVoiceId = useWatch({
+    control: form.control,
+    name: 'voice.voiceId' as const,
+  }) as string | null | undefined;
+  const watchedSampleState = useWatch({
+    control: form.control,
+    name: 'voice.sample.state' as const,
+  }) as 'empty' | 'pending' | 'cloned' | undefined;
+
+  const isAi = watchedSource !== 'upload';
+  const aiSubMode: 'tts' | 'clone' = watchedSource === 'clone' ? 'clone' : 'tts';
+
+  // Mode swaps abort in-flight TTS/clone — otherwise the result
+  // lands on the new variant and shows stale audio under the wrong source.
+  const abortInflight = () => {
+    tts.abort();
+    cloner.abort();
+  };
+
   const switchToAi = () => {
-    if (voice.source === 'upload') setVoice(toTTS);
+    const cur = form.getValues('voice');
+    if (cur.source === 'upload') {
+      abortInflight();
+      form.setValue('voice', toTTSForm(cur), {
+        shouldDirty: true,
+        shouldValidate: true,
+      });
+    }
   };
   const switchToRawAudio = () => {
-    if (voice.source !== 'upload') setVoice(toUpload);
+    const cur = form.getValues('voice');
+    if (cur.source !== 'upload') {
+      abortInflight();
+      form.setValue('voice', toUploadForm(cur), {
+        shouldDirty: true,
+        shouldValidate: true,
+      });
+    }
   };
   const switchAiSubMode = (next: 'tts' | 'clone') => {
-    if (voice.source === next) return;
-    setVoice(next === 'tts' ? toTTS : toClone);
+    const cur = form.getValues('voice');
+    if (cur.source === next) return;
+    abortInflight();
+    form.setValue(
+      'voice',
+      next === 'tts' ? toTTSForm(cur) : toCloneForm(cur),
+      { shouldDirty: true, shouldValidate: true },
+    );
   };
 
-  // ── Eager upload — when upload-mode voice has a LocalAsset audio
-  //    pending, kick off /api/upload/audio and replace it with the
-  //    returned ServerAsset. Skip if already a ServerAsset or null.
-  //    The hook's epoch contract makes stale results from a superseded
-  //    pick land harmlessly. ────────────────────────────────────────
+  // Eager upload — when upload-mode voice has a LocalAsset audio
+  // pending, kick off /api/upload/audio and replace it with the
+  // returned ServerAsset. The hook's epoch contract makes stale
+  // results from a superseded pick land harmlessly.
   useEffect(() => {
-    if (voice.source !== 'upload') return;
-    if (!voice.audio || !isLocalAsset(voice.audio)) return;
-    const local = voice.audio;
+    if (watchedSource !== 'upload') return;
+    if (!watchedAudio || !isLocalAsset(watchedAudio)) return;
+    const local = watchedAudio;
+    setUploadErrorMsg(null);
     let alive = true;
     (async () => {
       const res = await audioUpload.upload(local.file);
-      if (!alive || !res?.path) return;
-      setVoice((prev) => {
-        if (prev.source !== 'upload') return prev;
-        // Defensive: only swap if the local asset we started uploading
-        // is still the current one (user didn't replace mid-upload).
-        if (!prev.audio || !isLocalAsset(prev.audio) || prev.audio.file !== local.file) {
-          return prev;
-        }
-        return {
-          ...prev,
-          audio: { path: res.path as string, url: typeof res.url === 'string' ? res.url : undefined, name: local.name },
-        };
-      });
+      if (!alive) return;
+      if (!res?.path) {
+        if (audioUpload.error) setUploadErrorMsg(audioUpload.error);
+        return;
+      }
+      const cur = form.getValues('voice');
+      if (
+        cur.source !== 'upload' ||
+        !cur.audio ||
+        !isLocalAsset(cur.audio) ||
+        cur.audio.file !== local.file
+      ) {
+        return;
+      }
+      form.setValue(
+        'voice',
+        {
+          ...cur,
+          audio: {
+            path: res.path as string,
+            url: typeof res.url === 'string' ? res.url : undefined,
+            name: local.name,
+          },
+        },
+        { shouldDirty: true },
+      );
     })();
     return () => {
       alive = false;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [voice.source === 'upload' ? voice.audio : null]);
+  }, [watchedSource, watchedAudio]);
 
-  // ── Derived display values ──────────────────────────────────────
-  const combinedScript = buildScript(voice.script.paragraphs);
+  const combinedScript = buildScript(watchedParagraphs);
   const estDuration = Math.round(
     combinedScript.replace(/\[breath\]/g, '').replace(/\s+/g, '').length * 0.3,
   );
-  const generatedSrc = (() => {
-    if (voice.source === 'upload') return null;
-    if (voice.generation.state !== 'ready') return null;
-    return voice.generation.audio.url || null;
-  })();
-  const isGenerated = voice.source !== 'upload' && voice.generation.state === 'ready';
+  const generatedSrc =
+    voiceGeneration && voiceGeneration.state === 'ready'
+      ? voiceGeneration.audio.url || null
+      : null;
+  const isGenerated =
+    watchedSource !== 'upload' && voiceGeneration?.state === 'ready';
+  // While TTS is generating, lock script + advanced edits — otherwise
+  // a mid-flight edit lands on the resolved 'ready' state with audio
+  // that doesn't match the displayed text. Mirrors the user expectation
+  // that "음성 만들기 중" is a quiet phase.
+  const generationLocked =
+    watchedSource !== 'upload' && voiceGeneration?.state === 'generating';
 
   // ── Generate CTA orchestration ──────────────────────────────────
-  const handleGenerate = async () => {
-    if (voice.source === 'upload') return;
-    setErrorMsg(null);
-    try {
-      // Clone mode with a pending sample needs the clone API call
-      // first — that flips sample.state to 'cloned' on success, which
-      // toVoiceGenerateRequest then reads as the voice_id.
-      if (voice.source === 'clone' && voice.sample.state === 'pending') {
-        const cloneResult = await cloner.clone(voice.sample.asset.file);
-        if (!cloneResult?.voice_id) return; // hook surfaces error
-      }
-      if (voice.source === 'clone' && voice.sample.state === 'empty') {
-        throw new Error('클론용 샘플 음성을 올려주세요');
-      }
-      if (voice.source === 'tts' && !voice.voiceId) {
-        throw new Error('목소리를 먼저 골라주세요');
-      }
-      const result = await tts.generate();
-      if (!result) return;
-    } catch (err) {
-      setErrorMsg(humanizeError(err));
-    }
-  };
+  const submit = useMemo(
+    () =>
+      form.handleSubmit(async ({ voice: v }) => {
+        if (v.source === 'upload') return;
+        setErrorMsg(null);
+        try {
+          // Drop the pending debounce + sync form → store. See
+          // useDebouncedFormSync.cancel docblock for the clone race.
+          formSync.cancel();
+          setVoice((prev) => formValuesToVoiceSlice(v, prev));
+
+          if (v.source === 'clone' && v.sample.state === 'pending') {
+            const cloneResult = await cloner.clone(v.sample.asset.file);
+            if (!cloneResult?.voice_id) {
+              if (cloner.error) setErrorMsg(cloner.error);
+              return;
+            }
+          }
+          if (v.source === 'clone' && v.sample.state === 'empty') {
+            throw new Error('클론용 샘플 음성을 올려주세요');
+          }
+          if (v.source === 'tts' && !v.voiceId) {
+            throw new Error('목소리를 먼저 골라주세요');
+          }
+          const result = await tts.generate();
+          if (!result) {
+            if (tts.error) setErrorMsg(tts.error);
+            return;
+          }
+        } catch (err) {
+          setErrorMsg(humanizeError(err));
+        }
+      }),
+    [form, cloner, tts, setVoice, formSync],
+  );
 
   // audioUpload runs in upload-mode only, where the AI Generate CTA
   // doesn't render; safe to scope `generating` to the AI hooks.
   const generating = tts.isLoading || cloner.isLoading;
   const canGenerate = (() => {
-    if (voice.source === 'upload') return false;
-    if (!combinedScript) return false;
-    if (voice.source === 'tts') return !!voice.voiceId;
-    if (voice.source === 'clone')
-      return voice.sample.state === 'cloned' || voice.sample.state === 'pending';
+    if (watchedSource === 'upload' || !combinedScript) return false;
+    if (combinedScript.length > SCRIPT_LIMIT) return false;
+    if (watchedSource === 'tts') return !!watchedVoiceId;
+    if (watchedSource === 'clone')
+      return watchedSampleState === 'cloned' || watchedSampleState === 'pending';
     return false;
   })();
 
-  // ── Subscriber bridges back to the legacy `update` prop for the
-  //    handful of fields that aren't on the voice slice (resolution,
-  //    playlist_id). Phase 3 replaces this with per-slice setters. ──
+  // resolution + playlistId aren't on the voice slice — keep on
+  // legacy `update` prop, scope-limited to Step 3 RHF.
   const setR = (r: ResolutionKey) =>
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     update((s: any) => ({ ...s, resolution: r }));
 
   return (
-    <div className="step-page-split step-page-split--65-35">
-      <div className="step-page-form">
-        <StepHeading
-          step={3}
-          title="목소리와 영상"
-          description="영상에 어떤 소리가 들어갈지 정하고, 화질까지 골라주세요."
-          eyebrow="영상 위저드"
-        />
+    <FormProvider {...form}>
+      <div className="step-page-split step-page-split--65-35">
+        <div className="step-page-form">
+          <StepHeading
+            step={3}
+            title="목소리와 영상"
+            description="영상에 어떤 소리가 들어갈지 정하고, 화질까지 골라주세요."
+            eyebrow="영상 위저드"
+          />
 
-        {/* Top-level mode cards — AI vs raw audio */}
-        <div className="grid grid-cols-2 gap-3">
-          <OptionCard
-            active={isAi}
-            icon={<Sparkles className="size-4" />}
-            title="AI로 음성 만들기"
-            desc="대본을 적으면 AI가 읽어줘요"
-            meta="~10초 소요"
-            onClick={switchToAi}
-          />
-          <OptionCard
-            active={!isAi}
-            icon={<MicVocal className="size-4" />}
-            title="내 녹음 그대로 쓰기"
-            desc="이미 녹음한 음성 파일을 사용해요"
-            meta="즉시 적용"
-            onClick={switchToRawAudio}
-          />
+          <div className="grid grid-cols-2 gap-3">
+            <OptionCard
+              active={isAi}
+              icon={<Sparkles className="size-4" />}
+              title="AI로 음성 만들기"
+              desc="대본을 적으면 AI가 읽어줘요"
+              meta="~10초 소요"
+              onClick={switchToAi}
+            />
+            <OptionCard
+              active={!isAi}
+              icon={<MicVocal className="size-4" />}
+              title="내 녹음 그대로 쓰기"
+              desc="이미 녹음한 음성 파일을 사용해요"
+              meta="즉시 적용"
+              onClick={switchToRawAudio}
+            />
+          </div>
+
+          {isAi && (
+            <Card>
+              <div className="mb-4">
+                <WizardTabs
+                  value={aiSubMode}
+                  onValueChange={(v) => switchAiSubMode(v as 'tts' | 'clone')}
+                >
+                  <WizardTab value="tts" icon={<Mic className="size-3.5" />}>
+                    목소리 고르기
+                  </WizardTab>
+                  <WizardTab value="clone" icon={<Copy className="size-3.5" />}>
+                    내 목소리 복제
+                  </WizardTab>
+                </WizardTabs>
+              </div>
+
+              <div className="min-h-[280px]">
+                {watchedSource === 'tts' && (
+                  <VoicePicker
+                    remoteVoices={voiceList.isLoading ? null : voiceList.voices}
+                    loadError={voiceList.error}
+                  />
+                )}
+                {watchedSource === 'clone' && <VoiceCloner />}
+              </div>
+
+              <hr className="hr" />
+
+              <ScriptEditor disabled={generationLocked} />
+
+              <VoiceAdvancedSettings
+                open={advancedOpen}
+                onOpenChange={setAdvancedOpen}
+                disabled={generationLocked}
+              />
+
+              {errorMsg && <WizardErrorBanner message={errorMsg} />}
+
+              <GenerateBar
+                label={
+                  isGenerated
+                    ? `음성 준비 완료 · ${estDuration}초`
+                    : '대본 입력 후 만들기 버튼을 누르면 ~10초 안에 음성이 만들어져요'
+                }
+                done={!!isGenerated}
+                disabled={generating || !canGenerate}
+                generating={generating}
+                onClick={submit}
+                cta="음성 만들기"
+                timeHint="~10초"
+              />
+
+              {isGenerated && generatedSrc && <AudioPlayer src={generatedSrc} />}
+            </Card>
+          )}
+
+          {watchedSource === 'upload' && (
+            <Card>
+              <div className="min-h-[280px]">
+                <AudioUploader isUploading={audioUpload.isLoading} />
+              </div>
+              {uploadErrorMsg && (
+                <WizardErrorBanner
+                  className="mt-3"
+                  message={uploadErrorMsg}
+                  hint="다시 시도하려면 파일을 다시 골라주세요"
+                />
+              )}
+              {watchedAudio && isServerAsset(watchedAudio) && (
+                <div className="mt-3 flex items-center gap-2">
+                  <Badge variant="success" icon="check_circle">
+                    음성 준비 완료
+                  </Badge>
+                  <span className="text-xs text-tertiary">TTS를 거치지 않고 그대로 영상에 들어가요</span>
+                </div>
+              )}
+            </Card>
+          )}
+
+          <Card title="영상 화질" subtitle="세로 영상 · 어디에 올릴지에 맞춰서 고르세요">
+            <ResolutionPicker selectedKey={resolution} onSelect={setR} />
+          </Card>
+
+          <Card title="플레이리스트" subtitle="만들어진 영상을 묶어두는 폴더예요. 비워두면 미지정에 저장됩니다.">
+            <PlaylistPicker
+              selected={state.playlistId ?? null}
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              onChange={(pid) => update((s: any) => ({ ...s, playlistId: pid }))}
+            />
+          </Card>
         </div>
 
-        {/* AI mode body — TS narrows voice.source via the `isAi` alias
-         * (control-flow analysis of aliased conditions). */}
-        {isAi && (
-          <Card>
-            <div className="mb-4">
-              <WizardTabs value={aiSubMode} onValueChange={(v) => switchAiSubMode(v as 'tts' | 'clone')}>
-                <WizardTab value="tts" icon={<Mic className="size-3.5" />}>
-                  목소리 고르기
-                </WizardTab>
-                <WizardTab value="clone" icon={<Copy className="size-3.5" />}>
-                  내 목소리 복제
-                </WizardTab>
-              </WizardTabs>
-            </div>
-
-            <div className="min-h-[280px]">
-              {voice.source === 'tts' && (
-                <VoicePicker
-                  selectedVoiceId={voice.voiceId}
-                  remoteVoices={voiceList.isLoading ? null : voiceList.voices}
-                  loadError={voiceList.error}
-                  onVoiceSelected={(v) =>
-                    setVoice((prev) => {
-                      if (prev.source !== 'tts') return prev;
-                      return { ...prev, voiceId: v.id, voiceName: v.name };
-                    })
-                  }
-                />
-              )}
-              {voice.source === 'clone' && (
-                <VoiceCloner
-                  sample={voice.sample}
-                  onSampleChange={(sample: VoiceCloneSample) =>
-                    setVoice((prev) => {
-                      if (prev.source !== 'clone') return prev;
-                      // Re-staging a sample resets the generation —
-                      // any prior TTS run was for a different voice.
-                      return { ...prev, sample, generation: { state: 'idle' } };
-                    })
-                  }
-                />
-              )}
-            </div>
-
-            <hr className="hr" />
-
-            <ScriptEditor
-              script={voice.script}
-              onScriptChange={(script: Script) =>
-                setVoice((prev) => {
-                  if (prev.source === 'upload') return { ...prev, script };
-                  return { ...prev, script };
-                })
-              }
-            />
-
-            <VoiceAdvancedSettings
-              advanced={voice.advanced}
-              open={advancedOpen}
-              onOpenChange={setAdvancedOpen}
-              onAdvancedChange={(advanced: VoiceAdvanced) =>
-                setVoice((prev) => {
-                  if (prev.source === 'upload') return prev;
-                  return { ...prev, advanced };
-                })
-              }
-            />
-
-            {errorMsg && (
-              <div
-                style={{
-                  padding: '10px 12px',
-                  background: 'var(--danger-soft)',
-                  border: '1px solid var(--danger)',
-                  borderRadius: 'var(--r-sm)',
-                  color: 'var(--danger)',
-                  fontSize: 12,
-                }}
-              >
-                <Icon name="alert_circle" size={13} style={{ marginRight: 6 }} />
-                {errorMsg}
-              </div>
-            )}
-
-            <GenerateBar
-              label={
-                isGenerated
-                  ? `음성 준비 완료 · ${estDuration}초`
-                  : '대본 입력 후 만들기 버튼을 누르면 ~10초 안에 음성이 만들어져요'
-              }
-              done={isGenerated}
-              disabled={generating || !canGenerate}
-              generating={generating}
-              onClick={handleGenerate}
-              cta="음성 만들기"
-              timeHint="~10초"
-            />
-
-            {isGenerated && generatedSrc && <AudioPlayer src={generatedSrc} />}
-          </Card>
-        )}
-
-        {/* Raw audio mode body */}
-        {voice.source === 'upload' && (
-          <Card>
-            <div className="min-h-[280px]">
-              <AudioUploader
-                audio={voice.audio}
-                script={voice.script}
-                isUploading={audioUpload.isLoading}
-                onAudioChange={(audio) =>
-                  setVoice((prev) => {
-                    if (prev.source !== 'upload') return prev;
-                    return { ...prev, audio };
-                  })
-                }
-                onScriptChange={(script: Script) =>
-                  setVoice((prev) => {
-                    if (prev.source !== 'upload') return prev;
-                    return { ...prev, script };
-                  })
-                }
-              />
-            </div>
-            {voice.audio && isServerAsset(voice.audio) && (
-              <div className="mt-3 flex items-center gap-2">
-                <Badge variant="success" icon="check_circle">
-                  음성 준비 완료
-                </Badge>
-                <span className="text-xs text-tertiary">TTS를 거치지 않고 그대로 영상에 들어가요</span>
-              </div>
-            )}
-          </Card>
-        )}
-
-        <Card title="영상 화질" subtitle="세로 영상 · 어디에 올릴지에 맞춰서 고르세요">
-          <ResolutionPicker selectedKey={resolution} onSelect={setR} />
-        </Card>
-
-        <Card title="플레이리스트" subtitle="만들어진 영상을 묶어두는 폴더예요. 비워두면 미지정에 저장됩니다.">
-          <PlaylistPicker
-            selected={state.playlistId ?? null}
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            onChange={(pid) => update((s: any) => ({ ...s, playlistId: pid }))}
-          />
-        </Card>
+        {/* RIGHT — pre-render review booth. The composite (Step 2's
+         * output) is the visual confidence anchor; voice/script/resolution
+         * collapse into one stat block; the big "영상 만들기" CTA lives
+         * here so the user commits without scrolling away from the
+         * preview. Codex framing: "pre-render review booth, not form
+         * completion". */}
+        <div className="step-page-canvas">
+          <RenderBooth state={state} estDuration={estDuration} />
+        </div>
       </div>
-
-      {/* RIGHT — pre-render review booth. The composite (Step 2's
-       * output) is the visual confidence anchor; voice/script/resolution
-       * collapse into one stat block; the big "영상 만들기" CTA lives
-       * here so the user commits without scrolling away from the
-       * preview. Codex framing: "pre-render review booth, not form
-       * completion". */}
-      <div className="step-page-canvas">
-        <RenderBooth state={state} estDuration={estDuration} />
-      </div>
-    </div>
+    </FormProvider>
   );
 }
 
@@ -455,12 +566,7 @@ function RenderBooth({ state, estDuration }: RenderBoothProps) {
   const voice = state.voice;
   const voiceLine = (() => {
     if (voice.source === 'upload') {
-      const name = voice.audio
-        ? isServerAsset(voice.audio)
-          ? voice.audio.name ?? '파일'
-          : voice.audio.name
-        : '파일';
-      return `내 녹음 · ${name}`;
+      return `내 녹음 · ${voice.audio?.name ?? '파일'}`;
     }
     if (voice.source === 'clone') {
       const sampleName = voice.sample.state === 'cloned' ? voice.sample.name : null;

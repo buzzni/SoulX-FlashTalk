@@ -9,11 +9,19 @@
  * Preview playback is self-contained — one hidden `<audio>` tag
  * inside this component plays whichever voice the user clicked
  * 재생 on. Clicking another voice or hitting 재생 again pauses.
+ *
+ * Reads/writes through `useFormContext` — the parent Step3Audio owns
+ * the form via `<FormProvider>`. Only renders in tts-mode (parent
+ * narrows on `voice.source === 'tts'`), so writing voiceId/voiceName
+ * via setValue is safe.
  */
 
 import { useRef, useState } from 'react';
+import { useFormContext, useWatch } from 'react-hook-form';
 import Icon from '../Icon.jsx';
 import { Field } from '@/components/field';
+import type { Step3FormValues } from '@/wizard/form-mappers';
+
 const VOICE_PRESETS: VoiceItem[] = [
   { id: 'v_minji', name: '민지', desc: '밝고 경쾌한 느낌의 20대 여성' },
   { id: 'v_sora', name: '소라', desc: '차분하고 부드러운 30대 여성' },
@@ -47,19 +55,18 @@ export interface RemoteVoiceEntry {
 }
 
 export interface VoicePickerProps {
-  selectedVoiceId: string | null;
   /** null = still loading; empty array = fetched but no voices. */
   remoteVoices: RemoteVoiceEntry[] | null;
   loadError: string | null;
-  onVoiceSelected: (voice: { id: string; name: string }) => void;
 }
 
-export function VoicePicker({
-  selectedVoiceId,
-  remoteVoices,
-  loadError,
-  onVoiceSelected,
-}: VoicePickerProps) {
+export function VoicePicker({ remoteVoices, loadError }: VoicePickerProps) {
+  const { control, setValue } = useFormContext<Step3FormValues>();
+  const selectedVoiceId = useWatch({
+    control,
+    name: 'voice.voiceId' as const,
+  }) as string | null | undefined;
+
   const previewAudioRef = useRef<HTMLAudioElement | null>(null);
   const [playingPreview, setPlayingPreview] = useState<string | null>(null);
 
@@ -74,6 +81,17 @@ export function VoicePicker({
           lang: v.labels?.language || '',
         }))
       : VOICE_PRESETS;
+
+  const selectVoice = (v: { id: string; name: string }) => {
+    setValue('voice.voiceId' as const, v.id, {
+      shouldDirty: true,
+      shouldValidate: true,
+    });
+    setValue('voice.voiceName' as const, v.name, {
+      shouldDirty: true,
+      shouldValidate: true,
+    });
+  };
 
   const playPreview = (voiceItem: VoiceItem) => {
     if (!voiceItem.preview_url) return;
@@ -136,7 +154,7 @@ export function VoicePicker({
                 <div
                   key={v.id}
                   className={`voice-item ${selectedVoiceId === v.id ? 'on' : ''}`}
-                  onClick={() => onVoiceSelected({ id: v.id, name: v.name })}
+                  onClick={() => selectVoice({ id: v.id, name: v.name })}
                 >
                   <div className="voice-avatar">{v.name[0]}</div>
                   <div className="voice-info">

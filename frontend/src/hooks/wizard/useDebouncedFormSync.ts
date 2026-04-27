@@ -13,14 +13,24 @@
  *   useDebouncedFormSync(form, (values) => setHost(formToHost(values)), 300);
  */
 
-import { useEffect, useRef } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import type { UseFormReturn, FieldValues } from 'react-hook-form';
+
+export interface DebouncedFormSyncControls {
+  /** Cancel any pending debounce timer without flushing. Used by
+   * submit handlers that already wrote form values to the store
+   * synchronously and don't want a stale buffered timer to fire later
+   * and overwrite hook-driven setVoice mutations (e.g. clone resolves
+   * with sample:'cloned'; a still-buffered timer with form's stale
+   * sample:'pending' would otherwise revert the cloned voiceId). */
+  cancel: () => void;
+}
 
 export function useDebouncedFormSync<V extends FieldValues>(
   form: UseFormReturn<V>,
   onChange: (values: V) => void,
   debounceMs = 300,
-): void {
+): DebouncedFormSyncControls {
   // Last serialized payload we emitted. Stops no-op flushes when watch
   // fires from a `form.reset` round-trip (slice changes → reset →
   // watch sees same values → would re-write the store with a fresh
@@ -34,12 +44,13 @@ export function useDebouncedFormSync<V extends FieldValues>(
   // same metadata would compare equal and silently drop the second
   // write.
   const lastEmittedRef = useRef<string | null>(null);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
-    let timer: ReturnType<typeof setTimeout> | null = null;
     const sub = form.watch((values) => {
-      if (timer) clearTimeout(timer);
-      timer = setTimeout(() => {
+      if (timerRef.current) clearTimeout(timerRef.current);
+      timerRef.current = setTimeout(() => {
+        timerRef.current = null;
         const serialized = JSON.stringify(values);
         if (serialized === lastEmittedRef.current) return;
         lastEmittedRef.current = serialized;
@@ -49,8 +60,20 @@ export function useDebouncedFormSync<V extends FieldValues>(
       }, debounceMs);
     });
     return () => {
-      if (timer) clearTimeout(timer);
+      if (timerRef.current) clearTimeout(timerRef.current);
       sub.unsubscribe();
     };
   }, [form, onChange, debounceMs]);
+
+  return useMemo<DebouncedFormSyncControls>(
+    () => ({
+      cancel: () => {
+        if (timerRef.current) {
+          clearTimeout(timerRef.current);
+          timerRef.current = null;
+        }
+      },
+    }),
+    [],
+  );
 }

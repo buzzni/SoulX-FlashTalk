@@ -6,8 +6,11 @@ import {
   hostSliceToFormValues,
   formValuesToHostSlice,
   Step2FormValuesSchema,
+  Step3FormValuesSchema,
+  voiceSliceToFormValues,
+  formValuesToVoiceSlice,
 } from '../form-mappers';
-import type { Host } from '../schema';
+import type { Host, Voice } from '../schema';
 import { INITIAL_HOST } from '../schema';
 
 const READY_TEXT_HOST: Host = {
@@ -115,5 +118,88 @@ describe('Step2FormValuesSchema', () => {
       // settings missing
     };
     expect(() => Step2FormValuesSchema.parse(invalid)).toThrow();
+  });
+});
+
+describe('Step3 voice form mappers', () => {
+  const ADVANCED = { speed: 1, stability: 0.5, style: 0.3, similarity: 0.75 };
+  const SCRIPT = { paragraphs: ['하나', '둘'] };
+
+  const READY_TTS: Voice = {
+    source: 'tts',
+    voiceId: 'v_minji',
+    voiceName: '민지',
+    advanced: ADVANCED,
+    script: SCRIPT,
+    generation: {
+      state: 'ready',
+      audio: { path: '/p/tts.wav', url: '/u/tts.wav', name: 'tts.wav' },
+    },
+  };
+
+  it('voiceSliceToFormValues drops generation per variant', () => {
+    const fv = voiceSliceToFormValues(READY_TTS);
+    expect(fv).toEqual({
+      source: 'tts',
+      voiceId: 'v_minji',
+      voiceName: '민지',
+      advanced: ADVANCED,
+      script: SCRIPT,
+    });
+    // The form-shaped object MUST NOT carry generation
+    expect((fv as Record<string, unknown>).generation).toBeUndefined();
+  });
+
+  it('formValuesToVoiceSlice preserves prev.generation on same-variant edits', () => {
+    const fv = voiceSliceToFormValues(READY_TTS);
+    // User edits voiceName via form
+    const edited = { ...fv, voiceName: '소라' } as typeof fv;
+    const next = formValuesToVoiceSlice(edited, READY_TTS);
+    expect(next.source).toBe('tts');
+    if (next.source !== 'tts') throw new Error('narrow');
+    expect(next.voiceName).toBe('소라');
+    expect(next.generation).toBe(READY_TTS.generation); // ref preserved
+  });
+
+  it('formValuesToVoiceSlice resets generation to idle on cross-variant swap', () => {
+    // Was tts (ready), now form switched to clone via setValue
+    const cloneForm = {
+      source: 'clone' as const,
+      sample: { state: 'empty' as const },
+      advanced: ADVANCED,
+      script: SCRIPT,
+    };
+    const next = formValuesToVoiceSlice(cloneForm, READY_TTS);
+    expect(next.source).toBe('clone');
+    if (next.source !== 'clone') throw new Error('narrow');
+    expect(next.generation).toEqual({ state: 'idle' });
+  });
+
+  it('formValuesToVoiceSlice produces upload variant without generation field', () => {
+    const uploadForm = {
+      source: 'upload' as const,
+      audio: null,
+      script: SCRIPT,
+    };
+    const next = formValuesToVoiceSlice(uploadForm, READY_TTS);
+    expect(next.source).toBe('upload');
+    expect((next as Record<string, unknown>).generation).toBeUndefined();
+  });
+
+  it('Step3FormValuesSchema accepts a clean tts shape', () => {
+    const valid = {
+      voice: voiceSliceToFormValues(READY_TTS),
+    };
+    expect(() => Step3FormValuesSchema.parse(valid)).not.toThrow();
+  });
+
+  it('voiceSliceToFormValues output never carries generation (the form contract)', () => {
+    // Zod's discriminated union members aren't strict, so passing an
+    // object with a stray `generation` field doesn't throw on parse.
+    // The real guard is the mapper output: voiceSliceToFormValues
+    // MUST strip generation per variant so it never re-enters the
+    // form and triggers a reset on lifecycle mutations.
+    const fv = voiceSliceToFormValues(READY_TTS);
+    expect((fv as Record<string, unknown>).generation).toBeUndefined();
   });
 });

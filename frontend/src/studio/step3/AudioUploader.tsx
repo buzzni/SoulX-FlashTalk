@@ -5,12 +5,14 @@
  * Also accepts an optional subtitle script (schema `Script`) so the
  * video can render on-screen text matching what the user said.
  *
- * Emits `voice.audio` (ServerAsset | LocalAsset | null) — Step3Audio
- * orchestrates the local→server upload transition; this component
- * only stages the file.
+ * Reads/writes through `useFormContext`. Only renders when the parent
+ * narrows on `voice.source === 'upload'`, so `voice.audio` and
+ * `voice.script` are valid paths here. Step3Audio orchestrates the
+ * local→server upload transition; this component only stages the file.
  */
 
 import { useEffect } from 'react';
+import { useFormContext, useWatch } from 'react-hook-form';
 import Icon from '../Icon.jsx';
 import { Field } from '@/components/field';
 import { UploadTile } from '@/components/upload-tile';
@@ -22,24 +24,26 @@ import {
 } from '@/components/upload-tile-bridge';
 import { isLocalAsset } from '@/wizard/normalizers';
 import type { LocalAsset, Script, ServerAsset } from '@/wizard/schema';
+import type { Step3FormValues } from '@/wizard/form-mappers';
+import { clampParagraphs } from './ScriptEditor';
 
 export interface AudioUploaderProps {
-  audio: ServerAsset | LocalAsset | null;
-  script: Script;
   /** True while the staged LocalAsset is being uploaded to the
    * server. Step3Audio drives this from `useUploadReferenceImage`. */
   isUploading?: boolean;
-  onAudioChange: (audio: ServerAsset | LocalAsset | null) => void;
-  onScriptChange: (script: Script) => void;
 }
 
-export function AudioUploader({
-  audio,
-  script,
-  isUploading = false,
-  onAudioChange,
-  onScriptChange,
-}: AudioUploaderProps) {
+export function AudioUploader({ isUploading = false }: AudioUploaderProps) {
+  const { control, setValue } = useFormContext<Step3FormValues>();
+  const audio = useWatch({
+    control,
+    name: 'voice.audio' as const,
+  }) as ServerAsset | LocalAsset | null | undefined;
+  const script = useWatch({
+    control,
+    name: 'voice.script' as const,
+  }) as Script | undefined;
+
   // Revoke our blob: previewUrl when the LocalAsset is replaced or
   // unmounted. data: URLs (the FileReader path) are no-ops.
   useEffect(() => {
@@ -48,14 +52,17 @@ export function AudioUploader({
     };
   }, [audio]);
 
-  const tileFile = uploadFileFromAsset(audio);
+  const tileFile = uploadFileFromAsset(audio ?? null);
 
   const handlePick = (next: UploadTileFile | null) => {
     if (audio && isLocalAsset(audio)) revokeLocalAssetIfBlob(audio);
-    onAudioChange(localAssetFromUploadFile(next));
+    setValue('voice.audio' as const, localAssetFromUploadFile(next), {
+      shouldDirty: true,
+      shouldValidate: true,
+    });
   };
 
-  const subtitleText = script.paragraphs.join('\n\n');
+  const subtitleText = (script?.paragraphs ?? ['']).join('\n\n');
 
   return (
     <div className="flex-col gap-3">
@@ -95,9 +102,15 @@ export function AudioUploader({
           onChange={(e) => {
             // Subtitle is a single textarea; split on blank-line
             // separators so the schema multi-paragraph shape stays
-            // consistent with TTS mode.
-            const paragraphs = e.target.value.split(/\n\s*\n/);
-            onScriptChange({ paragraphs: paragraphs.length > 0 ? paragraphs : [''] });
+            // consistent with TTS mode. Clamp to SCRIPT_LIMIT so a
+            // 1MB paste here doesn't ride into TTS via toTTSForm.
+            const split = e.target.value.split(/\n\s*\n/);
+            const paragraphs = clampParagraphs(split.length > 0 ? split : ['']);
+            setValue(
+              'voice.script' as const,
+              { paragraphs },
+              { shouldDirty: true, shouldValidate: true },
+            );
           }}
         />
       </Field>

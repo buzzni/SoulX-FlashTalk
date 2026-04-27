@@ -13,6 +13,7 @@ export interface WizardSliderProps {
   step?: number;
   formatValue?: (value: number) => string;
   ariaLabel?: string;
+  disabled?: boolean;
 }
 
 export function WizardSlider({
@@ -23,6 +24,7 @@ export function WizardSlider({
   step = 0.01,
   formatValue,
   ariaLabel,
+  disabled = false,
 }: WizardSliderProps) {
   return (
     <div className="flex items-center gap-3">
@@ -34,6 +36,7 @@ export function WizardSlider({
         step={step}
         aria-label={ariaLabel}
         className="flex-1"
+        disabled={disabled}
       />
       <span className="text-[12px] text-muted-foreground min-w-[40px] text-right tabular-nums">
         {formatValue ? formatValue(value) : value}
