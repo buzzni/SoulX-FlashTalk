@@ -3,7 +3,8 @@
 The client is a process-wide singleton. FastAPI's startup hook calls init();
 shutdown calls close(). Repositories import `get_db()` and call its methods.
 
-Indexes (per docs/db-integration-plan.md §4 + §7, docs/playlist-feature-plan.md §3):
+Indexes (per docs/db-integration-plan.md §4 + §7, docs/playlist-feature-plan.md §3,
+docs/plans/streaming-resume-eng-spec.md §7):
 - studio_hosts:        {user_id, image_id} unique;
                         {user_id, step, status, generated_at} compound;
                         {user_id, batch_id};
@@ -15,6 +16,12 @@ Indexes (per docs/db-integration-plan.md §4 + §7, docs/playlist-feature-plan.m
                         {user_id, playlist_id, completed_at} compound (filter)
 - studio_playlists:    {user_id, playlist_id} unique;
                         {user_id, name_normalized} unique
+- generation_jobs:     {user_id, kind, created_at desc} listing;
+                        partial {state, heartbeat_at} where state="streaming";
+                        partial {state, updated_at} where state in
+                          ("ready","failed","cancelled");
+                        partial unique {user_id, input_hash} where state in
+                          ("pending","streaming")  -- dedupe-by-reuse
 
 Re-running init_indexes() is a no-op on collections that already have the
 spec — motor's create_index uses the same idempotent semantics as pymongo.
@@ -115,6 +122,40 @@ async def init_indexes() -> None:
         [("user_id", 1), ("name_normalized", 1)],
         unique=True,
         name="user_name_normalized_uniq",
+    )
+    # generation_jobs (server-side first-class generation entity)
+    # Eng-spec §7. partial filters scope each index to the lifecycle slice that
+    # actually queries it, keeping write amplification low and dedupe correct.
+    await db.generation_jobs.create_index(
+        [("user_id", 1), ("kind", 1), ("created_at", -1)],
+        name="user_kind_created",
+    )
+    # Sweep stuck streaming jobs (heartbeat older than threshold). JobRunner
+    # commit will own the sweeper; the index is laid down here so the partial
+    # is enforced from day one.
+    await db.generation_jobs.create_index(
+        [("state", 1), ("heartbeat_at", 1)],
+        partialFilterExpression={"state": "streaming"},
+        name="state_heartbeat_streaming",
+    )
+    # TTL sweep candidates (terminal jobs older than 7 days).
+    await db.generation_jobs.create_index(
+        [("state", 1), ("updated_at", 1)],
+        partialFilterExpression={
+            "state": {"$in": ["ready", "failed", "cancelled"]}
+        },
+        name="state_updated_terminal",
+    )
+    # Dedupe-by-reuse: any active job (pending|streaming) with the same
+    # (user_id, input_hash) collapses onto the existing row. Terminal jobs
+    # drop out of the partial filter, freeing the slot for a re-roll.
+    await db.generation_jobs.create_index(
+        [("user_id", 1), ("input_hash", 1)],
+        unique=True,
+        partialFilterExpression={
+            "state": {"$in": ["pending", "streaming"]}
+        },
+        name="user_input_hash_active_uniq",
     )
 
 
