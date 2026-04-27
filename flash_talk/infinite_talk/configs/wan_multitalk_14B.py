@@ -15,7 +15,28 @@ multitalk_14B.param_dtype = torch.bfloat16
 # inference
 multitalk_14B.num_train_timesteps = 1000
 multitalk_14B.sample_fps = 16
-multitalk_14B.sample_neg_prompt = 'bright tones, overexposed, static, blurred details, subtitles, style, works, paintings, images, static, overall gray, worst quality, low quality, JPEG compression residue, ugly, incomplete, extra fingers, poorly drawn hands, poorly drawn faces, deformed, disfigured, misshapen limbs, fused fingers, still picture, messy background, three legs, many people in the background, walking backwards'
+
+
+def _dedup_neg_prompt(parts):
+    seen = set()
+    out = []
+    for p in parts:
+        for token in p.split(','):
+            t = token.strip()
+            if not t:
+                continue
+            key = t.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            out.append(t)
+    return ', '.join(out)
+
+
+_BASE_NEG = 'bright tones, overexposed, static, blurred details, subtitles, style, works, paintings, images, static, overall gray, worst quality, low quality, JPEG compression residue, ugly, incomplete, extra fingers, poorly drawn hands, poorly drawn faces, deformed, disfigured, misshapen limbs, fused fingers, still picture, messy background, three legs, many people in the background, walking backwards'
+_LIPSYNC_NEG = 'blurry mouth, smudged lips, distorted teeth, crooked teeth, misaligned jaw, asynchronous lip-sync, mumbling, closed mouth while speaking, double teeth, missing teeth'
+
+multitalk_14B.sample_neg_prompt = _dedup_neg_prompt([_BASE_NEG, _LIPSYNC_NEG])
 
 multitalk_14B.t5_checkpoint = 'models_t5_umt5-xxl-enc-bf16.pth'
 multitalk_14B.t5_tokenizer = 'google/umt5-xxl'

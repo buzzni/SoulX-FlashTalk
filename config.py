@@ -35,20 +35,36 @@ FLASHTALK_CKPT_DIR = os.path.join(PROJECT_ROOT, "models", "SoulX-FlashTalk-14B")
 FLASHTALK_WAV2VEC_DIR = os.path.join(PROJECT_ROOT, "models", "chinese-wav2vec2-base")
 
 FLASHTALK_OPTIONS = {
-    # Prompt conditions the T5 text encoder → diffusion model. Emphasize
-    # restraint on both lip and body motion: the unguarded "characters are
-    # moving" hint tended to produce jerky hand swings and exaggerated mouth
-    # openings.
+    # Prompt conditions the T5 text encoder → diffusion model. Emphasizes
+    # crisp Korean articulation and well-defined mouth/teeth detail.
+    # Trade-off: this can raise eval/step3/RUBRIC.md mouth_over_articulation
+    # score (lower = better). Re-evaluate against rubric after first runs.
     "default_prompt": (
-        "A person is talking with subtle, natural hand gestures and minimal, "
-        "stable body movement. The lips move softly and naturally in sync "
-        "with speech, not exaggerated. Only the foreground character moves; "
-        "the background remains static."
+        "A person speaking clearly to camera with crisp, articulate Korean "
+        "pronunciation. Mouth opens and closes accurately, well-defined lips, "
+        "sharp clean teeth, precise jaw motion synchronized to speech. Subtle "
+        "natural head movement, stable shoulders, static background, minimal "
+        "hand gestures."
     ),
     "audio_encode_mode": "stream",  # "stream" or "once"
     "base_seed": 9999,
     "cpu_offload": True,  # Enable CPU offload for lower VRAM usage (40GB instead of 64GB)
+    # When true, generate via `torchrun --nproc_per_node=2` subprocess on
+    # GPUs 1,3 with USP (sequence parallelism) + Parallel VAE +
+    # torch.compile. Falls back to in-process world_size=1 path on rollback.
+    # Set FLASHTALK_USE_TORCHRUN_SUBPROCESS=0 to disable.
+    "use_torchrun_subprocess": os.environ.get("FLASHTALK_USE_TORCHRUN_SUBPROCESS", "0") == "1",
+    "torchrun_gpu_set": os.environ.get("FLASHTALK_TORCHRUN_GPUS", "1,3"),
+    "torchrun_timeout_s": int(os.environ.get("FLASHTALK_TORCHRUN_TIMEOUT_S", "7200")),
 }
+
+# Audio preprocessing — trim leading/trailing silence to stabilise chunk
+# boundaries (lip closes awkwardly when long silence drives the first chunk).
+# Conservative defaults: 40dB threshold rarely cuts speech; 200ms padding
+# preserves natural breath. Disable per-job by setting AUDIO_TRIM_ENABLED=0.
+AUDIO_TRIM_ENABLED = os.environ.get("AUDIO_TRIM_ENABLED", "1") == "1"
+AUDIO_TRIM_TOP_DB = float(os.environ.get("AUDIO_TRIM_TOP_DB", "40"))
+AUDIO_TRIM_PAD_MS = int(os.environ.get("AUDIO_TRIM_PAD_MS", "200"))
 
 # ========================================
 # MultiTalk Model Settings (multi-person)
@@ -76,10 +92,10 @@ ELEVENLABS_OPTIONS = {
     "default_voice_id": "",  # Will be populated from API
     "model_id": "eleven_v3",  # v3: [breath] native, 5000 char limit (Phase 0 T-EL0)
     "output_format": "pcm_16000",  # 16kHz PCM for FlashTalk compatibility
-    "stability": 0.5,
-    "similarity_boost": 0.75,
+    "stability": 0.4,
+    "similarity_boost": 0.8,
     "style": 0.0,
-    "speed": 1.0,
+    "speed": 0.95,
     "use_speaker_boost": True,  # T-EL1
     "language_code": "ko",  # T-EL2
 }

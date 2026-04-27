@@ -434,6 +434,31 @@ async def generate_video_task(
 
                 human_speech_array_all, _ = librosa.load(audio_path, sr=sample_rate, mono=True)
 
+                # Trim leading/trailing silence with safety padding so chunk
+                # boundaries don't open on dead air. Loudness norm in
+                # multitalk_utils.loudness_norm runs later — trim first.
+                if config.AUDIO_TRIM_ENABLED and len(human_speech_array_all) > 0:
+                    orig_len = len(human_speech_array_all)
+                    trimmed, _idx = librosa.effects.trim(
+                        human_speech_array_all, top_db=config.AUDIO_TRIM_TOP_DB
+                    )
+                    pad_samples = int(config.AUDIO_TRIM_PAD_MS * sample_rate / 1000)
+                    if pad_samples > 0:
+                        pad = np.zeros(pad_samples, dtype=trimmed.dtype)
+                        trimmed = np.concatenate([pad, trimmed, pad])
+                    if len(trimmed) >= sample_rate * 0.5:  # never drop below 0.5s
+                        logger.info(
+                            f"audio trim: {orig_len/sample_rate:.2f}s → "
+                            f"{len(trimmed)/sample_rate:.2f}s "
+                            f"(top_db={config.AUDIO_TRIM_TOP_DB}, pad={config.AUDIO_TRIM_PAD_MS}ms)"
+                        )
+                        human_speech_array_all = trimmed
+                    else:
+                        logger.warning(
+                            f"audio trim skipped: result too short "
+                            f"({len(trimmed)/sample_rate:.2f}s < 0.5s)"
+                        )
+
                 # Pre-attenuate to target LUFS. FlashTalk's internal
                 audio_encode_mode = config.FLASHTALK_OPTIONS.get("audio_encode_mode", "stream")
                 generated_list = []
