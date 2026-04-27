@@ -11,7 +11,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import {
   Home,
   FolderOpen,
-  Sparkles,
+  Plus,
   HelpCircle,
   Settings,
   Moon,
@@ -60,7 +60,7 @@ export function Sidebar({ active }: SidebarProps) {
         title="새 영상 만들기 (3단계 위저드)"
         className="flex items-center gap-2 w-full px-3 py-2.5 mb-2 bg-foreground text-background rounded-md font-semibold text-[13px] tracking-[-0.014em] transition-colors hover:bg-foreground/85 cursor-pointer"
       >
-        <Sparkles className="size-4" />
+        <Plus className="size-4" />
         <span>새 영상 만들기</span>
       </button>
 
