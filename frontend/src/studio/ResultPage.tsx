@@ -21,6 +21,7 @@ import QueueStatus from './QueueStatus';
 import { ProfileMenu } from '../routes/ProfileMenu';
 import { fetchResult } from '../api/result';
 import { fetchJSON, humanizeError } from '../api/http';
+import { retryFailedTask } from '../api/queue';
 import { schemas } from '../api/schemas-generated';
 import { formatTaskTitle } from './taskFormat.js';
 import { Confetti } from './shared/Confetti';
@@ -79,6 +80,28 @@ export default function ResultPage() {
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [recent, setRecent] = useState<RecentItem[] | null>(null);
+  const [retrying, setRetrying] = useState(false);
+  const [retryError, setRetryError] = useState<string | null>(null);
+
+  const handleRetry = async () => {
+    if (!taskId || retrying) return;
+    if (!window.confirm('이 작업을 다시 시도할까요?')) return;
+    setRetrying(true);
+    setRetryError(null);
+    try {
+      const res = await retryFailedTask(taskId);
+      const newId = (res?.task_id as string | undefined) ?? null;
+      if (newId) {
+        navigate(`/render/${encodeURIComponent(newId)}`);
+      } else {
+        setRetryError('새 작업 id를 받지 못했어요');
+      }
+    } catch (err) {
+      setRetryError(humanizeError(err));
+    } finally {
+      setRetrying(false);
+    }
+  };
 
   // Fetch a few recent results to show as "다른 영상 둘러보기" sidebar.
   useEffect(() => {
@@ -193,6 +216,16 @@ export default function ResultPage() {
                 </h1>
               </div>
               <div className="flex gap-2">
+                {isError && (
+                  <Button
+                    icon="refresh"
+                    variant="secondary"
+                    onClick={handleRetry}
+                    disabled={retrying}
+                  >
+                    {retrying ? '재시도 중…' : '재시도'}
+                  </Button>
+                )}
                 <Button icon="plus" variant="secondary" onClick={() => navigate('/')}>
                   새로 만들기
                 </Button>
@@ -207,6 +240,12 @@ export default function ResultPage() {
                     처음으로 돌아가기
                   </Button>
                 </div>
+              </div>
+            )}
+
+            {retryError && (
+              <div className="mb-3 px-3 py-2 bg-destructive-soft text-destructive rounded-md text-xs">
+                {retryError}
               </div>
             )}
 

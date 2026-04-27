@@ -278,9 +278,52 @@ class TaskQueue:
                 logger.error(f"Task {task_id} failed in worker: {e}")
                 await self._mark_done(task_id, error=str(e))
 
+    async def _correct_completed_without_output(self):
+        """One-shot migration: pre-fix code returned False from
+        _run_torchrun_inference instead of raising, so _worker_loop marked
+        OOM / timeout / cancelled tasks as status='completed' even when no
+        mp4 ever landed. The queue and task_states drifted apart; the
+        frontend (queue popover + /result page) shows them as 성공.
+
+        Walk the persisted queue once on startup and flip entries where
+        status='completed' has no matching mp4 in OUTPUTS_DIR. Post-fix
+        code (commit 36a80d2) writes 'error' directly, so this only
+        repairs historical rows.
+        """
+        base_dir = os.path.dirname(QUEUE_FILE)  # outputs/
+        if not os.path.isdir(base_dir):
+            return
+        try:
+            files = [
+                n for n in os.listdir(base_dir)
+                if n.endswith(".mp4") and not n.endswith("_temp.mp4")
+            ]
+        except OSError:
+            return
+        corrections = 0
+        async with self._lock:
+            for entry in self._queue:
+                if entry.get("status") != "completed":
+                    continue
+                short = entry["task_id"][:8]
+                if any(short in n for n in files):
+                    continue
+                entry["status"] = "error"
+                if not entry.get("error"):
+                    entry["error"] = "출력 영상이 만들어지지 않았어요"
+                corrections += 1
+            if corrections > 0:
+                self._save()
+        if corrections > 0:
+            logger.info(
+                f"Reclassified {corrections} legacy 'completed' tasks "
+                f"with no mp4 as 'error' (queue/task_states drift fix)"
+            )
+
     async def start(self):
         """Start the queue worker. Call during app startup."""
         await self._recover_interrupted()
+        await self._correct_completed_without_output()
         self._worker_task = asyncio.create_task(self._worker_loop())
         # Kick the worker in case there are pending tasks from recovery
         if self._pending_count() > 0:
