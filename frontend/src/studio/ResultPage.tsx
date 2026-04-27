@@ -285,30 +285,64 @@ export default function ResultPage() {
     };
     const paragraphs = scriptText ? splitScript(scriptText) : [];
 
-    // Hydrate the voice slice when meta says it was a tts run — voice
-    // selection + advanced sliders + script all carry over so the user
-    // doesn't have to re-pick at step 3. clone/upload have lifecycle we
-    // can't fake (sample upload, audio file path) — script alone for those.
-    if (metaVoice.source === 'tts' && typeof metaVoice.voiceId === 'string') {
+    // ── Voice hydrate (incl. already-generated audio) ───────────────
+    // The generated wav lives at params.audio_path. Building a
+    // ServerAsset from it lets the wizard skip TTS regeneration —
+    // step3's voice card sees a 'ready' generation and just plays the
+    // file. Audio files in outputs/ are served from /api/files/{name}.
+    const audioPath = typeof params.audio_path === 'string' ? params.audio_path : '';
+    const audioName = audioPath ? (audioPath.split('/').pop() ?? '') : '';
+    const audioAsset = audioPath
+      ? { path: audioPath, url: `/api/files/${audioName}`, name: audioName }
+      : null;
+    const voiceSource = strOr(metaVoice.source, 'tts');
+    const advancedFromMeta = {
+      speed: num(metaVoice.speed, 1),
+      stability: num(metaVoice.stability, 0.5),
+      style: num(metaVoice.style, 0.3),
+      similarity: num(metaVoice.similarity, 0.75),
+    };
+    const scriptForVoice = {
+      paragraphs: paragraphs.length > 0 ? paragraphs : [''],
+    };
+    if (voiceSource === 'upload') {
+      // upload mode bypasses TTS entirely; audio is the canonical artifact.
+      store.setVoice(() => ({
+        source: 'upload',
+        audio: audioAsset,
+        script: scriptForVoice,
+      }));
+    } else if (voiceSource === 'clone') {
+      // clone mode needs a cloned sample. We can restore the cloned-state
+      // when meta carried voiceId/voiceName, plus the generated audio.
+      const cloneVoiceId = str(metaVoice.voiceId);
+      const cloneVoiceName = str(metaVoice.voiceName);
+      const sample =
+        cloneVoiceId && cloneVoiceName
+          ? { state: 'cloned' as const, voiceId: cloneVoiceId, name: cloneVoiceName }
+          : { state: 'empty' as const };
+      store.setVoice(() => ({
+        source: 'clone',
+        sample,
+        advanced: advancedFromMeta,
+        script: scriptForVoice,
+        generation: audioAsset
+          ? { state: 'ready', audio: audioAsset }
+          : { state: 'idle' },
+      }));
+    } else {
+      // Default to tts (most runs). voiceId/voiceName + the already-
+      // generated audio mean step3 plays the existing wav rather than
+      // making the user click "음성 생성" again.
       store.setVoice(() => ({
         source: 'tts',
-        voiceId: metaVoice.voiceId as string,
+        voiceId: str(metaVoice.voiceId),
         voiceName: str(metaVoice.voiceName),
-        advanced: {
-          speed: num(metaVoice.speed, 1),
-          stability: num(metaVoice.stability, 0.5),
-          style: num(metaVoice.style, 0.3),
-          similarity: num(metaVoice.similarity, 0.75),
-        },
-        script: { paragraphs: paragraphs.length > 0 ? paragraphs : [''] },
-        generation: { state: 'idle' },
-      }));
-    } else if (paragraphs.length > 0) {
-      // Non-tts source — at least restore the script so the user only
-      // has to re-pick the voice, not retype the whole thing.
-      store.setVoice((prev) => ({
-        ...prev,
-        script: { paragraphs },
+        advanced: advancedFromMeta,
+        script: scriptForVoice,
+        generation: audioAsset
+          ? { state: 'ready', audio: audioAsset }
+          : { state: 'idle' },
       }));
     }
 
