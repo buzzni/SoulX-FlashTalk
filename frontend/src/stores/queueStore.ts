@@ -39,22 +39,21 @@ export type PollTier = 'active' | 'background';
 
 const ACTIVE_INTERVAL_MS = 4000;
 const BACKGROUND_INTERVAL_MS = 30000;
-
-// Circuit breaker: exponential backoff on consecutive failures so a
-// 5-min backend outage doesn't fire 75 requests in the meantime.
-const BACKOFF_STEPS_MS = [4000, 8000, 16000, 32000, 60000];
+// Exponential-backoff cap. Same shape as `query-client.ts:22` so the
+// codebase has one backoff convention. Schedule on consecutive
+// failures: 1→4 s, 2→8 s, 3→16 s, 4→32 s, 5+→60 s clamped.
+const BACKOFF_BASE_MS = ACTIVE_INTERVAL_MS;
+const BACKOFF_CAP_MS = 60000;
 
 interface QueueState {
   data: QueueSnapshot | null;
   error: string | null;
-  lastFetchedAt: number | null;
   set: (patch: Partial<QueueState>) => void;
 }
 
 const useQueueStoreRaw = create<QueueState>((set) => ({
   data: null,
   error: null,
-  lastFetchedAt: null,
   set: (patch) => set(patch),
 }));
 
@@ -67,29 +66,27 @@ let visible = typeof document !== 'undefined' ? !document.hidden : true;
 let pollTimer: ReturnType<typeof setTimeout> | null = null;
 let currentController: AbortController | null = null;
 let consecutiveFailures = 0;
-let visibilityListenerRegistered = false;
+// Cached signature of the current `data` value. Avoids recomputing
+// the prev signature on every poll for the diff-on-fetch check.
+let lastSignature = 'null';
+// Single-flight gate for `pollNowAndArm()` — two promotions in the
+// same render tick (e.g. background + active subscriber mounted
+// together) won't double-poll.
+let pendingImmediate: Promise<void> | null = null;
 
-/** What interval should the timer fire at right now, given current demand?
- * Returns null when polling should not run at all (no subscribers OR
- * tab hidden OR backoff exhausted). */
 function effectiveInterval(): number | null {
   if (!visible) return null;
   if (counts.active === 0 && counts.background === 0) return null;
   const baseline = counts.active > 0 ? ACTIVE_INTERVAL_MS : BACKGROUND_INTERVAL_MS;
   if (consecutiveFailures > 0) {
-    const idx = Math.min(consecutiveFailures - 1, BACKOFF_STEPS_MS.length - 1);
-    const backoff = BACKOFF_STEPS_MS[idx] ?? BACKOFF_STEPS_MS[BACKOFF_STEPS_MS.length - 1] ?? baseline;
-    // Backoff must SLOW polling, never speed it up — `max(baseline, backoff)`
-    // protects the background tier (30 s) from getting accidentally
-    // promoted to 4 s on the first failure.
+    const backoff = Math.min(BACKOFF_BASE_MS * 2 ** (consecutiveFailures - 1), BACKOFF_CAP_MS);
+    // max(baseline, backoff) so a single failure can't accidentally
+    // promote the 30 s background tier to 4 s.
     return Math.max(baseline, backoff);
   }
   return baseline;
 }
 
-/** Stable signature for diff-on-fetch. Two snapshots that produce the
- * same signature won't trigger a `set({data})` write — downstream
- * Zustand selectors only re-broadcast when this changes. */
 function snapshotSignature(s: QueueSnapshot | null): string {
   if (!s) return 'null';
   const lists: QueueEntry[][] = [s.running || [], s.pending || [], s.recent || []];
@@ -100,6 +97,20 @@ function snapshotSignature(s: QueueSnapshot | null): string {
   return parts.join('#');
 }
 
+/** Cancel any pending timer and any in-flight fetch. Used when there
+ * are no subscribers OR the tab goes hidden — both states mean we
+ * don't want a response landing into a stale store. */
+function suspendPolling(): void {
+  if (pollTimer) {
+    clearTimeout(pollTimer);
+    pollTimer = null;
+  }
+  if (currentController) {
+    currentController.abort();
+    currentController = null;
+  }
+}
+
 async function pollOnce(): Promise<void> {
   if (currentController) currentController.abort();
   const controller = new AbortController();
@@ -108,14 +119,18 @@ async function pollOnce(): Promise<void> {
     const next = await fetchQueue({ signal: controller.signal });
     if (currentController !== controller) return;
     consecutiveFailures = 0;
-    const prev = useQueueStoreRaw.getState().data;
-    if (snapshotSignature(prev) === snapshotSignature(next)) {
-      // Same shape — only update timestamp + clear stale error, don't
-      // touch `data` reference (avoids cascade re-renders).
-      useQueueStoreRaw.getState().set({ error: null, lastFetchedAt: Date.now() });
+    const nextSig = snapshotSignature(next);
+    if (nextSig === lastSignature) {
+      // No-op write avoidance: only clear `error` if it was actually
+      // set last poll. Otherwise the setState broadcast wakes every
+      // selector even though nothing readable changed.
+      if (useQueueStoreRaw.getState().error !== null) {
+        useQueueStoreRaw.getState().set({ error: null });
+      }
       return;
     }
-    useQueueStoreRaw.getState().set({ data: next, error: null, lastFetchedAt: Date.now() });
+    lastSignature = nextSig;
+    useQueueStoreRaw.getState().set({ data: next, error: null });
   } catch (err) {
     if ((err as { name?: string })?.name === 'AbortError') return;
     if (currentController !== controller) return;
@@ -125,97 +140,69 @@ async function pollOnce(): Promise<void> {
   }
 }
 
-/** While an immediate-poll cycle is in flight, dedupe further
- * `reschedule(true)` calls — two promotions in the same tick (e.g.
- * background subscriber mounted, then active subscriber mounted in
- * the same render) would otherwise both fire `pollOnce`, double-
- * counting against the spy mock and double-arming the next timer. */
-let pendingImmediate: Promise<void> | null = null;
-
-/** Clear the pending timer and re-arm with the current effective
- * interval. If `pollNow` is true and the new effective interval is
- * non-null, fire `pollOnce()` immediately before scheduling the next
- * tick — used on tier promotion (background→active) and on
- * visibility resume so the user doesn't wait a full slow tick. */
-function reschedule(pollNow: boolean): void {
-  if (pollTimer) {
-    clearTimeout(pollTimer);
-    pollTimer = null;
-  }
+/** Arm the next loop tick at the current effective interval (no
+ * immediate poll). Caller must clear any existing timer first. */
+function armNextTick(): void {
   const interval = effectiveInterval();
   if (interval == null) return;
-  if (pollNow) {
-    if (pendingImmediate) return;
-    pendingImmediate = (async () => {
-      try {
-        await pollOnce();
-      } finally {
-        pendingImmediate = null;
-      }
-      // After the immediate poll the interval may have shifted (e.g.
-      // failures incremented). Recompute and arm only if no other
-      // call already armed it.
-      if (pollTimer) return;
-      const nextInterval = effectiveInterval();
-      if (nextInterval != null) {
-        pollTimer = setTimeout(loopTick, nextInterval);
-      }
-    })();
-    return;
-  }
   pollTimer = setTimeout(loopTick, interval);
+}
+
+/** Fire `pollOnce()` immediately, then arm the next tick. Deduped
+ * via `pendingImmediate` so concurrent promotions in the same render
+ * pass don't multiply fetches. */
+function pollNowAndArm(): void {
+  if (pendingImmediate) return;
+  pendingImmediate = (async () => {
+    try {
+      await pollOnce();
+    } finally {
+      pendingImmediate = null;
+    }
+    if (pollTimer) return;
+    armNextTick();
+  })();
 }
 
 async function loopTick(): Promise<void> {
   pollTimer = null;
   if (effectiveInterval() == null) return;
   await pollOnce();
-  const next = effectiveInterval();
-  if (next != null) {
-    pollTimer = setTimeout(loopTick, next);
-  }
+  armNextTick();
 }
 
 function startPolling(tier: PollTier): void {
-  // Tier promotion: bg→active when the only existing subs were background
-  // and we just added our first active. Same trigger when going from
-  // zero subs to any sub. Either way, kick a fresh poll right now so
-  // the consumer gets fresh state on mount.
+  // Tier promotion (idle→any-sub OR background-only→active) gets a
+  // fresh poll right now so the consumer sees current state on mount.
+  // No-promotion adds (e.g. second background subscriber while active
+  // is already counting) just inherit the existing schedule.
   const wasIdle = counts.active === 0 && counts.background === 0;
   const wasBackgroundOnly = counts.active === 0 && counts.background > 0;
   counts[tier] += 1;
   const promoted = wasIdle || (tier === 'active' && wasBackgroundOnly);
   if (promoted) {
-    if (!visibilityListenerRegistered && typeof document !== 'undefined') {
-      document.addEventListener('visibilitychange', handleVisibilityChange);
-      visibilityListenerRegistered = true;
+    if (pollTimer) {
+      clearTimeout(pollTimer);
+      pollTimer = null;
     }
-    reschedule(true);
+    pollNowAndArm();
   }
-  // Demoted-to-equal cases (e.g. adding a background while active is
-  // already counting) need no reschedule — the active interval still wins.
 }
 
 function stopPolling(tier: PollTier): void {
   counts[tier] = Math.max(0, counts[tier] - 1);
   if (counts.active === 0 && counts.background === 0) {
-    // No subs left — abort and clear timer. (Visibility listener stays;
-    // re-registering on every promotion would race with React strict
-    // mode's double-invoke.)
-    if (pollTimer) {
-      clearTimeout(pollTimer);
-      pollTimer = null;
-    }
-    if (currentController) {
-      currentController.abort();
-      currentController = null;
-    }
+    suspendPolling();
     return;
   }
   // Tier downgrade (active→background-only) keeps any in-flight fetch —
   // a full snapshot in flight is still useful to the background sub.
   // Just reschedule so the next tick fires at the slower interval.
-  reschedule(false);
+  if (pollTimer) {
+    clearTimeout(pollTimer);
+    pollTimer = null;
+  }
+  armNextTick();
 }
 
 function handleVisibilityChange(): void {
@@ -225,19 +212,21 @@ function handleVisibilityChange(): void {
   if (visible) {
     // Returning from hidden — fire a fresh poll so the dot updates
     // before the user's eye lands on it (humans notice ~100 ms).
-    reschedule(true);
-  } else {
-    // Going hidden — abort in-flight fetch (its result would land
-    // into a tab the user isn't looking at), clear timer.
     if (pollTimer) {
       clearTimeout(pollTimer);
       pollTimer = null;
     }
-    if (currentController) {
-      currentController.abort();
-      currentController = null;
-    }
+    pollNowAndArm();
+  } else {
+    suspendPolling();
   }
+}
+
+if (typeof document !== 'undefined') {
+  // Module-init listener — singleton lifetime equals the page; no
+  // teardown needed. Lazy-registering only on first promotion would
+  // race with React strict mode's double-invoke without buying anything.
+  document.addEventListener('visibilitychange', handleVisibilityChange);
 }
 
 /** Manual refresh — used right after enqueueing a task so the UI
@@ -339,35 +328,30 @@ export const __queueStoreInternals = {
   consecutiveFailures: () => consecutiveFailures,
   effectiveInterval,
   reset: () => {
-    if (pollTimer) {
-      clearTimeout(pollTimer);
-      pollTimer = null;
-    }
-    if (currentController) {
-      currentController.abort();
-      currentController = null;
-    }
+    suspendPolling();
     counts.active = 0;
     counts.background = 0;
     consecutiveFailures = 0;
     pendingImmediate = null;
+    lastSignature = 'null';
     visible = typeof document !== 'undefined' ? !document.hidden : true;
-    useQueueStoreRaw.setState({ data: null, error: null, lastFetchedAt: null });
+    useQueueStoreRaw.setState({ data: null, error: null });
   },
-  setData: (data: QueueSnapshot | null) => useQueueStoreRaw.setState({ data }),
+  setData: (data: QueueSnapshot | null) => {
+    lastSignature = snapshotSignature(data);
+    useQueueStoreRaw.setState({ data });
+  },
   setVisible: (next: boolean) => {
     if (next === visible) return;
     visible = next;
-    if (visible) reschedule(true);
-    else {
+    if (visible) {
       if (pollTimer) {
         clearTimeout(pollTimer);
         pollTimer = null;
       }
-      if (currentController) {
-        currentController.abort();
-        currentController = null;
-      }
+      pollNowAndArm();
+    } else {
+      suspendPolling();
     }
   },
   subscribe: useQueueStoreRaw.subscribe,

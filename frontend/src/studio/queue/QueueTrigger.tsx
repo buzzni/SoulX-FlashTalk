@@ -1,19 +1,9 @@
 /**
- * QueueTrigger — the "작업" pill in the header.
- *
- * Disabled while the queue snapshot hasn't landed yet (instead of
- * hiding, which caused a visible flicker every time the header
- * re-mounted between wizard and render views).
- *
- * Active signal is two-layered: button bg flips to accent (calm
- * confirmation that work exists), and an absolute red dot at the
- * upper-right corner (attention-grabber). The dot replaces the
- * legacy numeric badge — user opted for "변경 있다/없다" semantics
- * over precise count display (2026-04-27).
- *
- * Open/close behaviour is owned by the parent Radix Popover (via
- * `PopoverTrigger asChild`), so this component is render-only — no
- * onClick of its own; Radix injects toggle-on-click through the child.
+ * QueueTrigger — the "작업" pill in the header. Render-only; the
+ * parent Radix Popover injects open/close via `PopoverTrigger asChild`.
+ * Disabled (not hidden) until the queue snapshot lands, so the header
+ * doesn't flicker on layout remounts between wizard and render views.
+ * Red dot = work in progress.
  */
 import { forwardRef } from 'react';
 import Icon from '../Icon.jsx';
