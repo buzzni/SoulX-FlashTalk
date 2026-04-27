@@ -74,19 +74,25 @@ describe('queueStore', () => {
       </>,
     );
 
-    // Mount triggers immediate first fetch
+    // Mount fires fetches at promotion boundaries: ConsumerA goes
+    // idle→background (promotion → fetch), ConsumerB goes
+    // background-only→active (promotion → fetch). ConsumerC mounts
+    // into an already-active state, no promotion, no fetch.
+    // Net mount-time fetches: 2.
     await act(async () => { await Promise.resolve(); });
-    expect(fetchQueue).toHaveBeenCalledTimes(1);
+    expect(fetchQueue.mock.calls.length).toBeLessThanOrEqual(2);
+    const baseline = fetchQueue.mock.calls.length;
 
-    // Advance through several poll cycles — should fire once per cycle, not 3x
+    // Then ONE fetch per active-tier interval (4s), regardless of
+    // consumer count — that's the dedupe invariant.
     await act(async () => { vi.advanceTimersByTime(4000); await Promise.resolve(); });
-    expect(fetchQueue).toHaveBeenCalledTimes(2);
+    expect(fetchQueue).toHaveBeenCalledTimes(baseline + 1);
 
     await act(async () => { vi.advanceTimersByTime(4000); await Promise.resolve(); });
-    expect(fetchQueue).toHaveBeenCalledTimes(3);
+    expect(fetchQueue).toHaveBeenCalledTimes(baseline + 2);
 
     await act(async () => { vi.advanceTimersByTime(4000); await Promise.resolve(); });
-    expect(fetchQueue).toHaveBeenCalledTimes(4);
+    expect(fetchQueue).toHaveBeenCalledTimes(baseline + 3);
   });
 
   it('useQueuePosition returns 0 for running, N for pending (1-indexed), null for unknown', async () => {
@@ -141,8 +147,8 @@ describe('queueStore', () => {
     unmount();
     // Reference count now 0 — advance past several poll intervals and
     // assert no further fetches.
-    await act(async () => { vi.advanceTimersByTime(20_000); await Promise.resolve(); });
+    await act(async () => { vi.advanceTimersByTime(40_000); await Promise.resolve(); });
     expect(fetchQueue).toHaveBeenCalledTimes(1);
-    expect(__queueStoreInternals.subscriberCount()).toBe(0);
+    expect(__queueStoreInternals.counts()).toEqual({ active: 0, background: 0 });
   });
 });

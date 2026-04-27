@@ -5,7 +5,11 @@
  * hiding, which caused a visible flicker every time the header
  * re-mounted between wizard and render views).
  *
- * Badge turns accent-color when at least one task is running/pending.
+ * Active signal is two-layered: button bg flips to accent (calm
+ * confirmation that work exists), and an absolute red dot at the
+ * upper-right corner (attention-grabber). The dot replaces the
+ * legacy numeric badge — user opted for "변경 있다/없다" semantics
+ * over precise count display (2026-04-27).
  *
  * Open/close behaviour is owned by the parent Radix Popover (via
  * `PopoverTrigger asChild`), so this component is render-only — no
@@ -23,19 +27,27 @@ export const QueueTrigger = forwardRef<HTMLButtonElement, QueueTriggerProps & Re
   { loading, totalActive, ...rest },
   ref,
 ) {
+  const active = totalActive > 0;
+  const ariaLabel = loading
+    ? '작업 목록 불러오는 중'
+    : active
+      ? '작업 목록 보기. 진행 중인 작업이 있습니다.'
+      : '작업 목록 보기. 진행 중인 작업이 없습니다.';
   return (
     <button
       ref={ref}
       type="button"
       disabled={loading}
+      aria-label={ariaLabel}
       {...rest}
       style={{
+        position: 'relative',
         display: 'inline-flex',
         alignItems: 'center',
         gap: 6,
         padding: '6px 10px',
-        background: totalActive > 0 ? 'var(--accent)' : 'var(--bg-elev)',
-        color: totalActive > 0 ? '#fff' : 'var(--text-secondary)',
+        background: active ? 'var(--accent)' : 'var(--bg-elev)',
+        color: active ? '#fff' : 'var(--text-secondary)',
         border: '1px solid var(--border)',
         borderRadius: 'var(--r-sm)',
         fontSize: 12,
@@ -48,18 +60,27 @@ export const QueueTrigger = forwardRef<HTMLButtonElement, QueueTriggerProps & Re
     >
       <Icon name="settings" size={12} />
       작업
-      {totalActive > 0 && (
+      {active && (
+        // Red dot — single liveness indicator. Pulse animation is
+        // disabled globally under prefers-reduced-motion (index.css:281).
+        // role/aria-live announces state changes to screen readers
+        // since the dot is a color-only visual signal.
         <span
+          role="status"
+          aria-live="polite"
+          aria-label="작업 진행 중"
           style={{
-            background: 'rgba(255,255,255,0.25)',
-            borderRadius: 99,
-            padding: '0 6px',
-            fontSize: 10,
-            fontWeight: 700,
+            position: 'absolute',
+            top: -2,
+            right: -2,
+            width: 8,
+            height: 8,
+            borderRadius: 999,
+            background: 'var(--destructive)',
+            boxShadow: '0 0 0 3px var(--destructive-soft)',
+            animation: 'var(--animate-pulse-slow)',
           }}
-        >
-          {totalActive}
-        </span>
+        />
       )}
     </button>
   );
