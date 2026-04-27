@@ -26,13 +26,8 @@ import {
   clearDispatchInflight,
   clearDispatchSnapshot,
   clearDraftIfDispatched,
-  getDispatchInflight,
-  getDispatchSnapshot,
   markDispatched,
-  setDispatchInflight,
 } from '../../lib/wizardNav';
-import { computeDispatchSignature } from '../../lib/dispatchSignature';
-import { isTaskLive } from '../../api/queue';
 import { useRenderJob } from '../../hooks/useRenderJob';
 import { useQueuePosition } from '../../stores/queueStore';
 import { RESOLUTION_META } from '../../wizard/schema';
@@ -100,56 +95,14 @@ export default function RenderDashboard({
 
     (async () => {
       try {
-        // ── Idempotency gate. dispatchedRef only protects this single
-        //    component instance — refresh, fast double-click, or
-        //    back-and-click all rebuild the instance with current=false
-        //    and would re-POST without this. sessionStorage carries the
-        //    last dispatched task across mounts; if its signature
-        //    matches the current wizard intent and the task is still
-        //    live at the backend, attach to it instead of duplicating.
-        const currentSig = computeDispatchSignature(state);
-        const snap = getDispatchSnapshot();
-        if (snap && snap.signature === currentSig) {
-          const live = await isTaskLive(snap.taskId, {
-            signal: controller.signal,
-          }).catch(() => false);
-          if (!alive) return;
-          if (live) {
-            navigate(`/render/${snap.taskId}`, { replace: true });
-            return;
-          }
-          // Prior task no longer in-flight (completed / errored /
-          // cancelled / 404'd). Drop the stale snapshot so a fresh
-          // dispatch path runs and writes its own.
-          clearDispatchSnapshot();
-        }
-
-        // ── In-flight gate. Bridges the window between POST start and
-        //    task_id landing in sessionStorage. Refresh inside that
-        //    window would otherwise miss the snapshot gate and fire a
-        //    duplicate /api/generate. Poll briefly for the snapshot to
-        //    appear, then attach. Falls through after 6s if the peer
-        //    dispatch never completes (peer crashed / aborted).
-        const inflight = getDispatchInflight();
-        if (inflight && inflight.signature === currentSig) {
-          for (let i = 0; i < 12 && alive; i++) {
-            await new Promise((r) => setTimeout(r, 500));
-            const fresh = getDispatchSnapshot();
-            if (fresh && fresh.signature === currentSig) {
-              navigate(`/render/${fresh.taskId}`, { replace: true });
-              return;
-            }
-            if (!getDispatchInflight()) break; // peer cleared (failed)
-          }
-          // Timed out or peer cleared without writing snapshot. Drop the
-          // stale lock so this mount can fresh-dispatch.
-          clearDispatchInflight();
-        }
-
-        // Acquire the in-flight lock right before the POST so any
-        // concurrent mount (from refresh, double-click, StrictMode)
-        // sees we're already on it.
-        setDispatchInflight(currentSig);
+        // Stale-state cleanup only — no gate. The snapshot/in-flight gates
+        // we tried earlier (commits 09ab582, 36a80d2) blocked dispatch
+        // outright when isTaskLive threw (auth, network, 5xx) and put the
+        // page into "큐 에러" with no POST ever firing. Race protection now
+        // lives in dispatchedRef alone (single-instance) — dupes from
+        // refresh / fast double-click are accepted as the lesser evil.
+        clearDispatchSnapshot();
+        clearDispatchInflight();
 
         // Audio path lives on `voice.generation.audio.path` (tts /
         // clone) or `voice.audio.path` (upload mode, once the file
@@ -187,13 +140,8 @@ export default function RenderDashboard({
         // completion event can auto-reset the wizard. Reset can't
         // happen here yet — RenderDashboard still depends on the
         // wizard state (resolution etc.) for display fallbacks until
-        // the queue snapshot lands. The signature lets the next mount
-        // (refresh / back-and-click) recognize this same intent and
-        // attach instead of re-POSTing.
-        markDispatched(id, { signature: currentSig });
-        // markDispatched wrote the snapshot, so the in-flight lock
-        // has done its job — release it for any subsequent mount.
-        clearDispatchInflight();
+        // the queue snapshot lands.
+        markDispatched(id);
         // Promote the URL from /render → /render/:taskId so refresh
         // survives and the task is permalink-able. `replace: true` so
         // the back button skips the transient dispatch URL. No
@@ -202,14 +150,8 @@ export default function RenderDashboard({
         // 'fresh'` forces a full remount with the id as a prop.
         navigate(`/render/${id}`, { replace: true });
       } catch (err) {
-        // AbortError = user navigated away mid-dispatch. The POST may
-        // have landed at backend, so we deliberately leave the in-flight
-        // lock alone — the next mount can attach via the snapshot if
-        // markDispatched ran, or wait out the lock TTL if it didn't.
+        // AbortError = user navigated away mid-dispatch. Quiet exit.
         if ((err as { name?: string })?.name === 'AbortError') return;
-        // Hard failure (network, schema, missing audio path) — release
-        // the lock so the user can retry without a stale 60s wait.
-        clearDispatchInflight();
         if (!alive) return;
         // eslint-disable-next-line no-console
         console.error('render dispatch failed', err);
