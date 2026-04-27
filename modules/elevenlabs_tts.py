@@ -153,9 +153,6 @@ class ElevenLabsTTS:
             try:
                 resp.raise_for_status()
             except httpx.HTTPStatusError as exc:
-                # quota_exceeded comes back as 401 — translate before bubbling
-                # so the FastAPI layer surfaces "크레딧 부족" instead of the
-                # misleading "401 Unauthorized" raw string.
                 _raise_friendly(exc)
             pcm_bytes = resp.content
 

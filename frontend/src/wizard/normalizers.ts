@@ -330,20 +330,23 @@ function migrateCompositionVariants(raw: unknown): CompositionVariant[] {
   return migrateHostVariants(raw); // same shape
 }
 
+// Backend enum: closeup | bust | medium | full. Old persisted values
+// ('close', 'far') from before the rename map onto the closest backend
+// value so users with stale localStorage don't blow up Step 2.
+const LEGACY_SHOT_MAP: Record<string, CompositionShot> = { close: 'closeup', far: 'full' };
+
+function migrateShot(raw: unknown): CompositionShot {
+  if (raw === 'closeup' || raw === 'bust' || raw === 'medium' || raw === 'full') return raw;
+  if (typeof raw === 'string') {
+    const mapped = LEGACY_SHOT_MAP[raw];
+    if (mapped) return mapped;
+  }
+  return 'medium';
+}
+
 function migrateComposition(raw: unknown): Composition {
   const r = asObject(raw);
-  // Backend enum: closeup | bust | medium | full. Old persisted values
-  // ('close', 'far') from before the rename map onto the closest backend
-  // value so users with stale localStorage don't blow up Step 2.
-  const rawShot = r.shot;
-  const shot: CompositionShot =
-    rawShot === 'closeup' || rawShot === 'bust' || rawShot === 'medium' || rawShot === 'full'
-      ? rawShot
-      : rawShot === 'close'
-        ? 'closeup'
-        : rawShot === 'far'
-          ? 'full'
-          : 'medium';
+  const shot = migrateShot(r.shot);
   const angle: CompositionAngle = r.angle === 'high' || r.angle === 'low' ? r.angle : 'eye';
   const settings = {
     direction: asString(r.direction),

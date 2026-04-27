@@ -1096,8 +1096,6 @@ async def generate_elevenlabs_speech(
             "url": f"/api/files/{filename}",  # serveable URL — used by Step 3 <audio> preview
         }
     except ElevenLabsQuotaExceeded as e:
-        # 402 Payment Required — distinct from auth so the UI can route the
-        # message to "크레딧 부족" instead of the generic generation-failed banner.
         logger.warning(f"ElevenLabs quota exceeded: {e}")
         raise HTTPException(status_code=402, detail=f"ElevenLabs 크레딧이 부족합니다. {e}")
     except ElevenLabsAPIError as e:

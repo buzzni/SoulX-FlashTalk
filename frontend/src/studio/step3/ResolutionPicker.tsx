@@ -9,12 +9,7 @@
 import type { ResolutionKey } from '@/wizard/schema';
 import { RESOLUTION_META } from '@/wizard/schema';
 
-const RES_DISPLAY: Record<ResolutionKey, { warn?: boolean }> = {
-  '448p': {},
-  '480p': {},
-  '720p': {},
-  '1080p': { warn: true },
-};
+const WARN_KEYS = new Set<ResolutionKey>(['1080p']);
 
 const RES_OPTION_KEYS: ResolutionKey[] = ['448p', '480p', '720p', '1080p'];
 
@@ -27,7 +22,8 @@ export function ResolutionPicker({ selectedKey, onSelect }: ResolutionPickerProp
   return (
     <div className="res-grid">
       {RES_OPTION_KEYS.map((key) => {
-        const r = { ...RESOLUTION_META[key], ...RES_DISPLAY[key], tag: key };
+        const r = RESOLUTION_META[key];
+        const warn = WARN_KEYS.has(key);
         return (
         <button
           key={r.key}
@@ -38,10 +34,10 @@ export function ResolutionPicker({ selectedKey, onSelect }: ResolutionPickerProp
             {r.label}
           </div>
           <div className="res-dim">
-            {r.tag} · {r.width}×{r.height}
+            {key} · {r.width}×{r.height}
           </div>
           <div className="res-meta" style={{ marginTop: 10 }}>
-            <span style={{ fontWeight: r.warn ? 600 : 500, color: r.warn ? 'var(--warn-text)' : undefined }}>
+            <span style={{ fontWeight: warn ? 600 : 500, color: warn ? 'var(--warn-text)' : undefined }}>
               {r.speed}
             </span>
             <span>{r.size}</span>
