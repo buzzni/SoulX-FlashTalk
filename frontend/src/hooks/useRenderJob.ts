@@ -5,8 +5,8 @@
  * Combines two sources:
  *   1. `useQueueEntry(taskId)` — the 4s-polled queue row (status,
  *      timestamps, label, backend-side metadata).
- *   2. `subscribeProgress(taskId, …)` — the 1.5s-polled live
- *      progress snapshot (stage, progress, message).
+ *   2. `useTaskProgress(taskId)` — the 1.5s-polled live progress
+ *      snapshot (stage, progress, message) via TanStack Query.
  *
  * Pre-refactor, RenderDashboard maintained two parallel state
  * machines that read the same thing from two different sources and
@@ -60,9 +60,9 @@ export function useRenderJob(taskId: string | null | undefined): UseRenderJobRet
   // first poll lands, `data` stays non-null forever, so this flips
   // from false → true exactly once. Depending on `queueSnapshot`
   // directly in the effect below would re-fire every 4s (queueStore
-  // writes a fresh object on every poll), causing subscribeProgress
-  // to tear down + recreate on every tick — extra HTTP traffic and
-  // a reset of the 12s error-give-up budget inside progress.ts.
+  // writes a fresh object on every poll), causing the progress
+  // subscription to tear down + recreate on every tick — extra HTTP
+  // traffic and a reset of the 12s error-give-up budget.
   const queueSnapshotReady = queueSnapshot !== null;
 
   // Short-circuit: if the queue snapshot already shows the task is in
@@ -137,7 +137,7 @@ export function useRenderJob(taskId: string | null | undefined): UseRenderJobRet
   }, [startedAt, isTerminal, entry?.completed_at]);
 
   const isDone = isTerminalStage ? stage === 'complete' : entry?.status === 'completed';
-  // `pollFailed` flips when subscribeProgress gives up after ~12s of
+  // `pollFailed` flips when the progress poller gives up after ~12s of
   // backend errors. Before this was folded in, pollFailed set a flag
   // nobody read — RenderDashboard's status aggregator only looks at
   // `isError`, so a dying progress endpoint surfaced as an eternal

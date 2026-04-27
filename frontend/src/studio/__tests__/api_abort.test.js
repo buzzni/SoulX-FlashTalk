@@ -8,7 +8,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { fetchResult } from '../../api/result';
 import { getVideoMeta } from '../../api/file';
-import { subscribeProgress } from '../../api/progress';
 import { streamHost } from '../../api/host';
 
 beforeEach(() => {
@@ -62,37 +61,9 @@ describe('api.abort — getVideoMeta', () => {
   });
 });
 
-describe('api.abort — subscribeProgress', () => {
-  it('unsubscribe() stops further polling ticks', async () => {
-    const onUpdate = vi.fn();
-    // First call resolves to a non-terminal snapshot so the subscription
-    // wants to schedule a second tick; without unsubscribe, it would.
-    global.fetch = vi.fn().mockResolvedValue({
-      ok: true,
-      json: async () => ({ task_id: 'task-1', stage: 'generating', progress: 0.5, message: '…' }),
-    });
-
-    const unsubscribe = subscribeProgress('task-1', onUpdate);
-    // Let the first tick complete
-    await vi.waitFor(() => expect(onUpdate).toHaveBeenCalledTimes(1));
-
-    unsubscribe();
-    const callsAfterUnsub = global.fetch.mock.calls.length;
-    // Advance well past the poll interval — no new fetch should happen
-    await vi.advanceTimersByTimeAsync(5_000);
-    expect(global.fetch.mock.calls.length).toBe(callsAfterUnsub);
-  });
-
-  it('gives up after 8 consecutive failures, emits {error: true}, stops polling', async () => {
-    const onUpdate = vi.fn();
-    // Every fetch rejects → consecutiveErrors hits 8 → onUpdate({error:true})
-    global.fetch = vi.fn().mockRejectedValue(new Error('network down'));
-    subscribeProgress('task-1', onUpdate);
-    // Drive enough ticks to exceed the error budget (default 8, poll 1500ms).
-    await vi.advanceTimersByTimeAsync(20_000);
-    expect(onUpdate).toHaveBeenCalledWith({ error: true });
-  });
-});
+// `subscribeProgress` was retired in favour of `useTaskProgress` (TanStack
+// Query) — its abort/cancel semantics are now covered by
+// `src/api/queries/__tests__/use-task-progress.test.tsx`.
 
 describe('api.abort — streamHost', () => {
   it('abort before iteration rejects the initial fetch', async () => {
