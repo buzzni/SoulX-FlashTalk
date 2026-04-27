@@ -22,6 +22,13 @@ import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover
 import { QueueTrigger } from './queue/QueueTrigger';
 import { QueuePanel } from './queue/QueuePanel';
 import { useQueueActions } from './queue/useQueueActions';
+import { ConfirmModal } from '../components/confirm-modal';
+
+interface PendingAction {
+  type: 'cancel' | 'retry';
+  taskId: string;
+  label: string;
+}
 
 export default function QueueStatus() {
   const navigate = useNavigate();
@@ -40,9 +47,31 @@ export default function QueueStatus() {
     retry,
   } = useQueueActions(refresh);
 
-  // Retry returns the new task_id; navigate the user to its render page
-  // so they immediately see the new attempt instead of having to dig.
-  const handleRetry = async (taskId: string, label: string) => {
+  // Confirm modal lives one level up from the rows so a single instance
+  // covers cancel + retry across all rows. State holds the pending
+  // action; null means no modal open. Row click → set pending →
+  // ConfirmModal renders → confirm runs the hook action.
+  const [pending, setPending] = useState<PendingAction | null>(null);
+
+  // Wrappers the rows call. These don't run the action — they queue
+  // a confirm. ConfirmModal's onConfirm runs the real hook function.
+  const askCancel = (taskId: string, label: string) => {
+    setPending({ type: 'cancel', taskId, label });
+  };
+  const askRetry = (taskId: string, label: string) => {
+    setPending({ type: 'retry', taskId, label });
+  };
+
+  const runPending = async () => {
+    if (!pending) return;
+    const { type, taskId, label } = pending;
+    setPending(null);
+    if (type === 'cancel') {
+      await cancel(taskId, label);
+      return;
+    }
+    // Retry returns the new task_id; navigate to it so the user lands
+    // on the new attempt instead of staring at the popover.
     const newId = await retry(taskId, label);
     if (newId) {
       setOpen(false);
@@ -73,6 +102,7 @@ export default function QueueStatus() {
   };
 
   return (
+    <>
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
         <QueueTrigger loading={loading} totalActive={totalActive} />
@@ -94,11 +124,46 @@ export default function QueueStatus() {
             onClose={() => setOpen(false)}
             onOpenLive={handleOpenLive}
             onOpenRecent={handleOpenRecent}
-            onCancel={cancel}
-            onRetry={handleRetry}
+            onCancel={askCancel}
+            onRetry={askRetry}
           />
         )}
       </PopoverContent>
     </Popover>
+    <ConfirmModal
+      open={pending?.type === 'cancel'}
+      title="이 작업을 취소할까요?"
+      description={
+        pending?.type === 'cancel' ? (
+          <p className="m-0 leading-relaxed">
+            {pending.label || pending.taskId}
+            <br />
+            <span className="text-tertiary">큐에서 제거되고 되돌릴 수 없어요.</span>
+          </p>
+        ) : null
+      }
+      confirmLabel="취소하기"
+      cancelLabel="유지"
+      variant="danger"
+      onConfirm={runPending}
+      onCancel={() => setPending(null)}
+    />
+    <ConfirmModal
+      open={pending?.type === 'retry'}
+      title="이 작업을 다시 시도할까요?"
+      description={
+        pending?.type === 'retry' ? (
+          <p className="m-0 leading-relaxed">
+            {pending.label || pending.taskId}
+            <br />
+            <span className="text-tertiary">같은 입력으로 새 작업을 만들어요.</span>
+          </p>
+        ) : null
+      }
+      confirmLabel="재시도"
+      onConfirm={runPending}
+      onCancel={() => setPending(null)}
+    />
+    </>
   );
 }

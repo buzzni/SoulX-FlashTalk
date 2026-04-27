@@ -24,6 +24,7 @@ import { fetchJSON, humanizeError } from '../api/http';
 import { retryFailedTask } from '../api/queue';
 import { useWizardStore } from '../stores/wizardStore';
 import { RESOLUTION_META, type ResolutionKey } from '../wizard/schema';
+import { ConfirmModal } from '../components/confirm-modal';
 import { schemas } from '../api/schemas-generated';
 import { formatTaskTitle } from './taskFormat.js';
 import { Confetti } from './shared/Confetti';
@@ -84,10 +85,12 @@ export default function ResultPage() {
   const [recent, setRecent] = useState<RecentItem[] | null>(null);
   const [retrying, setRetrying] = useState(false);
   const [retryError, setRetryError] = useState<string | null>(null);
+  // null = no modal open; otherwise the action that's pending confirmation.
+  const [confirmAction, setConfirmAction] = useState<'retry' | 'edit' | null>(null);
 
-  const handleRetry = async () => {
+  const doRetry = async () => {
+    setConfirmAction(null);
     if (!taskId || retrying) return;
-    if (!window.confirm('이 작업을 다시 시도할까요?')) return;
     setRetrying(true);
     setRetryError(null);
     try {
@@ -111,10 +114,9 @@ export default function ResultPage() {
   // directly because their lifecycle (selected/url/seed/etc.) is wider
   // than what the manifest carries — better to make the user re-confirm
   // than fake a half-valid generation.
-  const handleEditAndRetry = () => {
-    if (!result || !window.confirm('지금까지 입력한 다른 작업이 있다면 사라져요. 이 작업의 입력으로 새로 시작할까요?')) {
-      return;
-    }
+  const doEditAndRetry = () => {
+    setConfirmAction(null);
+    if (!result) return;
     const params = (result.params ?? {}) as Record<string, unknown>;
     const scriptText = typeof params.script_text === 'string' ? params.script_text : '';
     const resReq = typeof params.resolution_requested === 'string' ? params.resolution_requested : '';
@@ -271,7 +273,7 @@ export default function ResultPage() {
                     <Button
                       icon="refresh"
                       variant="secondary"
-                      onClick={handleRetry}
+                      onClick={() => setConfirmAction('retry')}
                       disabled={retrying}
                       title="같은 입력으로 그대로 다시 시도"
                     >
@@ -280,7 +282,7 @@ export default function ResultPage() {
                     <Button
                       icon="settings"
                       variant="secondary"
-                      onClick={handleEditAndRetry}
+                      onClick={() => setConfirmAction('edit')}
                       title="이 작업의 입력값을 마법사에 채우고 처음부터 다시"
                     >
                       수정해서 다시 만들기
@@ -291,6 +293,35 @@ export default function ResultPage() {
                   새로 만들기
                 </Button>
               </div>
+
+              <ConfirmModal
+                open={confirmAction === 'retry'}
+                title="이 작업을 다시 시도할까요?"
+                description="같은 입력으로 새 작업을 큐에 넣어요. 같은 환경에서 같은 이유로 또 실패할 수 있어요."
+                confirmLabel="재시도"
+                onConfirm={doRetry}
+                onCancel={() => setConfirmAction(null)}
+                busy={retrying}
+              />
+              <ConfirmModal
+                open={confirmAction === 'edit'}
+                title="입력을 수정해서 다시 만들까요?"
+                description={
+                  <>
+                    <p className="m-0 leading-relaxed">
+                      이 작업의 <b>대본</b>과 <b>화질</b> 설정을 마법사에 채우고
+                      <br />
+                      <b>1단계</b>부터 다시 시작해요.
+                    </p>
+                    <p className="mt-2 m-0 leading-relaxed text-tertiary">
+                      지금까지 입력하던 다른 마법사 작업이 있다면 사라져요.
+                    </p>
+                  </>
+                }
+                confirmLabel="시작하기"
+                onConfirm={doEditAndRetry}
+                onCancel={() => setConfirmAction(null)}
+              />
             </div>
 
             {error && !result && (

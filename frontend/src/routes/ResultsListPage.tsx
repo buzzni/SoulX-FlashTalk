@@ -17,6 +17,7 @@ import { startNewVideo } from '../lib/wizardNav';
 import { cn } from '@/lib/utils';
 import { fetchJSON, humanizeError } from '../api/http';
 import { schemas } from '../api/schemas-generated';
+import { ConfirmModal } from '../components/confirm-modal';
 import {
   createPlaylist,
   deletePlaylist,
@@ -377,6 +378,7 @@ function PlaylistChip({ playlist, active, onSelect, onChanged }: PlaylistChipPro
   const [renaming, setRenaming] = useState(false);
   const [name, setName] = useState(playlist.name);
   const [busy, setBusy] = useState(false);
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
 
   const submitRename = async () => {
     const n = name.trim();
@@ -400,13 +402,9 @@ function PlaylistChip({ playlist, active, onSelect, onChanged }: PlaylistChipPro
     }
   };
 
+  const askDelete = () => setConfirmingDelete(true);
   const submitDelete = async () => {
-    if (!window.confirm(
-      `"${playlist.name}" 플레이리스트를 삭제할까요?\n` +
-      `안에 있는 영상들은 미지정으로 옮겨집니다.`,
-    )) {
-      return;
-    }
+    setConfirmingDelete(false);
     setBusy(true);
     try {
       await deletePlaylist(playlist.playlist_id);
@@ -474,11 +472,29 @@ function PlaylistChip({ playlist, active, onSelect, onChanged }: PlaylistChipPro
           <DropdownMenuItem onSelect={() => setRenaming(true)}>
             이름 변경
           </DropdownMenuItem>
-          <DropdownMenuItem onSelect={submitDelete} variant="destructive">
+          <DropdownMenuItem onSelect={askDelete} variant="destructive">
             삭제
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
+      <ConfirmModal
+        open={confirmingDelete}
+        title="플레이리스트를 삭제할까요?"
+        description={
+          <p className="m-0 leading-relaxed">
+            <b>{playlist.name}</b>
+            <br />
+            <span className="text-tertiary">
+              안에 있는 영상들은 미지정으로 옮겨져요.
+            </span>
+          </p>
+        }
+        confirmLabel="삭제"
+        variant="danger"
+        busy={busy}
+        onConfirm={submitDelete}
+        onCancel={() => setConfirmingDelete(false)}
+      />
     </div>
   );
 }

@@ -31,9 +31,12 @@ export function useQueueActions(refresh: () => void): UseQueueActions {
   const [retryingIds, setRetryingIds] = useState<Set<string>>(new Set());
   const [retryError, setRetryError] = useState<string | null>(null);
 
+  // The hook no longer carries the user-confirm step — callers (queue
+  // popover, ResultPage) own that with ConfirmModal so we get a styled
+  // dialog instead of the OS native confirm. Each caller decides when
+  // the action is committed; the hook just runs it and tracks state.
   const cancel = useCallback(
-    async (taskId: string, label: string) => {
-      if (!window.confirm(`이 작업을 취소할까요?\n${label || taskId}`)) return;
+    async (taskId: string, _label: string) => {
       setCancellingIds((prev) => {
         const next = new Set(prev);
         next.add(taskId);
@@ -57,12 +60,9 @@ export function useQueueActions(refresh: () => void): UseQueueActions {
   );
 
   // Retry returns the new task_id (caller can navigate to /render/:newId);
-  // null on cancel or failure. Confirm + per-task spinner mirror cancel().
+  // null on failure. Per-task spinner state mirrors cancel().
   const retry = useCallback(
-    async (taskId: string, label: string): Promise<string | null> => {
-      if (!window.confirm(`이 작업을 다시 시도할까요?\n${label || taskId}`)) {
-        return null;
-      }
+    async (taskId: string, _label: string): Promise<string | null> => {
       setRetryingIds((prev) => {
         const next = new Set(prev);
         next.add(taskId);

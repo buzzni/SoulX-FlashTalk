@@ -82,7 +82,10 @@ describe('QueueStatus click-to-navigate', () => {
 
   it('pending rows expose an enabled cancel button that calls cancelQueuedTask', async () => {
     cancelQueuedTask.mockResolvedValue({ message: 'cancelled' });
-    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    // Radix Dialog uses RAF / setTimeout for mount transitions; under
+    // fake timers it never appears, so the modal's confirm button
+    // can't be found. Switch to real timers for this test only.
+    vi.useRealTimers();
 
     await renderAndExpand();
     // Running rows have no cancel button at all (backend can't kill in-flight
@@ -91,7 +94,14 @@ describe('QueueStatus click-to-navigate', () => {
     expect(cancelBtns).toHaveLength(2);
     expect(cancelBtns[0].disabled).toBe(false);
 
+    // Click the row's cancel X — this opens the styled ConfirmModal
+    // (replaces the old window.confirm). The API call only fires
+    // after the user clicks the modal's "취소하기" button.
     await act(async () => { fireEvent.click(cancelBtns[0]); await Promise.resolve(); });
+    expect(cancelQueuedTask).not.toHaveBeenCalled();
+
+    const confirmBtn = await screen.findByRole('button', { name: '취소하기' });
+    await act(async () => { fireEvent.click(confirmBtn); await Promise.resolve(); });
     expect(cancelQueuedTask).toHaveBeenCalledWith('pend-1');
   });
 
