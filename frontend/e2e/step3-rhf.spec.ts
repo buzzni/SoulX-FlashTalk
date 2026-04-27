@@ -192,32 +192,10 @@ test.describe('step3-rhf', () => {
     expect(paragraphs).toEqual(['안녕하세요 첫 문단 내용입니다', '두 번째 문단 내용']);
   });
 
-  test('typed script survives a simulated voice.generation mutation', async ({ page }) => {
-    await page.goto('/step/3');
-    await page.waitForLoadState('networkidle');
-
-    const firstPara = page.locator('textarea').first();
-    await firstPara.fill('타이핑 중인 사용자 입력');
-    await page.waitForTimeout(400);
-
-    // Simulate a TTS state-machine event by mutating voice.generation
-    // via the persisted blob + a storage event. Step3Audio subscribes
-    // to narrow voice fields (script, advanced, voiceId, voiceName,
-    // sample, audio) — NOT to voice.generation. This mutation MUST
-    // NOT trigger a form.reset that wipes the textarea.
-    await page.evaluate(() => {
-      const raw = JSON.parse(localStorage.getItem('showhost.wizard.v1')!);
-      raw.state.voice.generation = { state: 'generating' };
-      localStorage.setItem('showhost.wizard.v1', JSON.stringify(raw));
-      window.dispatchEvent(
-        new StorageEvent('storage', {
-          key: 'showhost.wizard.v1',
-          newValue: JSON.stringify(raw),
-        }),
-      );
-    });
-    await page.waitForTimeout(200);
-
-    await expect(firstPara).toHaveValue('타이핑 중인 사용자 입력');
-  });
+  // The narrow-watch regression guard (typed paragraph survives a
+  // voice.generation mutation) is verified at the integration layer
+  // in src/studio/__tests__/step3_audio.test.tsx — the e2e variant
+  // would have to fake the in-memory store mutation via a storage
+  // event, which the wizardStore does not listen for, leaving the
+  // assertion trivially passing even if the design regressed.
 });

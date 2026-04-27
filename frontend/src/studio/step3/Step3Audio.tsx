@@ -42,7 +42,6 @@ import { useUploadReferenceImage } from '../../hooks/useUploadReferenceImage';
 import { useWizardStore } from '../../stores/wizardStore';
 import { isLocalAsset, isServerAsset } from '@/wizard/normalizers';
 import {
-  INITIAL_VOICE,
   RESOLUTION_META,
   isHostReady,
   isCompositionReady,
@@ -68,7 +67,7 @@ import { AudioPlayer } from '../shared/AudioPlayer';
 import { VoicePicker } from './VoicePicker';
 import { VoiceCloner } from './VoiceCloner';
 import { AudioUploader } from './AudioUploader';
-import { ScriptEditor, buildScript } from './ScriptEditor';
+import { ScriptEditor, buildScript, SCRIPT_LIMIT, clampParagraphs } from './ScriptEditor';
 import { VoiceAdvancedSettings } from './VoiceAdvancedSettings';
 import { ResolutionPicker } from './ResolutionPicker';
 import { PlaylistPicker } from './PlaylistPicker';
@@ -92,17 +91,24 @@ export interface Step3AudioProps {
   update: UpdateFn;
 }
 
-// ────────────────────────────────────────────────────────────────────
-// Source-mode transitions on form values — script + advanced carry
-// over where the union members agree on them. Switching from upload
-// back to AI defaults the sliders to INITIAL_VOICE.advanced (no
-// advanced field on the upload variant to carry from).
-// ────────────────────────────────────────────────────────────────────
+// Source-mode transitions on form values. Script + advanced carry
+// over where the union members agree on them; switching from upload
+// to AI defaults the sliders to schema initial values (the upload
+// variant has no advanced field to carry from).
 
 function carryAdvanced(prev: VoiceFormValues): VoiceAdvanced {
   return prev.source === 'upload'
     ? { speed: 1, stability: 0.5, style: 0.3, similarity: 0.75 }
     : prev.advanced;
+}
+
+// Carrying script across upload → TTS clamps to SCRIPT_LIMIT — the
+// upload-mode subtitle textarea has no per-paragraph cap, so a long
+// paste must not silently ride into the TTS request.
+function carryScript(prev: VoiceFormValues): { paragraphs: string[] } {
+  return prev.source === 'upload'
+    ? { paragraphs: clampParagraphs(prev.script.paragraphs) }
+    : prev.script;
 }
 
 function toTTSForm(prev: VoiceFormValues): VoiceFormValues {
@@ -112,7 +118,7 @@ function toTTSForm(prev: VoiceFormValues): VoiceFormValues {
     voiceId: null,
     voiceName: null,
     advanced: carryAdvanced(prev),
-    script: prev.script,
+    script: carryScript(prev),
   };
 }
 
@@ -122,7 +128,7 @@ function toCloneForm(prev: VoiceFormValues): VoiceFormValues {
     source: 'clone',
     sample: { state: 'empty' },
     advanced: carryAdvanced(prev),
-    script: prev.script,
+    script: carryScript(prev),
   };
 }
 
@@ -137,10 +143,8 @@ export default function Step3Audio({ state, update }: Step3AudioProps) {
   const resolution: ResolutionKey = state.resolution;
   const setVoice = useWizardStore((s) => s.setVoice);
 
-  // Narrow voice-field subscriptions. NEVER subscribe to the full
-  // `voice` slice — generation lifecycle mutations (TTS state machine)
-  // would create a new `voice` reference and trigger spurious form
-  // resets that wipe in-progress edits. See keepDirty memory.
+  // Each useWizardStore call subscribes to one narrow field — see
+  // file header for the streaming-event regression this prevents.
   const source = useWizardStore((s) => s.voice.source);
   const script = useWizardStore((s) => s.voice.script);
   const advanced = useWizardStore((s) =>
@@ -171,6 +175,7 @@ export default function Step3Audio({ state, update }: Step3AudioProps) {
   const audioUpload = useUploadReferenceImage(uploadAudio);
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [uploadErrorMsg, setUploadErrorMsg] = useState<string | null>(null);
 
   // Form-shaped projection. Memoize on the narrow field refs so
   // generation mutations don't bubble through.
@@ -213,7 +218,7 @@ export default function Step3Audio({ state, update }: Step3AudioProps) {
     },
     [setVoice],
   );
-  useDebouncedFormSync(form, onChange, 300);
+  const formSync = useDebouncedFormSync(form, onChange, 300);
 
   // Narrow per-field watches — broad `useWatch({name: 'voice'})` would
   // re-render Step3Audio on every keystroke in any nested field
@@ -246,9 +251,18 @@ export default function Step3Audio({ state, update }: Step3AudioProps) {
   const isAi = watchedSource !== 'upload';
   const aiSubMode: 'tts' | 'clone' = watchedSource === 'clone' ? 'clone' : 'tts';
 
+  // Mode swaps abort any in-flight TTS / clone request — otherwise
+  // the resolution lands on the new variant via setVoice and the
+  // user sees stale audio attributed to the wrong source.
+  const abortInflight = () => {
+    tts.abort();
+    cloner.abort();
+  };
+
   const switchToAi = () => {
     const cur = form.getValues('voice');
     if (cur.source === 'upload') {
+      abortInflight();
       form.setValue('voice', toTTSForm(cur), {
         shouldDirty: true,
         shouldValidate: true,
@@ -258,6 +272,7 @@ export default function Step3Audio({ state, update }: Step3AudioProps) {
   const switchToRawAudio = () => {
     const cur = form.getValues('voice');
     if (cur.source !== 'upload') {
+      abortInflight();
       form.setValue('voice', toUploadForm(cur), {
         shouldDirty: true,
         shouldValidate: true,
@@ -267,6 +282,7 @@ export default function Step3Audio({ state, update }: Step3AudioProps) {
   const switchAiSubMode = (next: 'tts' | 'clone') => {
     const cur = form.getValues('voice');
     if (cur.source === next) return;
+    abortInflight();
     form.setValue(
       'voice',
       next === 'tts' ? toTTSForm(cur) : toCloneForm(cur),
@@ -282,10 +298,15 @@ export default function Step3Audio({ state, update }: Step3AudioProps) {
     if (watchedSource !== 'upload') return;
     if (!watchedAudio || !isLocalAsset(watchedAudio)) return;
     const local = watchedAudio;
+    setUploadErrorMsg(null);
     let alive = true;
     (async () => {
       const res = await audioUpload.upload(local.file);
-      if (!alive || !res?.path) return;
+      if (!alive) return;
+      if (!res?.path) {
+        if (audioUpload.error) setUploadErrorMsg(audioUpload.error);
+        return;
+      }
       const cur = form.getValues('voice');
       if (
         cur.source !== 'upload' ||
@@ -324,6 +345,12 @@ export default function Step3Audio({ state, update }: Step3AudioProps) {
       : null;
   const isGenerated =
     watchedSource !== 'upload' && voiceGeneration?.state === 'ready';
+  // While TTS is generating, lock script + advanced edits — otherwise
+  // a mid-flight edit lands on the resolved 'ready' state with audio
+  // that doesn't match the displayed text. Mirrors the user expectation
+  // that "음성 만들기 중" is a quiet phase.
+  const generationLocked =
+    watchedSource !== 'upload' && voiceGeneration?.state === 'generating';
 
   // ── Generate CTA orchestration ──────────────────────────────────
   const submit = useMemo(
@@ -332,15 +359,19 @@ export default function Step3Audio({ state, update }: Step3AudioProps) {
         if (v.source === 'upload') return;
         setErrorMsg(null);
         try {
-          // Sync form → store synchronously so useTTSGeneration
-          // (which reads useWizardStore.getState().voice) sees fresh
-          // values even if the user clicked within the 300ms debounce
-          // window.
+          // Cancel any pending debounce timer + sync form → store
+          // synchronously. Without the cancel, a buffered timer can
+          // fire AFTER cloner.clone resolves and overwrite the new
+          // sample:'cloned' with form's stale sample:'pending'.
+          formSync.cancel();
           setVoice((prev) => formValuesToVoiceSlice(v, prev));
 
           if (v.source === 'clone' && v.sample.state === 'pending') {
             const cloneResult = await cloner.clone(v.sample.asset.file);
-            if (!cloneResult?.voice_id) return;
+            if (!cloneResult?.voice_id) {
+              if (cloner.error) setErrorMsg(cloner.error);
+              return;
+            }
           }
           if (v.source === 'clone' && v.sample.state === 'empty') {
             throw new Error('클론용 샘플 음성을 올려주세요');
@@ -349,12 +380,15 @@ export default function Step3Audio({ state, update }: Step3AudioProps) {
             throw new Error('목소리를 먼저 골라주세요');
           }
           const result = await tts.generate();
-          if (!result) return;
+          if (!result) {
+            if (tts.error) setErrorMsg(tts.error);
+            return;
+          }
         } catch (err) {
           setErrorMsg(humanizeError(err));
         }
       }),
-    [form, cloner, tts, setVoice],
+    [form, cloner, tts, setVoice, formSync],
   );
 
   // audioUpload runs in upload-mode only, where the AI Generate CTA
@@ -362,6 +396,7 @@ export default function Step3Audio({ state, update }: Step3AudioProps) {
   const generating = tts.isLoading || cloner.isLoading;
   const canGenerate = (() => {
     if (watchedSource === 'upload' || !combinedScript) return false;
+    if (combinedScript.length > SCRIPT_LIMIT) return false;
     if (watchedSource === 'tts') return !!watchedVoiceId;
     if (watchedSource === 'clone')
       return watchedSampleState === 'cloned' || watchedSampleState === 'pending';
@@ -432,11 +467,12 @@ export default function Step3Audio({ state, update }: Step3AudioProps) {
 
               <hr className="hr" />
 
-              <ScriptEditor />
+              <ScriptEditor disabled={generationLocked} />
 
               <VoiceAdvancedSettings
                 open={advancedOpen}
                 onOpenChange={setAdvancedOpen}
+                disabled={generationLocked}
               />
 
               {errorMsg && (
@@ -478,6 +514,22 @@ export default function Step3Audio({ state, update }: Step3AudioProps) {
               <div className="min-h-[280px]">
                 <AudioUploader isUploading={audioUpload.isLoading} />
               </div>
+              {uploadErrorMsg && (
+                <div
+                  className="mt-3"
+                  style={{
+                    padding: '10px 12px',
+                    background: 'var(--danger-soft)',
+                    border: '1px solid var(--danger)',
+                    borderRadius: 'var(--r-sm)',
+                    color: 'var(--danger)',
+                    fontSize: 12,
+                  }}
+                >
+                  <Icon name="alert_circle" size={13} style={{ marginRight: 6 }} />
+                  {uploadErrorMsg} · 다시 시도하려면 파일을 다시 골라주세요.
+                </div>
+              )}
               {watchedAudio && isServerAsset(watchedAudio) && (
                 <div className="mt-3 flex items-center gap-2">
                   <Badge variant="success" icon="check_circle">

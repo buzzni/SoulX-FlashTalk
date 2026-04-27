@@ -25,6 +25,7 @@ import {
 import { isLocalAsset } from '@/wizard/normalizers';
 import type { LocalAsset, Script, ServerAsset } from '@/wizard/schema';
 import type { Step3FormValues } from '@/wizard/form-mappers';
+import { clampParagraphs } from './ScriptEditor';
 
 export interface AudioUploaderProps {
   /** True while the staged LocalAsset is being uploaded to the
@@ -101,11 +102,13 @@ export function AudioUploader({ isUploading = false }: AudioUploaderProps) {
           onChange={(e) => {
             // Subtitle is a single textarea; split on blank-line
             // separators so the schema multi-paragraph shape stays
-            // consistent with TTS mode.
-            const paragraphs = e.target.value.split(/\n\s*\n/);
+            // consistent with TTS mode. Clamp to SCRIPT_LIMIT so a
+            // 1MB paste here doesn't ride into TTS via toTTSForm.
+            const split = e.target.value.split(/\n\s*\n/);
+            const paragraphs = clampParagraphs(split.length > 0 ? split : ['']);
             setValue(
               'voice.script' as const,
-              { paragraphs: paragraphs.length > 0 ? paragraphs : [''] },
+              { paragraphs },
               { shouldDirty: true, shouldValidate: true },
             );
           }}

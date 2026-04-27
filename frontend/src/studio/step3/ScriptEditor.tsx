@@ -38,7 +38,40 @@ export function buildScript(paragraphs: string[]): string {
     .join(BREATH_TAG);
 }
 
-export function ScriptEditor() {
+/** Clamp a paragraphs array so buildScript(...).length <= SCRIPT_LIMIT.
+ * Truncates from the END of the over-budget paragraph so earlier
+ * content stays intact. Used when carrying script across mode swaps
+ * (upload subtitle → TTS) and on hydration from possibly-stale
+ * localStorage blobs that predate the cap. */
+export function clampParagraphs(paragraphs: string[]): string[] {
+  const out: string[] = [];
+  let used = 0;
+  for (let i = 0; i < paragraphs.length; i++) {
+    const p = paragraphs[i] ?? '';
+    const trimmed = p.trim();
+    const isFirstNonEmpty = out.every((q) => (q || '').trim().length === 0);
+    const sepCost = trimmed.length > 0 && !isFirstNonEmpty ? BREATH_TAG.length : 0;
+    const available = SCRIPT_LIMIT - used - sepCost;
+    if (available <= 0) {
+      out.push('');
+      continue;
+    }
+    if (p.length > available) {
+      out.push(p.slice(0, available));
+      used += sepCost + p.slice(0, available).trim().length;
+    } else {
+      out.push(p);
+      used += sepCost + trimmed.length;
+    }
+  }
+  return out;
+}
+
+export interface ScriptEditorProps {
+  disabled?: boolean;
+}
+
+export function ScriptEditor({ disabled = false }: ScriptEditorProps) {
   const { control, setValue, getValues } = useFormContext<Step3FormValues>();
   const watched = useWatch({
     control,
@@ -133,8 +166,9 @@ export function ScriptEditor() {
                   {idx !== 0 && (
                     <button
                       type="button"
-                      className="paragraph-delete-btn inline-flex items-center gap-1 h-7 px-2.5 rounded-md text-[12px] font-medium text-muted-foreground hover:bg-secondary hover:text-foreground transition-colors"
+                      className="paragraph-delete-btn inline-flex items-center gap-1 h-7 px-2.5 rounded-md text-[12px] font-medium text-muted-foreground hover:bg-secondary hover:text-foreground transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                       onClick={() => removeParagraph(idx)}
+                      disabled={disabled}
                     >
                       <Icon name="trash" size={11} />
                       삭제
@@ -152,6 +186,7 @@ export function ScriptEditor() {
                 }
                 value={p}
                 onChange={(e) => updateParagraph(idx, e.target.value)}
+                disabled={disabled}
               />
             </div>
           </Fragment>
@@ -162,7 +197,7 @@ export function ScriptEditor() {
           type="button"
           className="add-paragraph-btn inline-flex items-center gap-1.5 h-8 px-3 rounded-md text-[12px] font-medium border border-input bg-card text-foreground hover:bg-secondary disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
           onClick={addParagraph}
-          disabled={!canAddParagraph}
+          disabled={disabled || !canAddParagraph}
           title={canAddParagraph ? '문단 추가' : '5000자 한도에 도달했어요'}
         >
           <Icon name="plus" size={12} />

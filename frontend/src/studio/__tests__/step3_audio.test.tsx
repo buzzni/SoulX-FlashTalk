@@ -143,13 +143,19 @@ afterEach(() => {
 });
 
 describe('Step3Audio — submit handler', () => {
-  it('tts mode happy path: synchronously flushes form values to the store before tts.generate runs', async () => {
+  it('synchronously flushes form-only changes to the store before tts.generate reads it', async () => {
+    // Seed with no voice picked yet — voiceId must transition from
+    // null → 'v_minji' via the form (VoicePicker click) and reach the
+    // store synchronously inside submit, BEFORE tts.generate fires.
+    // If the sync flush regresses, the store still has voiceId:null
+    // at tts.generate time (debounce hasn't fired) and the captured
+    // voice fails the assertion.
     seedStore({
       source: 'tts',
-      voiceId: 'v_minji',
-      voiceName: '민지',
+      voiceId: null,
+      voiceName: null,
       advanced: { speed: 1, stability: 0.5, style: 0.3, similarity: 0.75 },
-      script: { paragraphs: ['초기 대본'] },
+      script: { paragraphs: ['대본 한 줄'] },
       generation: { state: 'idle' },
     });
     const voiceAtGenerateRef: { current: Voice | null } = { current: null };
@@ -158,19 +164,65 @@ describe('Step3Audio — submit handler', () => {
       return { audio_path: '/p/tts.wav' };
     });
     renderStep3();
-    const generateBtn = screen.getByText('음성 만들기').closest('button')!;
-    expect((generateBtn as HTMLButtonElement).disabled).toBe(false);
+    // Pick '민지' (preset row). VoicePicker fallback list is rendered
+    // because useVoiceList mock returns empty voices.
+    const minjiRow = screen.getByText('민지').closest('.voice-item');
+    if (!minjiRow) throw new Error('expected 민지 preset row');
+    fireEvent.click(minjiRow);
+    // Generate button enables once form has voiceId; no debounce wait.
+    const generateBtn = screen.getByText('음성 만들기').closest('button') as HTMLButtonElement;
+    await waitFor(() => expect(generateBtn.disabled).toBe(false));
     fireEvent.click(generateBtn);
     await waitFor(() => expect(ttsGenerate).toHaveBeenCalled());
-    // The submit handler MUST flush form values to the store before
-    // tts.generate runs — useTTSGeneration reads from
-    // useWizardStore.getState().voice at call time.
     const captured = voiceAtGenerateRef.current;
     if (!captured || captured.source !== 'tts') {
       throw new Error('voice should be tts at generate time');
     }
     expect(captured.voiceId).toBe('v_minji');
-    expect(captured.script.paragraphs).toEqual(['초기 대본']);
+    expect(captured.voiceName).toBe('민지');
+  });
+});
+
+describe('Step3Audio — narrow-watch regression guard', () => {
+  it('typed paragraph survives a voice.generation mutation (no broad voice subscription)', async () => {
+    // The store starts with one paragraph value; the user then types
+    // a different value into the form (dirty, not yet flushed via
+    // 300ms debounce). A side-channel setVoice mutates ONLY
+    // voice.generation. If any container code path subscribes to the
+    // whole voice slice (instead of narrow per-field watches), the
+    // formValues memo would create a new reference, useFormZustandSync
+    // would call form.reset, and the form's dirty value would be
+    // overwritten by the store value. The narrow-watch design makes
+    // generation-only mutations invisible to the form bridge.
+    seedStore({
+      source: 'tts',
+      voiceId: 'v_minji',
+      voiceName: '민지',
+      advanced: { speed: 1, stability: 0.5, style: 0.3, similarity: 0.75 },
+      script: { paragraphs: ['STORE'] },
+      generation: { state: 'idle' },
+    });
+    renderStep3();
+    const textarea = screen.getAllByRole('textbox')[0] as HTMLTextAreaElement;
+    expect(textarea.value).toBe('STORE');
+    // Type a different value — form is now dirty with 'FORM-EDIT';
+    // store still has 'STORE' until the 300ms debounce flushes.
+    await act(async () => {
+      fireEvent.change(textarea, { target: { value: 'FORM-EDIT' } });
+    });
+    expect(textarea.value).toBe('FORM-EDIT');
+    // Side-channel setVoice mutates only generation. Same-source
+    // branch keeps script/advanced/voiceId refs stable so narrow
+    // selectors should NOT trigger form.reset.
+    await act(async () => {
+      useWizardStore.getState().setVoice((prev) => {
+        if (prev.source !== 'tts') return prev;
+        return { ...prev, generation: { state: 'generating' } };
+      });
+    });
+    // The dirty form value MUST survive — if it reverts to 'STORE',
+    // the narrow-watch design has regressed.
+    expect(textarea.value).toBe('FORM-EDIT');
   });
 });
 

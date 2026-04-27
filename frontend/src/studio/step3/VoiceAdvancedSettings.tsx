@@ -22,11 +22,13 @@ import type { Step3FormValues } from '@/wizard/form-mappers';
 export interface VoiceAdvancedSettingsProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  disabled?: boolean;
 }
 
 export function VoiceAdvancedSettings({
   open,
   onOpenChange,
+  disabled = false,
 }: VoiceAdvancedSettingsProps) {
   const { control, setValue, getValues } = useFormContext<Step3FormValues>();
   const advanced = useWatch({
@@ -57,6 +59,7 @@ export function VoiceAdvancedSettings({
             max={1.8}
             step={0.05}
             formatValue={(v: number) => `${v.toFixed(2)}x`}
+            disabled={disabled}
           />
         </Field>
       </div>
@@ -92,6 +95,7 @@ export function VoiceAdvancedSettings({
               max={1}
               step={0.01}
               formatValue={(v: number) => String(Math.round(v * 100))}
+              disabled={disabled}
             />
           </Field>
           <Field
@@ -105,6 +109,7 @@ export function VoiceAdvancedSettings({
               max={1}
               step={0.01}
               formatValue={(v: number) => String(Math.round(v * 100))}
+              disabled={disabled}
             />
           </Field>
           <Field
@@ -118,6 +123,7 @@ export function VoiceAdvancedSettings({
               max={1}
               step={0.01}
               formatValue={(v: number) => String(Math.round(v * 100))}
+              disabled={disabled}
             />
           </Field>
         </div>
