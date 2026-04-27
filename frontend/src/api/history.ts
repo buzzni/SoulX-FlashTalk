@@ -7,6 +7,7 @@
  */
 
 import { fetchJSON } from './http';
+import { schemas } from './schemas-generated';
 import type { HistoryResponse } from '../types/app';
 
 export interface CallOptions {
@@ -15,8 +16,9 @@ export interface CallOptions {
 
 export function fetchHistory(limit = 10, { signal }: CallOptions = {}): Promise<HistoryResponse> {
   const clamped = Math.max(1, Math.min(100, limit | 0));
-  return fetchJSON<HistoryResponse>(`/api/history?limit=${clamped}`, {
+  return fetchJSON(`/api/history?limit=${clamped}`, {
     label: '히스토리 조회',
     signal,
+    schema: schemas.HistoryResponse,
   });
 }

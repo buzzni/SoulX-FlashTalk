@@ -21,6 +21,7 @@ import QueueStatus from './QueueStatus';
 import { ProfileMenu } from '../routes/ProfileMenu';
 import { fetchResult } from '../api/result';
 import { fetchJSON, humanizeError } from '../api/http';
+import { schemas } from '../api/schemas-generated';
 import { formatTaskTitle } from './taskFormat.js';
 import { Confetti } from './shared/Confetti';
 import { ResultVideoCard } from './result/ResultVideoCard';
@@ -82,11 +83,15 @@ export default function ResultPage() {
   // Fetch a few recent results to show as "다른 영상 둘러보기" sidebar.
   useEffect(() => {
     const ctl = new AbortController();
-    fetchJSON<{ videos: RecentItem[] }>('/api/history?limit=6', {
+    fetchJSON('/api/history?limit=6', {
       signal: ctl.signal,
       label: '최근 영상',
+      schema: schemas.HistoryResponse,
     })
-      .then((r) => setRecent(r.videos.filter((v) => v.task_id !== taskId).slice(0, 5)))
+      .then((r) => {
+        const videos = (r.videos ?? []) as RecentItem[];
+        setRecent(videos.filter((v) => v.task_id !== taskId).slice(0, 5));
+      })
       .catch(() => {});
     return () => ctl.abort();
   }, [taskId]);

@@ -74,3 +74,26 @@ jobs:
       - run: npm run test -- --run
       - run: npm audit --audit-level=high
         continue-on-error: true
+
+  # Bundle-size gate. Runs `vite build` + `size-limit` against the
+  # absolute caps declared in frontend/package.json `size-limit` (App
+  # JS 250 KB gzip, App CSS 40 KB gzip). Started life as
+  # andresz1/size-limit-action with a delta-vs-main PR comment
+  # (cherry-pick C6 from docs/ai-pipeline-stability-plan.md), but
+  # main is currently broken at build time (the missing
+  # components/sparkline import on HomePage.tsx — fixed separately
+  # in PR #9). Once main can build cleanly, swap this back to the
+  # action so reviewers see the delta in PR comments.
+  size-limit:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - run: npm ci
+      - run: npm run build
+      - run: npm run size

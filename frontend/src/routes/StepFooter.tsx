@@ -12,6 +12,7 @@
  */
 import { ArrowLeft, ArrowRight, AlertCircle, Check, Video } from 'lucide-react';
 import type { WizardValidity } from './wizardValidation';
+import { AutoSaveIndicator } from '../components/auto-save-indicator';
 
 export interface StepFooterProps {
   step: 1 | 2 | 3;
@@ -34,14 +35,17 @@ export function StepFooter({ step, valid, onPrev, onNext }: StepFooterProps) {
 
   return (
     <div className="step-footer">
-      <button
-        type="button"
-        onClick={onPrev}
-        disabled={step === 1}
-        className="inline-flex items-center gap-1.5 h-10 px-4 rounded-md border border-input bg-card text-foreground text-[13px] font-semibold hover:border-rule-strong disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer transition-colors"
-      >
-        <ArrowLeft className="size-4" /> 이전
-      </button>
+      <div className="inline-flex items-center gap-3">
+        <button
+          type="button"
+          onClick={onPrev}
+          disabled={step === 1}
+          className="inline-flex items-center gap-1.5 h-10 px-4 rounded-md border border-input bg-card text-foreground text-[13px] font-semibold hover:border-rule-strong disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer transition-colors"
+        >
+          <ArrowLeft className="size-4" /> 이전
+        </button>
+        <AutoSaveIndicator />
+      </div>
 
       <div className="flex-1 flex items-center justify-center min-w-0 px-4">
         {!canProceed && (

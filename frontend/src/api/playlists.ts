@@ -6,6 +6,7 @@
  * 4xx status (caller decides whether to humanize).
  */
 
+import { z } from 'zod';
 import { API_BASE, fetchJSON, getAuthHeaders, parseResponse } from './http';
 
 export interface Playlist {
@@ -25,10 +26,28 @@ export interface CallOptions {
   signal?: AbortSignal;
 }
 
+const PlaylistSchema = z
+  .object({
+    playlist_id: z.string(),
+    name: z.string(),
+    video_count: z.number(),
+    created_at: z.string().optional(),
+    updated_at: z.string().optional(),
+  })
+  .passthrough();
+
+const PlaylistListResponseSchema = z
+  .object({
+    playlists: z.array(PlaylistSchema),
+    unassigned_count: z.number(),
+  })
+  .passthrough();
+
 export function listPlaylists({ signal }: CallOptions = {}): Promise<PlaylistListResponse> {
-  return fetchJSON<PlaylistListResponse>('/api/playlists', {
+  return fetchJSON('/api/playlists', {
     label: '플레이리스트 목록',
     signal,
+    schema: PlaylistListResponseSchema,
   });
 }
 

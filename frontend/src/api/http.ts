@@ -2,9 +2,10 @@
  * HTTP core — every api/* module imports from here.
  *
  * Responsibilities:
- *  - `fetchJSON<T>(url, init?)` — parsed JSON on 2xx, typed `ApiError` on
- *    anything else. `init.signal` is the universal cancellation channel;
- *    every caller threads an `AbortSignal` through it.
+ *  - `fetchJSON(url, { schema, ... })` — parsed JSON on 2xx, then run
+ *    through the supplied zod schema. Returns `z.infer<typeof schema>`.
+ *    Schema is required at the call site (Lane B / D7) so backend renames
+ *    surface as zod parse failures, not silent `undefined` propagation.
  *  - `humanizeError(err)` — UI-friendly Korean copy for common failures.
  *  - Auth-header provider (E2 slot) — noop today, returns `{}`. When auth
  *    lands, `authStore` swaps in a real provider via `setAuthProvider`
@@ -12,7 +13,9 @@
  *    header. No per-module plumbing required.
  */
 
-export const API_BASE: string = (import.meta as any).env?.VITE_API_BASE_URL ?? '';
+import type { z } from 'zod';
+
+export const API_BASE: string = (import.meta as { env?: { VITE_API_BASE_URL?: string } }).env?.VITE_API_BASE_URL ?? '';
 
 // ────────────────────────────────────────────────────────────────────
 // E2 — Auth header provider (swapped in when the real authStore lands)
@@ -91,13 +94,18 @@ export interface FetchJSONOptions extends Omit<RequestInit, 'signal'> {
  *  - Merges auth headers from the provider (E2) with caller-supplied ones.
  *  - Parses JSON on 2xx; throws `ApiError` on non-2xx with best-effort
  *    body extraction.
+ *  - Validates the parsed JSON against the supplied zod schema. Schema
+ *    failure throws `ApiError` with status 0 — distinct from a network
+ *    fault (network has no .status from the server) so callers can tell
+ *    "backend returned a shape we don't understand" from "DNS broke".
  *  - Rethrows `AbortError` as-is so callers can distinguish user-cancelled
  *    operations from real failures.
  */
-export async function fetchJSON<T = unknown>(
+export async function fetchJSON<S extends z.ZodTypeAny>(
   path: string,
-  { label = 'API 요청', signal, headers, ...init }: FetchJSONOptions = {},
-): Promise<T> {
+  { schema, label = 'API 요청', signal, headers, ...init }:
+    FetchJSONOptions & { schema: S },
+): Promise<z.infer<S>> {
   const url = path.startsWith('http') ? path : `${API_BASE}${path}`;
   const merged: HeadersInit = { ...getAuthHeaders(), ...(headers as Record<string, string> | undefined) };
   let res: Response;
@@ -113,7 +121,29 @@ export async function fetchJSON<T = unknown>(
     const msg = err instanceof Error ? err.message : String(err);
     throw new ApiError(`${label} 실패: ${msg}`, { cause: err });
   }
-  return parseResponse<T>(res, label);
+  const raw = await parseResponse<unknown>(res, label);
+  return runSchema(schema, raw, label);
+}
+
+/** Apply a zod schema to a parsed-JSON payload, surfacing failures as
+ * a structured ApiError with detail = the zod issues. */
+export function runSchema<S extends z.ZodTypeAny>(
+  schema: S,
+  raw: unknown,
+  label: string,
+): z.infer<S> {
+  // 204/205 surface here as `undefined`. Schemas that allow undefined
+  // (e.g. `z.unknown()`, `z.void()`) accept it; others reject — which
+  // is desirable, "no body" should not satisfy a "TaskResult" schema.
+  const result = schema.safeParse(raw);
+  if (result.success) return result.data;
+  const detail = result.error.issues
+    .map((i) => `${i.path.join('.') || '<root>'}: ${i.message}`)
+    .join('; ');
+  throw new ApiError(`${label} 응답 형식 오류: ${detail}`, {
+    status: 0,
+    detail,
+  });
 }
 
 /** Separated so streaming callers can reuse the body-extraction contract. */

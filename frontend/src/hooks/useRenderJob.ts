@@ -20,7 +20,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { QueueEntry, TaskStateSnapshot } from '../types/app';
-import { subscribeProgress, type ProgressEvent } from '../api/progress';
+import { useTaskProgress } from '../api/queries/use-task-progress';
 import { useQueue, useQueueEntry } from '../stores/queueStore';
 
 export interface UseRenderJobReturn {
@@ -65,48 +65,33 @@ export function useRenderJob(taskId: string | null | undefined): UseRenderJobRet
   // a reset of the 12s error-give-up budget inside progress.ts.
   const queueSnapshotReady = queueSnapshot !== null;
 
-  const [progress, setProgress] = useState<number | null>(null);
-  const [stage, setStage] = useState<TaskStateSnapshot['stage'] | null>(null);
-  const [message, setMessage] = useState<string | null>(null);
-  const [pollFailed, setPollFailed] = useState(false);
-
-  // Progress subscription — one live connection per taskId. Clean
-  // unsubscribe on taskId change or unmount (the subscribe helper
-  // owns its own AbortController).
-  //
   // Short-circuit: if the queue snapshot already shows the task is in
-  // a terminal state (completed / error / cancelled), don't subscribe
-  // — the only data the progress poll would surface is already known
-  // from the queue row, and attached users browsing old tasks would
-  // otherwise fire a needless 1.5s poll that 404s against task_states.
+  // a terminal state (completed / error / cancelled), don't poll —
+  // the only data progress would surface is already known from the
+  // queue row, and attached users browsing old tasks would otherwise
+  // fire a needless 1.5s poll that 404s against task_states.
   const entryStatus = entry?.status;
   const entryIsTerminal =
     entryStatus === 'completed' || entryStatus === 'error' || entryStatus === 'cancelled';
 
-  useEffect(() => {
-    if (!taskId) return;
-    // Wait for the first queue snapshot to land — otherwise we can't
-    // tell "task is live and legitimately needs polling" from "task is
-    // already completed and we shouldn't subscribe at all." The flag
-    // flips once and stays, so the effect no longer reruns on every
-    // 4s queue poll tick.
-    if (!queueSnapshotReady) return;
-    if (entryIsTerminal) return;
-    setPollFailed(false);
-    const unsubscribe = subscribeProgress(taskId, (evt: ProgressEvent) => {
-      // Discriminate on the `error` variant — the happy-path variant
-      // carries stage/progress/message, the error variant is a flat
-      // `{error: true}` sentinel.
-      if ('error' in evt) {
-        setPollFailed(true);
-        return;
-      }
-      setStage(evt.stage ?? null);
-      setProgress(typeof evt.progress === 'number' ? evt.progress : null);
-      setMessage(evt.message ?? null);
-    });
-    return unsubscribe;
-  }, [taskId, entryIsTerminal, queueSnapshotReady]);
+  // Lane E: TanStack Query owns the polling lifecycle now. The
+  // `enabled` flag gates the entire query, so we never subscribe
+  // until the queue snapshot lands AND the task is actually live.
+  // TQ retries transient 5xx (3 attempts, exponential backoff) per
+  // the global queryClient config; `failureCount >= 3` flips the
+  // hook into an error state we surface as `pollFailed` to keep the
+  // existing UI contract.
+  const taskProgressQuery = useTaskProgress(taskId, {
+    enabled: Boolean(taskId) && queueSnapshotReady && !entryIsTerminal,
+  });
+
+  const stage: TaskStateSnapshot['stage'] | null = taskProgressQuery.data?.stage ?? null;
+  const progress: number | null =
+    typeof taskProgressQuery.data?.progress === 'number'
+      ? taskProgressQuery.data.progress
+      : null;
+  const message: string | null = taskProgressQuery.data?.message ?? null;
+  const pollFailed = taskProgressQuery.failureCount >= 3 && taskProgressQuery.isError;
 
   // Elapsed ticker — 1s interval ONLY while the task is live.
   // Source-of-truth start time is `entry.started_at` (backend

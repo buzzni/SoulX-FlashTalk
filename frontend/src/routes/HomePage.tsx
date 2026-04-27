@@ -12,6 +12,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { ArrowRight, Clock, Film, Play } from 'lucide-react';
 import { AppLayout } from './AppLayout';
 import { fetchJSON } from '../api/http';
+import { schemas } from '../api/schemas-generated';
 import { getUser, subscribe } from '../stores/authStore';
 import { Spinner } from '../components/spinner';
 import { EmptyState } from '../components/empty-state';
@@ -48,12 +49,13 @@ export function HomePage() {
 
   useEffect(() => {
     const ctl = new AbortController();
-    fetchJSON<HistoryResponse>('/api/history?limit=8', {
+    fetchJSON('/api/history?limit=8', {
       signal: ctl.signal,
       label: '최근 작업',
+      schema: schemas.HistoryResponse,
     })
       .then((r) => {
-        setHistory(r.videos);
+        setHistory((r.videos ?? []) as HistoryItem[]);
         setHistoryTotal(r.total);
       })
       .catch(() => {});

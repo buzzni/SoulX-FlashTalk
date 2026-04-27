@@ -1,7 +1,9 @@
 /**
- * useRenderJob — combines queueStore + progress subscription.
- * Tests cover basic stage/progress propagation, terminal detection,
- * and pollFailed surfacing.
+ * useRenderJob — combines queueStore + TanStack Query progress.
+ * Tests cover stage/progress propagation, terminal detection, and
+ * pollFailed surfacing. Lane E swapped subscribeProgress out for
+ * useTaskProgress (TQ); we mock that hook directly so tests can
+ * drive it deterministically without standing up a QueryClient.
  *
  * @vitest-environment jsdom
  */
@@ -12,10 +14,6 @@ vi.mock('../../api/queue', () => ({
   fetchQueue: vi.fn().mockResolvedValue({
     running: [
       { task_id: 'task-live', status: 'running', type: 'generate', created_at: '2026-04-24T10:00:00', started_at: '2026-04-24T10:01:00' },
-      // Second live task — the "new taskId" test swaps to this one and
-      // expects useRenderJob to resubscribe. Must be non-terminal or
-      // the terminal-skip optimization will (correctly) suppress the
-      // subscribe.
       { task_id: 'task-live-2', status: 'running', type: 'generate', created_at: '2026-04-24T10:10:00', started_at: '2026-04-24T10:11:00' },
     ],
     pending: [],
@@ -28,14 +26,26 @@ vi.mock('../../api/queue', () => ({
   cancelQueuedTask: vi.fn(),
 }));
 
-let progressCb = null;
-let progressUnsub = null;
-vi.mock('../../api/progress', () => ({
-  subscribeProgress: vi.fn((_taskId, cb) => {
-    progressCb = cb;
-    progressUnsub = vi.fn();
-    return progressUnsub;
-  }),
+// useTaskProgress mock — tests drive state via setProgressState() and
+// inspect lastEnabledFor() to assert the gating logic.
+let lastEnabledTaskId = null;
+let progressState = { data: undefined, failureCount: 0, isError: false };
+
+function setProgressState(next) {
+  progressState = { ...progressState, ...next };
+}
+
+vi.mock('../../api/queries/use-task-progress', () => ({
+  useTaskProgress: (taskId, opts) => {
+    if (opts?.enabled !== false && taskId) {
+      lastEnabledTaskId = taskId;
+    }
+    return {
+      data: progressState.data,
+      isError: progressState.isError,
+      failureCount: progressState.failureCount,
+    };
+  },
 }));
 
 import { useRenderJob } from '../useRenderJob';
@@ -45,8 +55,8 @@ afterEach(() => {
   cleanup();
   vi.clearAllMocks();
   __queueStoreInternals.reset();
-  progressCb = null;
-  progressUnsub = null;
+  lastEnabledTaskId = null;
+  progressState = { data: undefined, failureCount: 0, isError: false };
 });
 
 beforeEach(() => {
@@ -54,13 +64,12 @@ beforeEach(() => {
 });
 
 describe('useRenderJob', () => {
-  it('propagates stage/progress/message from the progress subscription', async () => {
-    const { result } = renderHook(() => useRenderJob('task-live'));
-    await waitFor(() => expect(progressCb).toBeTruthy());
+  it('propagates stage/progress/message from the TQ task-state query', async () => {
+    setProgressState({ data: { task_id: 'task-live', stage: 'generating', progress: 0.42, message: '진행 중' } });
+    const { result, rerender } = renderHook(() => useRenderJob('task-live'));
+    await waitFor(() => expect(lastEnabledTaskId).toBe('task-live'));
 
-    act(() => {
-      progressCb({ stage: 'generating', progress: 0.42, message: '진행 중' });
-    });
+    rerender();
     expect(result.current.stage).toBe('generating');
     expect(result.current.progress).toBe(0.42);
     expect(result.current.message).toBe('진행 중');
@@ -69,43 +78,38 @@ describe('useRenderJob', () => {
   });
 
   it('isDone turns true on terminal "complete" stage', async () => {
+    setProgressState({ data: { task_id: 'task-live', stage: 'complete', progress: 1.0, message: '완료' } });
     const { result } = renderHook(() => useRenderJob('task-live'));
-    await waitFor(() => expect(progressCb).toBeTruthy());
-    act(() => progressCb({ stage: 'complete', progress: 1.0, message: '완료' }));
+    await waitFor(() => expect(lastEnabledTaskId).toBe('task-live'));
     expect(result.current.isDone).toBe(true);
     expect(result.current.isError).toBe(false);
   });
 
-  it('pollFailed surfaces on subscription error AND promotes to isError', async () => {
-    // Regression guard: pollFailed must flip isError too, otherwise
-    // RenderDashboard's status aggregator treats a dying progress
-    // endpoint as "still rendering" and the user stares at an
-    // eternal spinner with no reconnect prompt.
+  it('pollFailed surfaces when TQ exhausts retries (failureCount>=3 + isError)', async () => {
+    setProgressState({ failureCount: 3, isError: true });
     const { result } = renderHook(() => useRenderJob('task-live'));
-    await waitFor(() => expect(progressCb).toBeTruthy());
-    act(() => progressCb({ error: true }));
+    await waitFor(() => expect(lastEnabledTaskId).toBe('task-live'));
     expect(result.current.pollFailed).toBe(true);
     expect(result.current.isError).toBe(true);
   });
 
-  it('unmount unsubscribes the progress listener', async () => {
-    const { unmount } = renderHook(() => useRenderJob('task-live'));
-    await waitFor(() => expect(progressCb).toBeTruthy());
-    unmount();
-    expect(progressUnsub).toHaveBeenCalled();
-  });
-
-  it('null taskId → no subscribe', () => {
+  it('null taskId → never enables the query', () => {
     renderHook(() => useRenderJob(null));
-    expect(progressCb).toBeNull();
+    expect(lastEnabledTaskId).toBeNull();
   });
 
-  it('re-render with a NEW taskId unsubscribes old + subscribes new', async () => {
+  it('switching to a NEW taskId enables the query for the new id', async () => {
     const { rerender } = renderHook(({ id }) => useRenderJob(id), { initialProps: { id: 'task-live' } });
-    await waitFor(() => expect(progressCb).toBeTruthy());
-    const firstUnsub = progressUnsub;
+    await waitFor(() => expect(lastEnabledTaskId).toBe('task-live'));
     rerender({ id: 'task-live-2' });
-    await waitFor(() => expect(progressUnsub).not.toBe(firstUnsub));
-    expect(firstUnsub).toHaveBeenCalled();
+    await waitFor(() => expect(lastEnabledTaskId).toBe('task-live-2'));
+  });
+
+  it('terminal queue entry → query stays disabled', async () => {
+    const { result } = renderHook(() => useRenderJob('task-done'));
+    // The mock asserts what *would* have been enabled; for the terminal
+    // skip path we expect lastEnabledTaskId to never flip to task-done.
+    await waitFor(() => expect(result.current.entry?.task_id).toBe('task-done'));
+    expect(lastEnabledTaskId).not.toBe('task-done');
   });
 });

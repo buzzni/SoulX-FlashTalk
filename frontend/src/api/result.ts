@@ -7,6 +7,7 @@
  */
 
 import { fetchJSON } from './http';
+import { schemas } from './schemas-generated';
 import type { ResultManifest } from '../types/app';
 
 export interface CallOptions {
@@ -17,8 +18,9 @@ export function fetchResult(taskId: string, { signal }: CallOptions = {}): Promi
   if (!taskId) {
     return Promise.reject(new Error('taskId가 비어 있어요'));
   }
-  return fetchJSON<ResultManifest>(`/api/results/${encodeURIComponent(taskId)}`, {
+  return fetchJSON(`/api/results/${encodeURIComponent(taskId)}`, {
     label: '결과 불러오기',
     signal,
+    schema: schemas.ResultManifest,
   });
 }

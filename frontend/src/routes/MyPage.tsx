@@ -10,13 +10,9 @@ import { toast } from 'sonner';
 import { LogOut, Moon, Sun, Bell, BellOff, Monitor } from 'lucide-react';
 import { AppLayout } from './AppLayout';
 import { fetchJSON } from '../api/http';
+import { schemas } from '../api/schemas-generated';
 import { getUser, logout, subscribe } from '../stores/authStore';
 import { getTheme, subscribeTheme, setTheme } from '../lib/theme';
-
-interface HistoryResponse {
-  total: number;
-  videos: unknown[];
-}
 
 const NOTIFY_KEY = 'showhost.notify.v1';
 
@@ -38,9 +34,10 @@ export function MyPage() {
 
   useEffect(() => {
     const ctl = new AbortController();
-    fetchJSON<HistoryResponse>('/api/history?limit=1000', {
+    fetchJSON('/api/history?limit=1000', {
       signal: ctl.signal,
       label: '활동 정보',
+      schema: schemas.HistoryResponse,
     })
       .then((r) => setVideoCount(r.total))
       .catch(() => setVideoCount(null));

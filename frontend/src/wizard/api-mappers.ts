@@ -108,33 +108,33 @@ export function toCompositeRequest(input: CompositeMapperInput): CompositeInput 
   const hostSelected =
     input.host.generation.state === 'ready' ? input.host.generation.selected : null;
 
+  // CompositeInput's products only carries `path`; the wizard's
+  // id/name are provenance-only, dropped on the wire.
+  const products: NonNullable<CompositeInput['products']> = input.products
+    .map((p) => {
+      if (p.source.kind === 'uploaded') return { path: p.source.asset.path };
+      if (p.source.kind === 'url') return { path: p.source.url };
+      return null;
+    })
+    .filter((p): p is { path: string } => p !== null);
+
+  // CompositeInput nests imageSize under composition; the request
+  // body builder reads it from there.
   return {
-    host: {
-      selectedPath: hostSelected?.path ?? null,
-    },
-    products: input.products
-      .map((p) => {
-        if (p.source.kind === 'uploaded') {
-          return { id: p.id, name: p.name, path: p.source.asset.path };
-        }
-        if (p.source.kind === 'url') {
-          return { id: p.id, name: p.name, url: p.source.url };
-        }
-        return null;
-      })
-      .filter((p): p is NonNullable<typeof p> => p !== null),
+    host: { selectedPath: hostSelected?.path ?? null },
+    products,
     background: backgroundToCompositeBg(input.background),
     composition: {
       direction: input.composition.settings.direction,
       shot: input.composition.settings.shot,
       angle: input.composition.settings.angle,
       temperature: input.composition.settings.temperature,
+      imageSize: input.imageQuality,
     },
-    imageSize: input.imageQuality,
-  } as unknown as CompositeInput;
+  };
 }
 
-function backgroundToCompositeBg(bg: Background) {
+function backgroundToCompositeBg(bg: Background): CompositeInput['background'] {
   switch (bg.kind) {
     case 'preset':
       return { source: 'preset', preset: bg.presetId };

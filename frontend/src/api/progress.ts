@@ -17,6 +17,7 @@
  */
 
 import { fetchJSON } from './http';
+import { schemas } from './schemas-generated';
 import type { TaskStateSnapshot } from '../types/app';
 
 const PROGRESS_POLL_MS = 1500;
@@ -44,11 +45,12 @@ export function subscribeProgress(taskId: string, onUpdate: ProgressHandler): ()
   const tick = async (): Promise<void> => {
     if (cancelled) return;
     try {
-      const snapshot = await fetchJSON<TaskStateSnapshot>(path, {
+      const snapshot = (await fetchJSON(path, {
         label: '작업 상태 조회',
         signal: controller.signal,
         cache: 'no-store',
-      });
+        schema: schemas.TaskStateSnapshot,
+      })) as TaskStateSnapshot;
       consecutiveErrors = 0;
 
       const sig = `${snapshot.stage}|${snapshot.progress}|${snapshot.message}`;

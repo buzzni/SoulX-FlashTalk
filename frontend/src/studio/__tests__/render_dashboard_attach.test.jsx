@@ -14,6 +14,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, screen, cleanup, waitFor } from '@testing-library/react';
 import { MemoryRouter, useLocation } from 'react-router-dom';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
 // Mock each domain module the component tree actually imports from.
 // api.js re-exports from these, so the mocks propagate through both
@@ -24,8 +25,10 @@ vi.mock('../../api/queue', () => ({
   cancelQueuedTask: vi.fn(),
 }));
 vi.mock('../../api/video', () => ({ generateVideo: vi.fn() }));
-vi.mock('../../api/progress', () => ({
-  subscribeProgress: vi.fn(() => () => {}),
+// Lane E: useTaskProgress (TanStack Query) replaces subscribeProgress.
+// Mock the hook so the test drives polling state deterministically.
+vi.mock('../../api/queries/use-task-progress', () => ({
+  useTaskProgress: vi.fn(() => ({ data: undefined, isError: false, failureCount: 0 })),
 }));
 vi.mock('../../api/history', () => ({
   fetchHistory: vi.fn().mockResolvedValue({ total: 0, videos: [] }),
@@ -36,7 +39,7 @@ vi.mock('../../api/file', () => ({
 }));
 
 import { fetchQueue } from '../../api/queue';
-import { subscribeProgress } from '../../api/progress';
+import { useTaskProgress } from '../../api/queries/use-task-progress';
 import RenderDashboard from '../render/RenderDashboard.tsx';
 import { __queueStoreInternals } from '../../stores/queueStore';
 
@@ -94,8 +97,13 @@ describe('RenderDashboard attach mode — branching on queue status', () => {
     await waitFor(() => {
       expect(screen.getByTestId('landed').textContent).toBe('LANDED:/result/done-1');
     });
-    // Must NOT subscribe SSE for already-completed work.
-    expect(subscribeProgress).not.toHaveBeenCalled();
+    // Must NOT poll task-state for already-completed work — the
+    // useTaskProgress hook should be called with enabled: false (or
+    // never called with the terminal task id).
+    const enabledCalls = useTaskProgress.mock.calls.filter(
+      ([id, opts]) => id === 'done-1' && opts?.enabled !== false,
+    );
+    expect(enabledCalls).toHaveLength(0);
   });
 
   it('error task: shows failure header, no SSE, stays on dashboard', async () => {
@@ -121,7 +129,10 @@ describe('RenderDashboard attach mode — branching on queue status', () => {
     await waitFor(() => {
       expect(screen.getByText('만들기에 실패했어요')).toBeTruthy();
     });
-    expect(subscribeProgress).not.toHaveBeenCalled();
+    const enabledCalls = useTaskProgress.mock.calls.filter(
+      ([id, opts]) => id === 'err-1' && opts?.enabled !== false,
+    );
+    expect(enabledCalls).toHaveLength(0);
     expect(screen.getByTestId('landed').textContent).toBe('LANDED:/');
   });
 
@@ -145,7 +156,10 @@ describe('RenderDashboard attach mode — branching on queue status', () => {
     );
 
     await waitFor(() => {
-      expect(subscribeProgress).toHaveBeenCalledWith('run-1', expect.any(Function));
+      const enabled = useTaskProgress.mock.calls.find(
+        ([id, opts]) => id === 'run-1' && opts?.enabled !== false,
+      );
+      expect(enabled).toBeTruthy();
     });
   });
 
@@ -168,7 +182,10 @@ describe('RenderDashboard attach mode — branching on queue status', () => {
     );
 
     await waitFor(() => {
-      expect(subscribeProgress).toHaveBeenCalledWith('pend-1', expect.any(Function));
+      const enabled = useTaskProgress.mock.calls.find(
+        ([id, opts]) => id === 'pend-1' && opts?.enabled !== false,
+      );
+      expect(enabled).toBeTruthy();
     });
     expect(screen.getByText('영상 만드는 중이에요')).toBeTruthy();
   });

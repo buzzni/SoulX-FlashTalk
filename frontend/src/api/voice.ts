@@ -5,6 +5,7 @@
  * voice-related callers don't have to import from two modules.
  */
 
+import { z } from 'zod';
 import { API_BASE, getAuthHeaders, fetchJSON, parseResponse } from './http';
 import { assertSize } from './upload';
 import { paragraphsToScript } from './mapping';
@@ -21,10 +22,23 @@ export interface VoiceEntry {
   [key: string]: unknown;
 }
 
+const VoiceEntrySchema = z
+  .object({
+    voice_id: z.string(),
+    name: z.string(),
+    category: z.string().optional(),
+  })
+  .passthrough();
+
+const VoiceListResponseSchema = z.object({
+  voices: z.array(VoiceEntrySchema),
+});
+
 export async function listVoices({ signal }: CallOptions = {}): Promise<{ voices: VoiceEntry[] }> {
-  return fetchJSON<{ voices: VoiceEntry[] }>('/api/elevenlabs/voices', {
+  return fetchJSON('/api/elevenlabs/voices', {
     label: '보이스 목록 조회',
     signal,
+    schema: VoiceListResponseSchema,
   });
 }
 
