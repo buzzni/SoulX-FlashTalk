@@ -118,25 +118,69 @@ export default function ResultPage() {
     setConfirmAction(null);
     if (!result) return;
     const params = (result.params ?? {}) as Record<string, unknown>;
-    const scriptText = typeof params.script_text === 'string' ? params.script_text : '';
-    const resReq = typeof params.resolution_requested === 'string' ? params.resolution_requested : '';
+    const meta = ((result as Record<string, unknown>).meta ?? {}) as Record<string, unknown>;
+    const metaVoice = (meta.voice && typeof meta.voice === 'object'
+      ? (meta.voice as Record<string, unknown>)
+      : {}) as Record<string, unknown>;
+
+    // backend's params.script_text is sometimes empty — meta.voice.script
+    // (joined with ' [breath] ' for tts/clone, '\n\n' for upload) is the
+    // reliable source. Try meta first, params second.
+    const scriptText =
+      (typeof metaVoice.script === 'string' && metaVoice.script) ||
+      (typeof params.script_text === 'string' ? params.script_text : '');
+    const resReq =
+      typeof params.resolution_requested === 'string' ? params.resolution_requested : '';
 
     const store = useWizardStore.getState();
     store.reset();
 
-    // Restore the script paragraphs — backend joins with '\n\n[breath]\n\n'
-    // so we split on the same separator (and fall back to a single
-    // paragraph for legacy rows that didn't use the marker).
-    if (scriptText) {
-      const paragraphs = scriptText.includes('[breath]')
-        ? scriptText
-            .split(/\s*\[breath\]\s*/g)
-            .map((p) => p.trim())
-            .filter((p) => p.length > 0)
-        : [scriptText];
+    // Re-split the script back into paragraphs. Tries the tts/clone
+    // separator (`[breath]`) first, falls back to upload-mode (`\n\n`),
+    // then a single-paragraph entry for legacy rows.
+    const splitScript = (text: string): string[] => {
+      if (text.includes('[breath]')) {
+        return text
+          .split(/\s*\[breath\]\s*/g)
+          .map((p) => p.trim())
+          .filter((p) => p.length > 0);
+      }
+      if (text.includes('\n\n')) {
+        return text
+          .split(/\n\n+/g)
+          .map((p) => p.trim())
+          .filter((p) => p.length > 0);
+      }
+      return text.trim() ? [text.trim()] : [];
+    };
+    const paragraphs = scriptText ? splitScript(scriptText) : [];
+
+    // Hydrate the voice slice when meta says it was a tts run — voice
+    // selection + advanced sliders + script all carry over so the user
+    // doesn't have to re-pick at step 3. clone/upload have lifecycle we
+    // can't fake (sample upload, audio file path) — script alone for those.
+    const num = (v: unknown, d: number) => (typeof v === 'number' ? v : d);
+    const str = (v: unknown) => (typeof v === 'string' ? v : null);
+    if (metaVoice.source === 'tts' && typeof metaVoice.voiceId === 'string') {
+      store.setVoice(() => ({
+        source: 'tts',
+        voiceId: metaVoice.voiceId as string,
+        voiceName: str(metaVoice.voiceName),
+        advanced: {
+          speed: num(metaVoice.speed, 1),
+          stability: num(metaVoice.stability, 0.5),
+          style: num(metaVoice.style, 0.3),
+          similarity: num(metaVoice.similarity, 0.75),
+        },
+        script: { paragraphs: paragraphs.length > 0 ? paragraphs : [''] },
+        generation: { state: 'idle' },
+      }));
+    } else if (paragraphs.length > 0) {
+      // Non-tts source — at least restore the script so the user only
+      // has to re-pick the voice, not retype the whole thing.
       store.setVoice((prev) => ({
         ...prev,
-        script: { paragraphs: paragraphs.length > 0 ? paragraphs : [''] },
+        script: { paragraphs },
       }));
     }
 
