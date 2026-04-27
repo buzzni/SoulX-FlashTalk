@@ -9,7 +9,7 @@
  */
 import { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { ArrowRight, Clock, Film, Play } from 'lucide-react';
+import { ArrowRight, Film, Play } from 'lucide-react';
 import { AppLayout } from './AppLayout';
 import { fetchJSON } from '../api/http';
 import { schemas } from '../api/schemas-generated';
@@ -18,8 +18,8 @@ import { Spinner } from '../components/spinner';
 import { EmptyState } from '../components/empty-state';
 import { Sparkline } from '../components/sparkline';
 import {
-  formatCompactDate,
   formatDuration,
+  formatRelativeDateTime,
   videoTitle,
 } from '../lib/format';
 
@@ -75,18 +75,6 @@ export function HomePage() {
 
   const weekCount = weekItems.length;
 
-  // Average gen time, sanitized — guard against the dev data bug where
-  // generation_time was sometimes seconds * something_else (we saw 3299s
-  // for a normal-looking video). Cap at 600s (10min, way above realistic).
-  const avgSec = useMemo(() => {
-    if (!history) return null;
-    const valid = history
-      .map((h) => h.generation_time)
-      .filter((s): s is number => typeof s === 'number' && s > 0 && s < 600);
-    if (!valid.length) return null;
-    return Math.round(valid.reduce((a, b) => a + b, 0) / valid.length);
-  }, [history]);
-
   // Sparkline data — bucket items per day for the last 7 days
   const weekTrend = useMemo(() => {
     const buckets = new Array(7).fill(0);
@@ -103,14 +91,10 @@ export function HomePage() {
     return buckets;
   }, [history]);
 
-  const durationTrend = useMemo(() => {
-    if (!history) return [];
-    return history
-      .slice(0, 8)
-      .map((h) => h.generation_time)
-      .filter((s): s is number => typeof s === 'number' && s > 0 && s < 600)
-      .reverse();
-  }, [history]);
+  const activeDays = useMemo(
+    () => weekTrend.filter((c) => c > 0).length,
+    [weekTrend],
+  );
 
   return (
     <AppLayout active="home">
@@ -145,10 +129,7 @@ export function HomePage() {
             <p className="m-0 mt-1.5 mb-4 text-[13.5px] text-white/75 leading-[1.55]">
               마음에 드는 호스트를 만들고 — 제품·배경을 합성하고 — 목소리·대본까지 한 자리에서.
             </p>
-            <div className="flex items-center justify-between mt-auto">
-              <span className="text-[12px] text-white/55 inline-flex items-center gap-1.5">
-                <Clock className="size-3" /> 약 2-4분 소요
-              </span>
+            <div className="flex items-center justify-end mt-auto">
               <span className="grid place-items-center w-8 h-8 rounded-full bg-primary text-primary-foreground transition-colors group-hover:bg-[var(--primary-hover)]">
                 <ArrowRight className="size-4" />
               </span>
@@ -166,11 +147,7 @@ export function HomePage() {
             <p className="m-0 mt-1.5 mb-4 text-[13.5px] text-muted-foreground leading-[1.55]">
               지금까지 만든 결과를 보고 플레이리스트로 정리하세요.
             </p>
-            <div className="flex items-center justify-between mt-auto">
-              <span className="text-[12px] text-muted-foreground inline-flex items-center gap-1.5">
-                <Film className="size-3" />
-                {historyTotal !== null ? `${historyTotal}개의 영상` : '영상 둘러보기'}
-              </span>
+            <div className="flex items-center justify-end mt-auto">
               <span className="grid place-items-center w-8 h-8 rounded-full bg-secondary text-foreground transition-colors group-hover:bg-foreground group-hover:text-background">
                 <ArrowRight className="size-4" />
               </span>
@@ -190,13 +167,13 @@ export function HomePage() {
             sparkKind="bars"
           />
           <Stat
-            label="평균 생성 시간"
-            value={avgSec ? `${avgSec}` : '—'}
-            unit={avgSec ? '초' : ''}
-            trend={avgSec ? '최근 8개 추세' : '아직 측정 전'}
-            trendOk={Boolean(avgSec)}
-            sparkData={durationTrend}
-            sparkKind="line"
+            label="활동한 날"
+            value={`${activeDays}`}
+            unit="/ 7일"
+            trend={activeDays > 0 ? '최근 7일 중' : '아직 활동 없음'}
+            trendOk={activeDays > 0}
+            sparkData={weekTrend}
+            sparkKind="bars"
           />
           <Stat
             label="총 영상"
@@ -298,8 +275,9 @@ function Stat({ label, value, unit, trend, trendOk, sparkData, sparkKind, icon }
 function RecentRow({ item }: { item: HistoryItem }) {
   const videoUrl = item.video_url || `/api/videos/${item.task_id}`;
   const title = videoTitle(item);
-  const ts = formatCompactDate(item.timestamp);
-  const dur = formatDuration(item.generation_time);
+  const ts = formatRelativeDateTime(item.timestamp);
+  const [playSec, setPlaySec] = useState<number | null>(null);
+  const dur = formatDuration(playSec);
 
   return (
     <Link
@@ -307,7 +285,16 @@ function RecentRow({ item }: { item: HistoryItem }) {
       className="group surface-card p-3.5 grid grid-cols-[80px_1fr] gap-3.5 no-underline text-foreground transition-colors hover:border-rule-strong relative"
     >
       <div className="relative w-20 h-[60px] rounded-md overflow-hidden bg-foreground">
-        <video src={videoUrl} preload="metadata" muted className="block w-full h-full object-cover" />
+        <video
+          src={videoUrl}
+          preload="metadata"
+          muted
+          className="block w-full h-full object-cover"
+          onLoadedMetadata={(e) => {
+            const d = e.currentTarget.duration;
+            if (Number.isFinite(d) && d > 0) setPlaySec(d);
+          }}
+        />
         <span className="absolute inset-0 grid place-items-center bg-foreground/0 group-hover:bg-foreground/30 transition-colors">
           <Play className="size-4 text-background opacity-0 group-hover:opacity-100 transition-opacity" fill="currentColor" />
         </span>

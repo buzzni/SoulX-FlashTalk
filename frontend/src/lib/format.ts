@@ -96,6 +96,34 @@ export function formatCompactDate(iso: string | null | undefined): string {
   return `${mm}.${dd} · ${hh}:${mn}`;
 }
 
+const DAY_MS = 86_400_000;
+
+function diffDaysFromToday(d: Date): number {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const target = new Date(d);
+  target.setHours(0, 0, 0, 0);
+  return Math.round((today.getTime() - target.getTime()) / DAY_MS);
+}
+
+/**
+ * Korean relative date+time ("오늘 14:32", "어제 14:32", "3일 전",
+ * "M월 D일"). Recent items show clock minutes; older items collapse to
+ * the date.
+ */
+export function formatRelativeDateTime(iso: string | null | undefined): string {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  const diffDays = diffDaysFromToday(d);
+  const hh = String(d.getHours()).padStart(2, '0');
+  const mn = String(d.getMinutes()).padStart(2, '0');
+  if (diffDays === 0) return `오늘 ${hh}:${mn}`;
+  if (diffDays === 1) return `어제 ${hh}:${mn}`;
+  if (diffDays < 7) return `${diffDays}일 전`;
+  return `${d.getMonth() + 1}월 ${d.getDate()}일`;
+}
+
 /**
  * Korean relative date ("오늘", "어제", "3일 전", "MM월 DD일").
  */
@@ -103,11 +131,7 @@ export function formatRelativeDate(iso: string | null | undefined): string {
   if (!iso) return '';
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return '';
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const target = new Date(d);
-  target.setHours(0, 0, 0, 0);
-  const diffDays = Math.round((today.getTime() - target.getTime()) / 86400000);
+  const diffDays = diffDaysFromToday(d);
   if (diffDays === 0) return '오늘';
   if (diffDays === 1) return '어제';
   if (diffDays < 7) return `${diffDays}일 전`;
