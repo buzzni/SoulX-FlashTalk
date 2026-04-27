@@ -22,6 +22,8 @@ import { ProfileMenu } from '../routes/ProfileMenu';
 import { fetchResult } from '../api/result';
 import { fetchJSON, humanizeError } from '../api/http';
 import { retryFailedTask } from '../api/queue';
+import { useWizardStore } from '../stores/wizardStore';
+import { RESOLUTION_META, type ResolutionKey } from '../wizard/schema';
 import { schemas } from '../api/schemas-generated';
 import { formatTaskTitle } from './taskFormat.js';
 import { Confetti } from './shared/Confetti';
@@ -101,6 +103,54 @@ export default function ResultPage() {
     } finally {
       setRetrying(false);
     }
+  };
+
+  // "수정해서 다시 만들기" — hydrate the wizard with the params we can
+  // safely restore (script text, resolution) and drop the user back at
+  // step 1 to re-pick host + voice. We can't restore host/voice/composition
+  // directly because their lifecycle (selected/url/seed/etc.) is wider
+  // than what the manifest carries — better to make the user re-confirm
+  // than fake a half-valid generation.
+  const handleEditAndRetry = () => {
+    if (!result || !window.confirm('지금까지 입력한 다른 작업이 있다면 사라져요. 이 작업의 입력으로 새로 시작할까요?')) {
+      return;
+    }
+    const params = (result.params ?? {}) as Record<string, unknown>;
+    const scriptText = typeof params.script_text === 'string' ? params.script_text : '';
+    const resReq = typeof params.resolution_requested === 'string' ? params.resolution_requested : '';
+
+    const store = useWizardStore.getState();
+    store.reset();
+
+    // Restore the script paragraphs — backend joins with '\n\n[breath]\n\n'
+    // so we split on the same separator (and fall back to a single
+    // paragraph for legacy rows that didn't use the marker).
+    if (scriptText) {
+      const paragraphs = scriptText.includes('[breath]')
+        ? scriptText
+            .split(/\s*\[breath\]\s*/g)
+            .map((p) => p.trim())
+            .filter((p) => p.length > 0)
+        : [scriptText];
+      store.setVoice((prev) => ({
+        ...prev,
+        script: { paragraphs: paragraphs.length > 0 ? paragraphs : [''] },
+      }));
+    }
+
+    // Restore the resolution preset by reverse-looking-up RESOLUTION_META.
+    // Backend stores 'WxH' (portrait canonical, e.g. '1080x1920').
+    const m = /^(\d+)\s*x\s*(\d+)$/.exec(resReq);
+    if (m) {
+      const w = Number(m[1]);
+      const h = Number(m[2]);
+      const matched = (Object.keys(RESOLUTION_META) as ResolutionKey[]).find(
+        (k) => RESOLUTION_META[k].width === w && RESOLUTION_META[k].height === h,
+      );
+      if (matched) store.setResolution(matched);
+    }
+
+    navigate('/step/1');
   };
 
   // Fetch a few recent results to show as "다른 영상 둘러보기" sidebar.
@@ -217,14 +267,25 @@ export default function ResultPage() {
               </div>
               <div className="flex gap-2">
                 {isError && (
-                  <Button
-                    icon="refresh"
-                    variant="secondary"
-                    onClick={handleRetry}
-                    disabled={retrying}
-                  >
-                    {retrying ? '재시도 중…' : '재시도'}
-                  </Button>
+                  <>
+                    <Button
+                      icon="refresh"
+                      variant="secondary"
+                      onClick={handleRetry}
+                      disabled={retrying}
+                      title="같은 입력으로 그대로 다시 시도"
+                    >
+                      {retrying ? '재시도 중…' : '재시도'}
+                    </Button>
+                    <Button
+                      icon="settings"
+                      variant="secondary"
+                      onClick={handleEditAndRetry}
+                      title="이 작업의 입력값을 마법사에 채우고 처음부터 다시"
+                    >
+                      수정해서 다시 만들기
+                    </Button>
+                  </>
                 )}
                 <Button icon="plus" variant="secondary" onClick={() => navigate('/')}>
                   새로 만들기
