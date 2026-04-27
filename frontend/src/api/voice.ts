@@ -107,5 +107,12 @@ export async function generateVoice(
     headers: getAuthHeaders(),
     signal,
   });
-  return parseResponse(res, '음성 생성');
+  // Backend returns { filename, path, url }. Callers (useTTSGeneration) read
+  // `audio_path` per this function's signature, so normalize here — without
+  // this the schema voice.generation never transitions to 'ready', which
+  // hides the Step 3 audio preview AND keeps "영상 만들기 시작" disabled.
+  const json = (await parseResponse(res, '음성 생성')) as Record<string, unknown>;
+  const path = typeof json.audio_path === 'string' ? json.audio_path
+    : typeof json.path === 'string' ? json.path : undefined;
+  return { ...json, audio_path: path };
 }
