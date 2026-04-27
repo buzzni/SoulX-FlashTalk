@@ -2,7 +2,11 @@
  * @vitest-environment jsdom
  */
 import { describe, it, expect } from 'vitest';
-import { hostSliceToFormValues, formValuesToHostSlice } from '../form-mappers';
+import {
+  hostSliceToFormValues,
+  formValuesToHostSlice,
+  Step2FormValuesSchema,
+} from '../form-mappers';
 import type { Host } from '../schema';
 import { INITIAL_HOST } from '../schema';
 
@@ -77,5 +81,39 @@ describe('formValuesToHostSlice', () => {
     expect(next.input.kind).toBe('image');
     // No stray prompt field from the previous text-mode input
     expect((next.input as { prompt?: string }).prompt).toBeUndefined();
+  });
+});
+
+describe('Step2FormValuesSchema', () => {
+  it('parses a complete Step 2 form payload', () => {
+    const valid = {
+      products: [
+        {
+          id: 'p1',
+          source: {
+            kind: 'uploaded',
+            asset: { path: '/uploads/p1.png', url: '/u/p1.png', name: 'p1' },
+          },
+        },
+      ],
+      background: { kind: 'preset', presetId: 'studio_white' },
+      settings: {
+        direction: '소파에 앉아 1번을 들고 있음',
+        shot: 'medium',
+        angle: 'eye',
+        temperature: 0.7,
+        rembg: true,
+      },
+    };
+    expect(() => Step2FormValuesSchema.parse(valid)).not.toThrow();
+  });
+
+  it('rejects missing settings field — composition.generation must NOT enter the form', () => {
+    const invalid = {
+      products: [],
+      background: { kind: 'preset', presetId: null },
+      // settings missing
+    };
+    expect(() => Step2FormValuesSchema.parse(invalid)).toThrow();
   });
 });
