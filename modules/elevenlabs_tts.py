@@ -18,6 +18,39 @@ logger = logging.getLogger(__name__)
 ELEVENLABS_BASE_URL = "https://api.elevenlabs.io/v1"
 
 
+class ElevenLabsQuotaExceeded(RuntimeError):
+    """Raised when ElevenLabs returns 401 with status='quota_exceeded'.
+
+    ElevenLabs returns 401 (not 402/429) when the account has 0 credits — surface
+    that as a distinct exception so the API layer can show the user "크레딧 부족"
+    instead of the misleading raw "Client error '401 Unauthorized'" httpx string.
+    """
+
+
+class ElevenLabsAPIError(RuntimeError):
+    """Raised when ElevenLabs returns a non-2xx with a parsed detail message."""
+
+
+def _raise_friendly(exc: "httpx.HTTPStatusError") -> None:
+    """Translate an httpx error from ElevenLabs into a typed exception with a
+    user-readable message. Falls back to the raw exception text if the response
+    body is not JSON."""
+    try:
+        data = exc.response.json()
+    except ValueError:
+        raise ElevenLabsAPIError(str(exc)) from exc
+
+    detail = data.get("detail") if isinstance(data, dict) else None
+    status = detail.get("status") if isinstance(detail, dict) else None
+    message = detail.get("message") if isinstance(detail, dict) else None
+
+    if status == "quota_exceeded":
+        raise ElevenLabsQuotaExceeded(
+            message or "ElevenLabs 크레딧이 부족합니다. 계정 크레딧을 충전해주세요."
+        ) from exc
+    raise ElevenLabsAPIError(message or str(exc)) from exc
+
+
 class ElevenLabsTTS:
     def __init__(self, api_key: str, model_id: str = "eleven_v3"):
         """v3 default: native [breath], 5000-char limit.
@@ -115,7 +148,13 @@ class ElevenLabsTTS:
                 params={"output_format": "pcm_16000"},
                 json=payload,
             )
-            resp.raise_for_status()
+            try:
+                resp.raise_for_status()
+            except httpx.HTTPStatusError as exc:
+                # quota_exceeded comes back as 401 — translate before bubbling
+                # so the FastAPI layer surfaces "크레딧 부족" instead of the
+                # misleading "401 Unauthorized" raw string.
+                _raise_friendly(exc)
             pcm_bytes = resp.content
 
         # pcm_16000 is raw 16-bit little-endian mono PCM at 16 kHz — wrap it

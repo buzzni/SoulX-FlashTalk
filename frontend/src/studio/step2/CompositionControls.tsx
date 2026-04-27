@@ -30,9 +30,10 @@ export interface CompositionControlsProps {
 }
 
 const SHOT_OPTS: { v: CompositionShot; label: string; desc: string }[] = [
-  { v: 'close', label: '클로즈업', desc: '얼굴 중심 (Close-Up)' },
+  { v: 'closeup', label: '클로즈업', desc: '얼굴 중심 (Close-Up)' },
+  { v: 'bust', label: '바스트샷', desc: '가슴~머리 (Bust Shot)' },
   { v: 'medium', label: '미디엄샷', desc: '머리~허리 (Medium Shot)' },
-  { v: 'far', label: '풀샷', desc: '전신 (Full Shot)' },
+  { v: 'full', label: '풀샷', desc: '전신 (Full Shot)' },
 ];
 const ANGLE_OPTS: { v: CompositionAngle; label: string; desc: string }[] = [
   { v: 'eye', label: '정면', desc: '아이레벨 — 같은 눈높이' },
@@ -289,7 +290,6 @@ export function CompositionControls({
             <>
               <SparklesIcon className="size-4" />
               <span>합성 이미지 만들기</span>
-              <span className="text-[11px] font-medium opacity-70 tabular-nums">~25초</span>
             </>
           )}
         </button>

@@ -27,7 +27,7 @@ export interface OptionCardProps {
   desc?: React.ReactNode;
   /** Optional left-aligned icon shown next to the title. */
   icon?: React.ReactNode;
-  /** Tiny supplementary line below the description (e.g. "~10초 소요"). */
+  /** Tiny supplementary line below the description. */
   meta?: React.ReactNode;
   /** dense=true tightens padding + drops the icon row spacing — use
    * inside a Card body where the OptionCard is a sub-control. */

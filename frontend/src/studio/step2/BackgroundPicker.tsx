@@ -103,7 +103,6 @@ export function BackgroundPicker({ onPickServerFile }: BackgroundPickerProps) {
           icon={<Sparkles className="size-4" />}
           title="AI로 새로 만들기"
           desc="원하는 장소·분위기를 글로 적으면 AI가 만들어줘요"
-          meta="합성 시 ~25초 추가"
           onClick={() => {
             if (background.kind !== 'prompt') swap({ kind: 'prompt', prompt: '' });
           }}
@@ -197,7 +196,7 @@ export function BackgroundPicker({ onPickServerFile }: BackgroundPickerProps) {
             </Field>
             <div className="flex items-center gap-2 text-xs text-tertiary">
               <Sparkles className="size-3.5 text-primary" />
-              <span>"합성 이미지 만들기"를 누르면 이 설명으로 배경까지 같이 만들어줘요 · 약 25초 추가</span>
+              <span>"합성 이미지 만들기"를 누르면 이 설명으로 배경까지 같이 만들어줘요</span>
             </div>
           </div>
         )}

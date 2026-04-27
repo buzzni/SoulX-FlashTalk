@@ -21,7 +21,7 @@ export function AppLayout({ children, active = 'home' }: AppLayoutProps) {
     <div className="min-h-screen grid grid-cols-1 md:grid-cols-[248px_1fr] bg-background">
       <Sidebar active={active} />
       <main className="relative min-h-screen overflow-x-hidden">
-        <div className="absolute top-4 right-5 md:right-8 z-10">
+        <div className="fixed top-4 right-5 md:right-8 z-20">
           <ProfileMenu />
         </div>
         {children}

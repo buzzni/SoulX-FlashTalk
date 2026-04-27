@@ -332,7 +332,18 @@ function migrateCompositionVariants(raw: unknown): CompositionVariant[] {
 
 function migrateComposition(raw: unknown): Composition {
   const r = asObject(raw);
-  const shot: CompositionShot = r.shot === 'close' || r.shot === 'far' ? r.shot : 'medium';
+  // Backend enum: closeup | bust | medium | full. Old persisted values
+  // ('close', 'far') from before the rename map onto the closest backend
+  // value so users with stale localStorage don't blow up Step 2.
+  const rawShot = r.shot;
+  const shot: CompositionShot =
+    rawShot === 'closeup' || rawShot === 'bust' || rawShot === 'medium' || rawShot === 'full'
+      ? rawShot
+      : rawShot === 'close'
+        ? 'closeup'
+        : rawShot === 'far'
+          ? 'full'
+          : 'medium';
   const angle: CompositionAngle = r.angle === 'high' || r.angle === 'low' ? r.angle : 'eye';
   const settings = {
     direction: asString(r.direction),

@@ -40,7 +40,7 @@ export function Sidebar({ active }: SidebarProps) {
   useDraftAgeTick(lastSavedAt != null);
 
   return (
-    <aside className="hidden md:flex flex-col bg-sidebar-background border-r border-sidebar-border px-3.5 py-4">
+    <aside className="hidden md:flex md:sticky md:top-0 md:h-screen flex-col bg-sidebar-background border-r border-sidebar-border px-3.5 py-4 overflow-y-auto">
       <Brand
         size="sm"
         to="/"

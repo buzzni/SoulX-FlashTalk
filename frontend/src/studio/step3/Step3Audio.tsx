@@ -423,7 +423,6 @@ export default function Step3Audio({ state, update }: Step3AudioProps) {
               icon={<Sparkles className="size-4" />}
               title="AI로 음성 만들기"
               desc="대본을 적으면 AI가 읽어줘요"
-              meta="~10초 소요"
               onClick={switchToAi}
             />
             <OptionCard
@@ -478,14 +477,13 @@ export default function Step3Audio({ state, update }: Step3AudioProps) {
                 label={
                   isGenerated
                     ? `음성 준비 완료 · ${estDuration}초`
-                    : '대본 입력 후 만들기 버튼을 누르면 ~10초 안에 음성이 만들어져요'
+                    : '대본 입력 후 만들기 버튼을 눌러주세요'
                 }
                 done={!!isGenerated}
                 disabled={generating || !canGenerate}
                 generating={generating}
                 onClick={submit}
                 cta="음성 만들기"
-                timeHint="~10초"
               />
 
               {isGenerated && generatedSrc && <AudioPlayer src={generatedSrc} />}
@@ -659,10 +657,9 @@ interface GenerateBarProps {
   generating: boolean;
   onClick: () => void;
   cta: string;
-  timeHint: string;
 }
 
-function GenerateBar({ label, done, disabled, generating, onClick, cta, timeHint }: GenerateBarProps) {
+function GenerateBar({ label, done, disabled, generating, onClick, cta }: GenerateBarProps) {
   return (
     <div className="flex justify-between items-center gap-3 pt-1">
       <div className={`text-[12.5px] flex items-center gap-2 ${done ? '' : 'text-muted-foreground'}`}>
@@ -687,7 +684,6 @@ function GenerateBar({ label, done, disabled, generating, onClick, cta, timeHint
           <>
             <Sparkles className="size-4" />
             <span>{cta}</span>
-            <span className="text-[11px] font-medium opacity-70 tabular-nums">{timeHint}</span>
           </>
         )}
       </button>

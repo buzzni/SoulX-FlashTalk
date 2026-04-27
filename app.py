@@ -1060,8 +1060,8 @@ async def generate_elevenlabs_speech(
     if not 0.5 <= speed <= 1.8:
         raise HTTPException(status_code=400, detail=f"speed must be in [0.5, 1.8], got {speed}")
 
+    from modules.elevenlabs_tts import ElevenLabsTTS, ElevenLabsQuotaExceeded, ElevenLabsAPIError
     try:
-        from modules.elevenlabs_tts import ElevenLabsTTS
         tts = ElevenLabsTTS(
             api_key=config.ELEVENLABS_API_KEY,
             model_id=config.ELEVENLABS_OPTIONS["model_id"],
@@ -1095,6 +1095,14 @@ async def generate_elevenlabs_speech(
             "path": output_path,           # filesystem path — used by /api/generate as audio_path
             "url": f"/api/files/{filename}",  # serveable URL — used by Step 3 <audio> preview
         }
+    except ElevenLabsQuotaExceeded as e:
+        # 402 Payment Required — distinct from auth so the UI can route the
+        # message to "크레딧 부족" instead of the generic generation-failed banner.
+        logger.warning(f"ElevenLabs quota exceeded: {e}")
+        raise HTTPException(status_code=402, detail=f"ElevenLabs 크레딧이 부족합니다. {e}")
+    except ElevenLabsAPIError as e:
+        logger.error(f"ElevenLabs API error: {e}")
+        raise HTTPException(status_code=502, detail=f"ElevenLabs 호출 실패: {e}")
     except Exception as e:
         logger.error(f"ElevenLabs TTS failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -1201,24 +1209,31 @@ async def generate_video(
             raise HTTPException(status_code=400, detail="ElevenLabs API key not configured")
 
         # Generate TTS audio
-        from modules.elevenlabs_tts import ElevenLabsTTS
+        from modules.elevenlabs_tts import ElevenLabsTTS, ElevenLabsQuotaExceeded, ElevenLabsAPIError
         tts = ElevenLabsTTS(
             api_key=config.ELEVENLABS_API_KEY,
             model_id=config.ELEVENLABS_OPTIONS["model_id"],
         )
         audio_filename = f"tts_{uuid.uuid4().hex[:8]}.wav"
         audio_path = os.path.join(config.TEMP_DIR, audio_filename)
-        tts.generate_speech(
-            text=script_text,
-            voice_id=voice_id,
-            output_path=audio_path,
-            stability=stability,
-            similarity_boost=similarity_boost,
-            style=style,
-            speed=config.ELEVENLABS_OPTIONS.get("speed", 1.0),
-            use_speaker_boost=config.ELEVENLABS_OPTIONS.get("use_speaker_boost", True),
-            language_code=config.ELEVENLABS_OPTIONS.get("language_code", "ko"),
-        )
+        try:
+            tts.generate_speech(
+                text=script_text,
+                voice_id=voice_id,
+                output_path=audio_path,
+                stability=stability,
+                similarity_boost=similarity_boost,
+                style=style,
+                speed=config.ELEVENLABS_OPTIONS.get("speed", 1.0),
+                use_speaker_boost=config.ELEVENLABS_OPTIONS.get("use_speaker_boost", True),
+                language_code=config.ELEVENLABS_OPTIONS.get("language_code", "ko"),
+            )
+        except ElevenLabsQuotaExceeded as e:
+            logger.warning(f"ElevenLabs quota exceeded: {e}")
+            raise HTTPException(status_code=402, detail=f"ElevenLabs 크레딧이 부족합니다. {e}")
+        except ElevenLabsAPIError as e:
+            logger.error(f"ElevenLabs API error: {e}")
+            raise HTTPException(status_code=502, detail=f"ElevenLabs 호출 실패: {e}")
         audio_source_label = f"elevenlabs:{voice_id}"
 
     elif audio_source == "upload":

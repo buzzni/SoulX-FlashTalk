@@ -6,15 +6,14 @@
  * from wizard/schema so consumers don't copy-paste an object already
  * in the canonical table.
  */
-import { Clock } from 'lucide-react';
 import type { ResolutionKey } from '@/wizard/schema';
 import { RESOLUTION_META } from '@/wizard/schema';
 
-const RES_DISPLAY: Record<ResolutionKey, { time: string; warn?: boolean }> = {
-  '448p': { time: '~30초' },
-  '480p': { time: '~35초' },
-  '720p': { time: '~1분' },
-  '1080p': { time: '~2분', warn: true },
+const RES_DISPLAY: Record<ResolutionKey, { warn?: boolean }> = {
+  '448p': {},
+  '480p': {},
+  '720p': {},
+  '1080p': { warn: true },
 };
 
 const RES_OPTION_KEYS: ResolutionKey[] = ['448p', '480p', '720p', '1080p'];
@@ -42,9 +41,8 @@ export function ResolutionPicker({ selectedKey, onSelect }: ResolutionPickerProp
             {r.tag} · {r.width}×{r.height}
           </div>
           <div className="res-meta" style={{ marginTop: 10 }}>
-            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontWeight: r.warn ? 600 : 500, color: r.warn ? 'var(--warn-text)' : undefined }}>
-              <Clock style={{ width: 11, height: 11 }} />
-              {r.time}
+            <span style={{ fontWeight: r.warn ? 600 : 500, color: r.warn ? 'var(--warn-text)' : undefined }}>
+              {r.speed}
             </span>
             <span>{r.size}</span>
           </div>

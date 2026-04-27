@@ -109,7 +109,6 @@ export function HostControls({
             <>
               <Sparkles className="size-4" />
               <span>쇼호스트 만들기</span>
-              <span className="text-[11px] font-medium opacity-70 tabular-nums">~15초</span>
             </>
           )}
         </button>

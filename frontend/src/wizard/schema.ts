@@ -183,7 +183,7 @@ export const BackgroundSchema = z.discriminatedUnion('kind', [
 ]);
 export type Background = z.infer<typeof BackgroundSchema>;
 
-export const CompositionShotSchema = z.enum(['close', 'medium', 'far']);
+export const CompositionShotSchema = z.enum(['closeup', 'bust', 'medium', 'full']);
 export type CompositionShot = z.infer<typeof CompositionShotSchema>;
 
 export const CompositionAngleSchema = z.enum(['eye', 'high', 'low']);
