@@ -47,6 +47,25 @@ export function cancelQueuedTask(
   });
 }
 
+const RetryTaskResponseSchema = z
+  .object({
+    message: z.string(),
+    task_id: z.string(),
+  })
+  .passthrough();
+
+export function retryFailedTask(
+  taskId: string,
+  { signal }: CallOptions = {},
+): Promise<z.infer<typeof RetryTaskResponseSchema>> {
+  return fetchJSON(`/api/tasks/${encodeURIComponent(taskId)}/retry`, {
+    method: 'POST',
+    label: '작업 재시도',
+    signal,
+    schema: RetryTaskResponseSchema,
+  });
+}
+
 const TaskStateLite = z
   .object({
     task_id: z.string(),

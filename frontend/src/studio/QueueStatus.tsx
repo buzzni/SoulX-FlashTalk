@@ -31,7 +31,24 @@ export default function QueueStatus() {
   // refresh quickly. Popover closed → null tier (no extra sub),
   // store falls back to the 30 s background tier from useQueue alone.
   usePolling(open ? 'active' : null);
-  const { cancellingIds, cancelError, cancel } = useQueueActions(refresh);
+  const {
+    cancellingIds,
+    cancelError,
+    cancel,
+    retryingIds,
+    retryError,
+    retry,
+  } = useQueueActions(refresh);
+
+  // Retry returns the new task_id; navigate the user to its render page
+  // so they immediately see the new attempt instead of having to dig.
+  const handleRetry = async (taskId: string, label: string) => {
+    const newId = await retry(taskId, label);
+    if (newId) {
+      setOpen(false);
+      navigate(`/render/${encodeURIComponent(newId)}`);
+    }
+  };
 
   const loading = !queueData;
   const totalActive = queueData
@@ -68,11 +85,14 @@ export default function QueueStatus() {
             error={error}
             cancellingIds={cancellingIds}
             cancelError={cancelError}
+            retryingIds={retryingIds}
+            retryError={retryError}
             totalActive={totalActive}
             onClose={() => setOpen(false)}
             onOpenLive={handleOpenLive}
             onOpenRecent={handleOpenRecent}
             onCancel={cancel}
+            onRetry={handleRetry}
           />
         )}
       </PopoverContent>

@@ -18,11 +18,14 @@ export interface QueuePanelProps {
   error: string | null;
   cancellingIds: Set<string>;
   cancelError: string | null;
+  retryingIds: Set<string>;
+  retryError: string | null;
   totalActive: number;
   onClose: () => void;
   onOpenLive: (taskId: string) => void;
   onOpenRecent: (taskId: string, status: string) => void;
   onCancel: (taskId: string, label: string) => void;
+  onRetry: (taskId: string, label: string) => void;
 }
 
 export function QueuePanel({
@@ -30,11 +33,14 @@ export function QueuePanel({
   error,
   cancellingIds,
   cancelError,
+  retryingIds,
+  retryError,
   totalActive,
   onClose,
   onOpenLive,
   onOpenRecent,
   onCancel,
+  onRetry,
 }: QueuePanelProps) {
   const running = queueData.running ?? [];
   const pending = queueData.pending ?? [];
@@ -111,8 +117,20 @@ export function QueuePanel({
         <div className={SECTION_CLASS}>
           <div className={SECTION_HEADER_CLASS}>최근 완료</div>
           {recent.slice(0, 5).map((t) => (
-            <RecentTaskRow key={t.task_id} task={t} onOpen={onOpenRecent} />
+            <RecentTaskRow
+              key={t.task_id}
+              task={t}
+              onOpen={onOpenRecent}
+              onRetry={onRetry}
+              retrying={retryingIds.has(t.task_id)}
+            />
           ))}
+        </div>
+      )}
+
+      {retryError && (
+        <div className="mt-2 px-2 py-1.5 bg-destructive-soft text-destructive rounded-sm text-2xs">
+          {retryError}
         </div>
       )}
 

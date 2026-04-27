@@ -9,6 +9,7 @@ import os
 import json
 import asyncio
 import logging
+import uuid
 from datetime import datetime
 from typing import Optional, Callable, Awaitable
 
@@ -120,6 +121,49 @@ class TaskQueue:
                 logger.info(f"Cancelled task {task_id} (by user={requesting_user_id})")
                 return "ok"
         return "not_found"
+
+    async def retry_task(self, task_id: str, *, requesting_user_id: Optional[str] = None,
+                          is_admin: bool = False) -> tuple[Optional[str], str]:
+        """Re-enqueue a finished (error/cancelled) task with the same params
+        under a fresh task_id. Returns (new_task_id, "ok") on success;
+        (None, reason) where reason is "not_found" / "forbidden" / "not_finished".
+        Owner-only unless is_admin. The original entry is untouched so users
+        can still see what failed and what replaced it side by side.
+        """
+        async with self._lock:
+            entry = next((e for e in self._queue if e["task_id"] == task_id), None)
+            if entry is None:
+                return None, "not_found"
+            if (not is_admin and requesting_user_id is not None
+                    and entry.get("user_id") != requesting_user_id):
+                # Don't leak existence: caller maps to 404
+                return None, "forbidden"
+            if entry["status"] not in ("error", "cancelled"):
+                # Only finished-but-failed tasks are retryable. Pending /
+                # running cases would create a duplicate of a live task.
+                return None, "not_finished"
+
+            new_task_id = uuid.uuid4().hex
+            new_entry = {
+                "task_id": new_task_id,
+                "user_id": entry["user_id"],
+                "type": entry["type"],
+                "params": dict(entry["params"]),
+                "label": entry.get("label", ""),
+                "status": "pending",
+                "created_at": datetime.now().isoformat(),
+                "started_at": None,
+                "completed_at": None,
+                "error": None,
+            }
+            self._queue.append(new_entry)
+            self._save()
+            logger.info(
+                f"Retried task {task_id} as {new_task_id} "
+                f"(by user={requesting_user_id})"
+            )
+        self._event.set()
+        return new_task_id, "ok"
 
     async def get_status(self, *, user_id: Optional[str] = None) -> dict:
         """Get queue status.

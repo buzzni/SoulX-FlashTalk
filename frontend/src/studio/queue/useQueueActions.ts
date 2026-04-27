@@ -13,18 +13,23 @@
  * to render immediately.
  */
 import { useCallback, useState } from 'react';
-import { cancelQueuedTask } from '../../api/queue';
+import { cancelQueuedTask, retryFailedTask } from '../../api/queue';
 import { humanizeError } from '../../api/http';
 
 export interface UseQueueActions {
   cancellingIds: Set<string>;
   cancelError: string | null;
   cancel: (taskId: string, label: string) => Promise<void>;
+  retryingIds: Set<string>;
+  retryError: string | null;
+  retry: (taskId: string, label: string) => Promise<string | null>;
 }
 
 export function useQueueActions(refresh: () => void): UseQueueActions {
   const [cancellingIds, setCancellingIds] = useState<Set<string>>(new Set());
   const [cancelError, setCancelError] = useState<string | null>(null);
+  const [retryingIds, setRetryingIds] = useState<Set<string>>(new Set());
+  const [retryError, setRetryError] = useState<string | null>(null);
 
   const cancel = useCallback(
     async (taskId: string, label: string) => {
@@ -51,5 +56,43 @@ export function useQueueActions(refresh: () => void): UseQueueActions {
     [refresh],
   );
 
-  return { cancellingIds, cancelError, cancel };
+  // Retry returns the new task_id (caller can navigate to /render/:newId);
+  // null on cancel or failure. Confirm + per-task spinner mirror cancel().
+  const retry = useCallback(
+    async (taskId: string, label: string): Promise<string | null> => {
+      if (!window.confirm(`이 작업을 다시 시도할까요?\n${label || taskId}`)) {
+        return null;
+      }
+      setRetryingIds((prev) => {
+        const next = new Set(prev);
+        next.add(taskId);
+        return next;
+      });
+      setRetryError(null);
+      try {
+        const res = await retryFailedTask(taskId);
+        refresh();
+        return (res?.task_id as string | undefined) ?? null;
+      } catch (err) {
+        setRetryError(humanizeError(err));
+        return null;
+      } finally {
+        setRetryingIds((prev) => {
+          const next = new Set(prev);
+          next.delete(taskId);
+          return next;
+        });
+      }
+    },
+    [refresh],
+  );
+
+  return {
+    cancellingIds,
+    cancelError,
+    cancel,
+    retryingIds,
+    retryError,
+    retry,
+  };
 }

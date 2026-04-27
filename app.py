@@ -2107,6 +2107,25 @@ async def get_queue_status(request: Request):
     return await task_queue.get_status(user_id=scope)
 
 
+@app.post("/api/tasks/{task_id}/retry")
+async def retry_failed_task(task_id: str, request: Request):
+    """Re-enqueue a finished (error/cancelled) task with the same params
+    under a new task_id. Owner-only (admin/master can retry any).
+    Returns the new task_id so the client can navigate to /render/:new_id.
+    """
+    user = auth_module.get_request_user(request)
+    is_admin = user.get("role") in ("admin", "master")
+    new_task_id, reason = await task_queue.retry_task(
+        task_id, requesting_user_id=user["user_id"], is_admin=is_admin,
+    )
+    if new_task_id is None:
+        if reason == "not_finished":
+            raise HTTPException(status_code=409, detail="Task is still in progress")
+        # not_found / forbidden — same surface (don't leak existence)
+        raise HTTPException(status_code=404, detail="Task not found")
+    return {"task_id": new_task_id, "message": "Task re-enqueued"}
+
+
 @app.delete("/api/queue/{task_id}")
 async def cancel_queued_task(task_id: str, request: Request):
     """Cancel a pending task. Owner-only (admins/masters can cancel any)."""
