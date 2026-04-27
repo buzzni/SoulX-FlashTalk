@@ -2,22 +2,30 @@
  * HostReferenceUploader — image-mode inputs for Step 1.
  *
  * Face / outfit reference uploads with instant preview + server-side
- * upload-on-pick (so the ref survives refresh). Plus strength
- * sliders (face + outfit) that get collapsed into prompt clauses at
- * api layer, plus optional text outfit description, plus
- * extraPrompt ("추가로 바라는 점").
+ * upload-on-pick (so the ref survives refresh). Strength sliders +
+ * outfit text + extraPrompt round out the image-mode editor.
  *
- * Upload choreography uses `useUploadReferenceImage` so stale
- * uploads can't overwrite newer choices (rapid pick-rename pattern
- * used to corrupt state).
+ * Reads/writes through `useFormContext` — Step1Host owns the form via
+ * `<FormProvider>`. Upload side-effects fire `setValue('input.faceRef',
+ * ServerAsset)` (not the store) so the form stays the single source of
+ * truth; the store→form sync hook in the parent is one-way for store
+ * updates that originate elsewhere (mode switches, generation result).
+ *
+ * Upload choreography uses `useUploadReferenceImage` so stale uploads
+ * can't overwrite newer choices (rapid pick-rename pattern used to
+ * corrupt state).
  */
 
+import { Controller, useFormContext, type Path } from 'react-hook-form';
 import Icon from '../Icon.jsx';
 import { Field } from '@/components/field';
 import { Segmented } from '@/components/segmented';
 import { UploadTile } from '@/components/upload-tile';
-import { uploadReferenceImage, type UploadResult } from '../../api/upload';
+import { uploadFileFromAsset, type UploadTileFile } from '@/components/upload-tile-bridge';
+import { uploadReferenceImage } from '../../api/upload';
 import { useUploadReferenceImage } from '../../hooks/useUploadReferenceImage';
+import type { ServerAsset, LocalAsset } from '@/wizard/schema';
+import type { HostFormValues } from '@/wizard/form-mappers';
 
 // Face/outfit strength is not a real Gemini parameter — the mapping
 // layer (§5.1.2) collapses 0–1 into one of four English prompt
@@ -39,58 +47,39 @@ export function strengthValueToStep(v: number | null | undefined): number {
   return 0.95;
 }
 
-export interface RefFile {
-  name?: string;
-  size?: number;
-  type?: string;
-  url?: string;
-  _file?: File;
-}
+type RefFieldName = Path<HostFormValues> & ('input.faceRef' | 'input.outfitRef');
 
-export interface HostReferenceUploaderProps {
-  faceRef: RefFile | null;
-  outfitRef: RefFile | null;
-  outfitText: string;
-  extraPrompt: string;
-  faceStrength: number;
-  outfitStrength: number;
-  onFaceSelected: (ref: RefFile | null, uploaded?: UploadResult) => void;
-  onOutfitSelected: (ref: RefFile | null, uploaded?: UploadResult) => void;
-  onOutfitTextChange: (s: string) => void;
-  onExtraPromptChange: (s: string) => void;
-  onFaceStrengthChange: (v: number) => void;
-  onOutfitStrengthChange: (v: number) => void;
-}
-
-export function HostReferenceUploader({
-  faceRef,
-  outfitRef,
-  outfitText,
-  extraPrompt,
-  faceStrength,
-  outfitStrength,
-  onFaceSelected,
-  onOutfitSelected,
-  onOutfitTextChange,
-  onExtraPromptChange,
-  onFaceStrengthChange,
-  onOutfitStrengthChange,
-}: HostReferenceUploaderProps) {
+export function HostReferenceUploader() {
+  const { control, register, setValue, watch } = useFormContext<HostFormValues>();
+  // One uploader per slot — face and outfit have independent in-flight
+  // tokens, so a rapid pick-rename on face can't clobber outfit.
   const faceUpload = useUploadReferenceImage(uploadReferenceImage);
   const outfitUpload = useUploadReferenceImage(uploadReferenceImage);
 
-  const handleFacePick = async (f: RefFile | null) => {
-    onFaceSelected(f);
-    if (!f?._file) return;
-    const res = await faceUpload.upload(f._file);
-    if (res) onFaceSelected(f, res);
-  };
-  const handleOutfitPick = async (f: RefFile | null) => {
-    onOutfitSelected(f);
-    if (!f?._file) return;
-    const res = await outfitUpload.upload(f._file);
-    if (res) onOutfitSelected(f, res);
-  };
+  const faceRef = watch('input.faceRef') as ServerAsset | LocalAsset | null;
+  const outfitRef = watch('input.outfitRef') as ServerAsset | LocalAsset | null;
+
+  const makePickHandler =
+    (field: RefFieldName, upload: ReturnType<typeof useUploadReferenceImage>) =>
+    async (f: UploadTileFile | null) => {
+      if (!f) {
+        setValue(field, null, { shouldDirty: true });
+        return;
+      }
+      // Pasted/drag without a File object — UploadTile usually attaches one.
+      if (!f._file) return;
+      const res = await upload.upload(f._file);
+      if (res?.path) {
+        setValue(
+          field,
+          { path: res.path, url: res.url, name: f.name },
+          { shouldDirty: true, shouldValidate: true },
+        );
+      }
+    };
+
+  const handleFacePick = makePickHandler('input.faceRef', faceUpload);
+  const handleOutfitPick = makePickHandler('input.outfitRef', outfitUpload);
 
   return (
     <div className="flex-col gap-3">
@@ -117,46 +106,57 @@ export function HostReferenceUploader({
       <div className="field-row">
         <Field label="얼굴" hint="꼭 필요해요">
           <UploadTile
-            file={faceRef}
+            file={uploadFileFromAsset(faceRef)}
             onFile={handleFacePick}
-            onRemove={() => onFaceSelected(null)}
+            onRemove={() => setValue('input.faceRef', null, { shouldDirty: true })}
             label="얼굴이 나온 사진 올리기"
             sub="정면·밝은 사진 추천"
           />
         </Field>
         <Field label="의상" hint="사진이나 글, 둘 다 가능 · 없어도 돼요">
           <UploadTile
-            file={outfitRef}
+            file={uploadFileFromAsset(outfitRef)}
             onFile={handleOutfitPick}
-            onRemove={() => onOutfitSelected(null)}
+            onRemove={() => setValue('input.outfitRef', null, { shouldDirty: true })}
             label="입힐 옷 사진 올리기"
             sub="원하는 옷차림이 있을 때"
           />
           <input
             className="input mt-2"
             placeholder="또는 글로 설명: 예) 베이지 니트, 청바지"
-            value={outfitText}
-            onChange={(e) => onOutfitTextChange(e.target.value)}
+            {...register('input.outfitText')}
           />
         </Field>
       </div>
 
       {faceRef && (
         <Field label="얼굴을 얼마나 비슷하게?" hint="프롬프트 문구에 반영돼요 (연속 수치가 아님)">
-          <Segmented
-            value={strengthValueToStep(faceStrength)}
-            onChange={onFaceStrengthChange}
-            options={STRENGTH_STEPS}
+          <Controller
+            control={control}
+            name="input.faceStrength"
+            render={({ field }) => (
+              <Segmented
+                value={strengthValueToStep(field.value as number | null | undefined)}
+                onChange={field.onChange}
+                options={STRENGTH_STEPS}
+              />
+            )}
           />
         </Field>
       )}
 
       {outfitRef && (
         <Field label="옷을 얼마나 비슷하게?" hint="프롬프트 문구에 반영돼요 (연속 수치가 아님)">
-          <Segmented
-            value={strengthValueToStep(outfitStrength)}
-            onChange={onOutfitStrengthChange}
-            options={STRENGTH_STEPS}
+          <Controller
+            control={control}
+            name="input.outfitStrength"
+            render={({ field }) => (
+              <Segmented
+                value={strengthValueToStep(field.value as number | null | undefined)}
+                onChange={field.onChange}
+                options={STRENGTH_STEPS}
+              />
+            )}
           />
         </Field>
       )}
@@ -165,8 +165,7 @@ export function HostReferenceUploader({
         <input
           className="input"
           placeholder="예) 밝은 표정, 자연스러운 자세"
-          value={extraPrompt}
-          onChange={(e) => onExtraPromptChange(e.target.value)}
+          {...register('input.extraPrompt')}
         />
       </Field>
     </div>

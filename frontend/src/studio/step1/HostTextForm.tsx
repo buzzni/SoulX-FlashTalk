@@ -2,12 +2,16 @@
  * HostTextForm — text-mode inputs for Step 1.
  *
  * Free-text prompt + category-builder chips + optional negative
- * prompt. Everything the "설명으로 만들기" tab shows, minus the
- * generation button (container owns that).
+ * prompt. Reads/writes through `useFormContext` — the parent
+ * Step1Host owns the form via `<FormProvider>`. No prop threading
+ * for values; every editor binds directly to a `input.*` field.
  */
 
+import { Controller, useFormContext } from 'react-hook-form';
 import { Chip } from '@/components/chip';
 import { Field } from '@/components/field';
+import type { HostFormValues } from '@/wizard/form-mappers';
+
 const HOST_PRESETS: Record<string, { value: string; label: string }[]> = {
   성별: [
     { value: 'female', label: '여성' },
@@ -39,38 +43,32 @@ const EXAMPLE_PROMPTS = [
   '40대 남성, 차분하고 신뢰감 있는 표정, 네이비 셔츠',
 ];
 
-export interface HostTextFormProps {
-  prompt: string;
-  negativePrompt: string;
-  builder: Record<string, string>;
-  onPromptChange: (s: string) => void;
-  onNegativePromptChange: (s: string) => void;
-  onBuilderChange: (b: Record<string, string>) => void;
-}
+export function HostTextForm() {
+  const { register, control, setValue, watch } = useFormContext<HostFormValues>();
 
-export function HostTextForm({
-  prompt,
-  negativePrompt,
-  builder,
-  onPromptChange,
-  onNegativePromptChange,
-  onBuilderChange,
-}: HostTextFormProps) {
+  // `watch('input.prompt')` re-renders this component on every keystroke
+  // so the live-validity hint can light up at 15 chars without waiting
+  // for a debounce flush. The textarea itself is uncontrolled (RHF
+  // `register`) so typing stays cheap.
+  const prompt = watch('input.prompt') ?? '';
+
   return (
     <div className="flex-col gap-3">
       <Field label="어떤 모습의 쇼호스트를 원하세요?" hint="자유롭게 15자 이상">
         <textarea
           className={`textarea ${prompt && prompt.length < 15 ? 'invalid' : ''}`}
           placeholder="예) 30대 여성, 밝게 웃고 있음, 베이지 니트, 따뜻한 분위기"
-          value={prompt}
-          onChange={(e) => onPromptChange(e.target.value)}
+          {...register('input.prompt')}
         />
         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 6 }}>
           <span className="text-xs text-tertiary" style={{ alignSelf: 'center' }}>
             예시 클릭 →
           </span>
           {EXAMPLE_PROMPTS.map((ex) => (
-            <Chip key={ex} onClick={() => onPromptChange(ex)}>
+            <Chip
+              key={ex}
+              onClick={() => setValue('input.prompt', ex, { shouldDirty: true, shouldTouch: true })}
+            >
               {ex.split(',')[0]}
             </Chip>
           ))}
@@ -81,26 +79,35 @@ export function HostTextForm({
         <div className="field-label" style={{ marginBottom: 10, marginTop: 6 }}>
           또는 조건으로 선택해요
         </div>
-        <div className="flex-col gap-3">
-          {Object.keys(HOST_PRESETS).map((key) => (
-            <div key={key}>
-              <div className="text-xs text-tertiary" style={{ marginBottom: 6 }}>
-                {key}
-              </div>
-              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                {HOST_PRESETS[key]!.map((o) => (
-                  <Chip
-                    key={o.value}
-                    on={builder?.[key] === o.value}
-                    onClick={() => onBuilderChange({ ...builder, [key]: o.value })}
-                  >
-                    {o.label}
-                  </Chip>
+        <Controller
+          control={control}
+          name="input.builder"
+          render={({ field }) => {
+            const builder = (field.value ?? {}) as Record<string, string>;
+            return (
+              <div className="flex-col gap-3">
+                {Object.keys(HOST_PRESETS).map((key) => (
+                  <div key={key}>
+                    <div className="text-xs text-tertiary" style={{ marginBottom: 6 }}>
+                      {key}
+                    </div>
+                    <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                      {HOST_PRESETS[key]!.map((o) => (
+                        <Chip
+                          key={o.value}
+                          on={builder[key] === o.value}
+                          onClick={() => field.onChange({ ...builder, [key]: o.value })}
+                        >
+                          {o.label}
+                        </Chip>
+                      ))}
+                    </div>
+                  </div>
                 ))}
               </div>
-            </div>
-          ))}
-        </div>
+            );
+          }}
+        />
       </div>
 
       <details style={{ fontSize: 12, color: 'var(--text-tertiary)', marginTop: 4 }}>
@@ -110,8 +117,7 @@ export function HostTextForm({
         <input
           className="input mt-2"
           placeholder="예) 과한 화장, 어두운 표정"
-          value={negativePrompt}
-          onChange={(e) => onNegativePromptChange(e.target.value)}
+          {...register('input.negativePrompt')}
         />
       </details>
     </div>

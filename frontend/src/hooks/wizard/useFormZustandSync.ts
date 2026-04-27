@@ -35,8 +35,14 @@ export function useFormZustandSync<S, V extends FieldValues>(
   useEffect(() => {
     if (lastSliceRef.current === slice) return;
     lastSliceRef.current = slice;
+    // Hard reset (no keepDirtyValues): tagged-union slices like
+    // HostInput swap their entire shape on mode change, and
+    // keepDirtyValues would preserve a dirty discriminator field on
+    // the OLD shape, leaving the form schema-invalid until the next
+    // user input. Spurious resets from debounce round-trips are
+    // suppressed in `useDebouncedFormSync` instead, where same-value
+    // flushes never reach `setHost` in the first place.
     form.reset(mapper(slice), {
-      // Preserve isDirty so submit-button gating doesn't flicker.
       keepDirty: false,
       keepErrors: false,
       keepTouched: false,

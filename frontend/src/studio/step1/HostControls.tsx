@@ -2,39 +2,39 @@
  * HostControls — temperature / image-quality / error / generate
  * button row for Step 1.
  *
- * Sits below either HostTextForm or HostReferenceUploader and
- * drives the actual "쇼호스트 만들기" click. Button disables
- * itself based on the caller-supplied `canGenerate` boolean —
- * container owns the validity rule (text mode needs 15+ chars,
- * image mode needs face ref), this component just renders.
+ * Sits below either HostTextForm or HostReferenceUploader and drives
+ * the actual "쇼호스트 만들기" click. Temperature reads/writes through
+ * `useFormContext` (form state); imageQuality stays on top-level
+ * wizard state (not inside the host slice). The `canGenerate` boolean
+ * comes from the container, which derives validity from form values.
  */
 
+import { Controller, useFormContext } from 'react-hook-form';
 import Icon from '../Icon.jsx';
 import { Field } from '@/components/field';
 import { Segmented } from '@/components/segmented';
 import { Sparkles } from 'lucide-react';
 import type { ImageQuality } from '@/wizard/schema';
+import type { HostFormValues } from '@/wizard/form-mappers';
+
 export interface HostControlsProps {
-  temperature: number;
   imageQuality: ImageQuality;
   errorMsg: string | null;
   generating: boolean;
   canGenerate: boolean;
-  onTemperatureChange: (v: number) => void;
   onImageQualityChange: (v: ImageQuality) => void;
   onGenerate: () => void;
 }
 
 export function HostControls({
-  temperature,
   imageQuality,
   errorMsg,
   generating,
   canGenerate,
-  onTemperatureChange,
   onImageQualityChange,
   onGenerate,
 }: HostControlsProps) {
+  const { control } = useFormContext<HostFormValues>();
   return (
     <>
       <hr className="hr" />
@@ -43,14 +43,20 @@ export function HostControls({
         label="변동성"
         hint="같은 입력으로 생성해도 얼마나 다양하게 나올지 — 안정적이면 비슷한 4장, 창의적이면 제각각"
       >
-        <Segmented
-          value={temperature}
-          onChange={onTemperatureChange}
-          options={[
-            { value: 0.4, label: '안정적' },
-            { value: 0.7, label: '보통' },
-            { value: 1.0, label: '창의적' },
-          ]}
+        <Controller
+          control={control}
+          name="temperature"
+          render={({ field }) => (
+            <Segmented
+              value={field.value as number}
+              onChange={field.onChange}
+              options={[
+                { value: 0.4, label: '안정적' },
+                { value: 0.7, label: '보통' },
+                { value: 1.0, label: '창의적' },
+              ]}
+            />
+          )}
         />
       </Field>
 
