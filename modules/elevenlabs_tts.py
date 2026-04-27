@@ -44,10 +44,12 @@ def _raise_friendly(exc: "httpx.HTTPStatusError") -> None:
     status = detail.get("status") if isinstance(detail, dict) else None
     message = detail.get("message") if isinstance(detail, dict) else None
 
+    # Don't add a Korean prefix here — the FastAPI layer adds its own user-facing
+    # prefix (e.g. "ElevenLabs 크레딧이 부족합니다."). Doubling it produces
+    # "...부족합니다. ...부족합니다. 계정 크레딧을 충전해주세요." in the rare
+    # path where ElevenLabs omits `detail.message`.
     if status == "quota_exceeded":
-        raise ElevenLabsQuotaExceeded(
-            message or "ElevenLabs 크레딧이 부족합니다. 계정 크레딧을 충전해주세요."
-        ) from exc
+        raise ElevenLabsQuotaExceeded(message or "0 credits remaining") from exc
     raise ElevenLabsAPIError(message or str(exc)) from exc
 
 

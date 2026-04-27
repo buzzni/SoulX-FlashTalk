@@ -540,8 +540,7 @@
 }
 
 /* ───── Sonner toast — productivity-shell aesthetic ─────
- * Card surface + thin type-colored accent stripe on the left.
- * No saturated rich-color floods, no jarring shadows. */
+ * Card surface, no accent stripe. Type signaled by icon color only. */
 [data-sonner-toaster] {
   --width: 380px;
 }
@@ -552,25 +551,11 @@
   border: 1px solid var(--border) !important;
   border-radius: 10px !important;
   box-shadow: var(--shadow-2) !important;
-  padding: 12px 14px 12px 18px !important;
+  padding: 12px 14px !important;
   font-family: var(--font-sans) !important;
   font-size: 13px !important;
   letter-spacing: -0.012em !important;
-  position: relative !important;
-  overflow: hidden !important;
 }
-
-[data-sonner-toast]::before {
-  content: '';
-  position: absolute;
-  inset: 0 auto 0 0;
-  width: 3px;
-  background: var(--ink-3);
-}
-[data-sonner-toast][data-type="success"]::before { background: var(--success); }
-[data-sonner-toast][data-type="error"]::before { background: var(--destructive); }
-[data-sonner-toast][data-type="warning"]::before { background: var(--amber); }
-[data-sonner-toast][data-type="info"]::before { background: var(--primary); }
 
 [data-sonner-toast] [data-title] {
   font-weight: 600 !important;

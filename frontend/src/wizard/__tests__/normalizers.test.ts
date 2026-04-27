@@ -167,6 +167,22 @@ describe('migrateLegacy', () => {
     // invalid → default
     expect(migrateLegacy({ resolution: { key: 'foo' } }).resolution).toBe('448p');
   });
+
+  // Backend VALID_SHOTS = {closeup, bust, medium, full}. The frontend used to
+  // expose {close, medium, far} — old persisted blobs must map onto the new
+  // backend enum so /api/composite/generate doesn't reject the shot.
+  // Legacy blobs put `shot` at the composition top level (pre-`settings.` nesting).
+  it('migrates legacy composition.shot values onto the backend enum', () => {
+    expect(migrateLegacy({ composition: { shot: 'close' } }).composition.settings.shot).toBe('closeup');
+    expect(migrateLegacy({ composition: { shot: 'far' } }).composition.settings.shot).toBe('full');
+    expect(migrateLegacy({ composition: { shot: 'medium' } }).composition.settings.shot).toBe('medium');
+    expect(migrateLegacy({ composition: { shot: 'bust' } }).composition.settings.shot).toBe('bust');
+    expect(migrateLegacy({ composition: { shot: 'closeup' } }).composition.settings.shot).toBe('closeup');
+    expect(migrateLegacy({ composition: { shot: 'full' } }).composition.settings.shot).toBe('full');
+    // Unknown / missing → fall back to medium so the wizard still loads.
+    expect(migrateLegacy({ composition: { shot: 'wide' } }).composition.settings.shot).toBe('medium');
+    expect(migrateLegacy({ composition: {} }).composition.settings.shot).toBe('medium');
+  });
 });
 
 describe('migrateImageQuality', () => {
