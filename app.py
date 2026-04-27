@@ -47,6 +47,10 @@ active_pipeline_type = None  # "flashtalk" or "multitalk"
 pipeline_lock = None
 task_states = {}  # task_id -> {stage, progress, message, error, updates[]}
 
+# Live torchrun child processes when FLASHTALK_USE_TORCHRUN_SUBPROCESS=1.
+# Keyed by task_id so /api/cancel can SIGTERM the right group.
+_active_processes: dict = {}
+
 app = FastAPI(
     title="SoulX-FlashTalk Video Generator",
     description="Audio-driven avatar video generation with ElevenLabs TTS",
@@ -313,6 +317,165 @@ def _ensure_multitalk_pipeline(cpu_offload: bool):
 # Video Generation (async)
 # ========================================
 
+
+def _phase_message(stage: str, payload: dict) -> str:
+    if stage == "loading_model":
+        return "모델 로딩 중..."
+    if stage == "compiling":
+        return "컴파일 중 (첫 호출 1-3분)..."
+    if stage == "generating":
+        idx = payload.get("idx", 0)
+        total = payload.get("total", 0)
+        return f"쇼호스트 움직임 만드는 중 ({idx}/{total})"
+    if stage == "saving":
+        return "비디오 저장 중..."
+    if stage == "starting_subprocess":
+        return "워커 시작 중 (USP 2GPU)..."
+    return stage
+
+
+async def _run_torchrun_inference(
+    task_id: str,
+    host_image: str,
+    audio_path: str,
+    prompt: str,
+    seed: int,
+    target_h: int,
+    target_w: int,
+    output_path: str,
+) -> bool:
+    """Spawn `torchrun --nproc_per_node=N` child on a fixed GPU set, parse
+    JSON progress lines from stdout, and forward them to update_task().
+
+    Contract with scripts/run_inference_subprocess.py: child emits
+    `{"type":"progress",...}` lines, then either `{"type":"done",...}` on
+    success or `{"type":"error","kind":"oom|other",...}` on failure.
+
+    Returns True iff the child exited 0 AND emitted "done"; otherwise the
+    task has already been marked errored via set_task_error().
+    """
+    import collections
+    import signal
+    import subprocess as _sp
+
+    opts = config.FLASHTALK_OPTIONS
+    gpu_set = opts.get("torchrun_gpu_set", "1,3")
+    nproc = max(1, len([x for x in gpu_set.split(",") if x.strip()]))
+    timeout_s = int(opts.get("torchrun_timeout_s", 7200))
+
+    env = os.environ.copy()
+    env["CUDA_VISIBLE_DEVICES"] = gpu_set
+    env["AUDIO_TRIM_ENABLED"] = "1" if config.AUDIO_TRIM_ENABLED else "0"
+    env["AUDIO_TRIM_TOP_DB"] = str(config.AUDIO_TRIM_TOP_DB)
+    env["AUDIO_TRIM_PAD_MS"] = str(config.AUDIO_TRIM_PAD_MS)
+    # Fast-fail on NCCL hang so watchdog kicks in instead of silent stall.
+    env.setdefault("NCCL_ASYNC_ERROR_HANDLING", "1")
+
+    cmd = [
+        "torchrun",
+        f"--nproc_per_node={nproc}",
+        "scripts/run_inference_subprocess.py",
+        "--ckpt_dir", config.FLASHTALK_CKPT_DIR,
+        "--wav2vec_dir", config.FLASHTALK_WAV2VEC_DIR,
+        "--input_prompt", prompt,
+        "--cond_image", host_image,
+        "--audio_path", audio_path,
+        "--save_path", output_path,
+        "--target_h", str(target_h),
+        "--target_w", str(target_w),
+        "--base_seed", str(seed),
+        "--audio_encode_mode", opts.get("audio_encode_mode", "stream"),
+    ]
+
+    logger.info(f"Task {task_id}: spawning torchrun (GPUs={gpu_set}, nproc={nproc})")
+    update_task(task_id, "starting_subprocess", 0.10, _phase_message("starting_subprocess", {}))
+
+    proc = await asyncio.create_subprocess_exec(
+        *cmd,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.STDOUT,
+        env=env,
+        cwd=config.PROJECT_ROOT,
+        start_new_session=True,
+    )
+    _active_processes[task_id] = proc
+
+    log_buffer = collections.deque(maxlen=400)  # last ~400 lines (~64KB-ish)
+    success_payload = None
+    error_payload = None
+
+    async def _drain_stdout():
+        nonlocal success_payload, error_payload
+        while True:
+            line = await proc.stdout.readline()
+            if not line:
+                break
+            text = line.decode("utf-8", errors="replace").rstrip()
+            log_buffer.append(text)
+            stripped = text.strip()
+            if not (stripped.startswith("{") and stripped.endswith("}")):
+                continue
+            try:
+                payload = json.loads(stripped)
+            except json.JSONDecodeError:
+                continue
+            t = payload.get("type")
+            if t == "progress":
+                stage = payload.get("stage", "generating")
+                pct = float(payload.get("pct", 0.5))
+                update_task(task_id, stage, pct, _phase_message(stage, payload))
+            elif t == "done":
+                success_payload = payload
+            elif t == "error":
+                error_payload = payload
+
+    drain_task = asyncio.create_task(_drain_stdout())
+    timed_out = False
+    try:
+        try:
+            await asyncio.wait_for(proc.wait(), timeout=timeout_s)
+        except asyncio.TimeoutError:
+            timed_out = True
+            logger.warning(f"Task {task_id}: torchrun timeout {timeout_s}s — escalating")
+            try:
+                os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
+                try:
+                    await asyncio.wait_for(proc.wait(), timeout=10)
+                except asyncio.TimeoutError:
+                    os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+                    await proc.wait()
+            except ProcessLookupError:
+                pass
+    finally:
+        try:
+            await asyncio.wait_for(drain_task, timeout=3)
+        except (asyncio.TimeoutError, Exception):
+            drain_task.cancel()
+        _active_processes.pop(task_id, None)
+
+    if timed_out:
+        set_task_error(task_id, f"생성 타임아웃 ({timeout_s}s 초과)")
+        return False
+
+    if proc.returncode == 0 and success_payload:
+        return True
+
+    if error_payload:
+        kind = error_payload.get("kind", "other")
+        if kind == "oom":
+            set_task_error(task_id, "GPU 메모리 부족 — 잠시 후 다시 시도하거나 해상도를 낮춰주세요.")
+        else:
+            short = (error_payload.get("msg") or "")[:200]
+            set_task_error(task_id, f"생성 실패: {short}")
+    else:
+        tail = "\n".join(list(log_buffer)[-30:])
+        if "out of memory" in tail.lower():
+            set_task_error(task_id, "GPU 메모리 부족 — 잠시 후 다시 시도하거나 해상도를 낮춰주세요.")
+        else:
+            set_task_error(task_id, f"워커 프로세스 비정상 종료 (exit={proc.returncode})")
+    return False
+
+
 async def generate_video_task(
     task_id: str,
     host_image: str,
@@ -382,181 +545,199 @@ async def generate_video_task(
                 finally:
                     await loop.run_in_executor(None, release_models)
 
-            # Stage 1: Load pipeline if needed
-            update_task(task_id, "loading", 0.1, "모델 로딩 중...")
-            await loop.run_in_executor(None, lambda: _ensure_flashtalk_pipeline(cpu_offload))
-
-            # Parse resolution (e.g., "1280x720" -> height=1280, width=720).
-            # Snap to 16× — FlashTalk VAE(8) × patch(2) requires both axes be
-            # multiples of 16 or attention dies with a shape mismatch.
+            # Resolution snap — both subprocess and in-process paths need
+            # target_h/target_w. FlashTalk VAE(8) × patch(2) requires both
+            # axes be multiples of 16 or attention dies on shape mismatch.
             res_parts = resolution.split("x")
             raw_h, raw_w = int(res_parts[0]), int(res_parts[1])
             target_h, target_w = _snap_resolution_to_16(raw_h, raw_w)
             if (target_h, target_w) != (raw_h, raw_w):
                 logger.info(f"Task {task_id}: snapped resolution {raw_w}x{raw_h} -> {target_w}x{target_h} (16× alignment)")
-            update_task(task_id, "preparing", 0.2, f"데이터 준비 중... ({target_w}x{target_h})")
 
-            # Stage 2: Prepare base data with custom resolution
-            def prepare_data():
-                from flash_talk.inference import infer_params
-                from flash_talk.src.pipeline.flash_talk_pipeline import FlashTalkPipeline
-                target_size = (target_h, target_w)
-                pipeline.prepare_params(
-                    input_prompt=prompt,
-                    cond_image=host_image,
-                    target_size=target_size,
-                    frame_num=infer_params['frame_num'],
-                    motion_frames_num=infer_params['motion_frames_num'],
-                    sampling_steps=infer_params['sample_steps'],
-                    seed=seed,
-                    shift=infer_params['sample_shift'],
-                    color_correction_strength=infer_params['color_correction_strength'],
-                )
-
-            await loop.run_in_executor(None, prepare_data)
-
-            update_task(task_id, "generating", 0.3, "비디오 생성 중...")
-
-            # Stage 3: Generate video chunks
-            def run_generation():
-                import numpy as np
-                import librosa
-                import torch
-                from collections import deque
-                from flash_talk.inference import get_audio_embedding, run_pipeline, infer_params
-
-                sample_rate = infer_params['sample_rate']
-                tgt_fps = infer_params['tgt_fps']
-                cached_audio_duration = infer_params['cached_audio_duration']
-                frame_num = infer_params['frame_num']
-                motion_frames_num = infer_params['motion_frames_num']
-                slice_len = frame_num - motion_frames_num
-
-                human_speech_array_all, _ = librosa.load(audio_path, sr=sample_rate, mono=True)
-
-                # Trim leading/trailing silence with safety padding so chunk
-                # boundaries don't open on dead air. Loudness norm in
-                # multitalk_utils.loudness_norm runs later — trim first.
-                if config.AUDIO_TRIM_ENABLED and len(human_speech_array_all) > 0:
-                    orig_len = len(human_speech_array_all)
-                    trimmed, _idx = librosa.effects.trim(
-                        human_speech_array_all, top_db=config.AUDIO_TRIM_TOP_DB
-                    )
-                    pad_samples = int(config.AUDIO_TRIM_PAD_MS * sample_rate / 1000)
-                    if pad_samples > 0:
-                        pad = np.zeros(pad_samples, dtype=trimmed.dtype)
-                        trimmed = np.concatenate([pad, trimmed, pad])
-                    if len(trimmed) >= sample_rate * 0.5:  # never drop below 0.5s
-                        logger.info(
-                            f"audio trim: {orig_len/sample_rate:.2f}s → "
-                            f"{len(trimmed)/sample_rate:.2f}s "
-                            f"(top_db={config.AUDIO_TRIM_TOP_DB}, pad={config.AUDIO_TRIM_PAD_MS}ms)"
-                        )
-                        human_speech_array_all = trimmed
-                    else:
-                        logger.warning(
-                            f"audio trim skipped: result too short "
-                            f"({len(trimmed)/sample_rate:.2f}s < 0.5s)"
-                        )
-
-                # Pre-attenuate to target LUFS. FlashTalk's internal
-                audio_encode_mode = config.FLASHTALK_OPTIONS.get("audio_encode_mode", "stream")
-                generated_list = []
-
-                if audio_encode_mode == 'once':
-                    human_speech_array_frame_num = frame_num * sample_rate // tgt_fps
-                    human_speech_array_slice_len = slice_len * sample_rate // tgt_fps
-
-                    remainder = (len(human_speech_array_all) - human_speech_array_frame_num) % human_speech_array_slice_len
-                    if remainder > 0:
-                        pad_length = human_speech_array_slice_len - remainder
-                        human_speech_array_all = np.concatenate([human_speech_array_all, np.zeros(pad_length, dtype=human_speech_array_all.dtype)])
-
-                    audio_embedding_all = get_audio_embedding(pipeline, human_speech_array_all)
-                    chunks = [audio_embedding_all[:, i * slice_len: i * slice_len + frame_num].contiguous()
-                              for i in range((audio_embedding_all.shape[1] - frame_num) // slice_len)]
-
-                    total = len(chunks)
-                    for idx, chunk in enumerate(chunks):
-                        torch.cuda.synchronize()
-                        video = run_pipeline(pipeline, chunk)
-                        if idx != 0:
-                            video = video[motion_frames_num:]
-                        generated_list.append(video.cpu())
-                        logger.info(f"Chunk {idx}/{total} done")
-                        # Per-chunk progress: scale 0.3 → 0.9 linearly across chunks.
-                        # Without this the UI freezes at 30% for the full inference
-                        # window (~60-90s/chunk × 45 chunks = 45+ min for a typical
-                        # script), making a healthy job look hung.
-                        update_task(
-                            task_id, "generating",
-                            0.3 + 0.6 * (idx + 1) / total,
-                            f"쇼호스트 움직임 만드는 중 ({idx + 1}/{total})",
-                        )
-
-                else:  # stream
-                    human_speech_array_slice_len = slice_len * sample_rate // tgt_fps
-                    cached_audio_length_sum = sample_rate * cached_audio_duration
-                    audio_end_idx = cached_audio_duration * tgt_fps
-                    audio_start_idx = audio_end_idx - frame_num
-
-                    audio_dq = deque([0.0] * cached_audio_length_sum, maxlen=cached_audio_length_sum)
-
-                    remainder = len(human_speech_array_all) % human_speech_array_slice_len
-                    if remainder > 0:
-                        pad_length = human_speech_array_slice_len - remainder
-                        human_speech_array_all = np.concatenate([human_speech_array_all, np.zeros(pad_length, dtype=human_speech_array_all.dtype)])
-
-                    slices = human_speech_array_all.reshape(-1, human_speech_array_slice_len)
-
-                    total = len(slices)
-                    for idx, audio_slice in enumerate(slices):
-                        audio_dq.extend(audio_slice.tolist())
-                        audio_array = np.array(audio_dq)
-                        audio_embedding = get_audio_embedding(pipeline, audio_array, audio_start_idx, audio_end_idx)
-
-                        torch.cuda.synchronize()
-                        video = run_pipeline(pipeline, audio_embedding)
-                        video = video[motion_frames_num:]
-                        generated_list.append(video.cpu())
-                        logger.info(f"Chunk {idx}/{total} done")
-                        # Per-chunk progress (see 'once' branch above for rationale).
-                        update_task(
-                            task_id, "generating",
-                            0.3 + 0.6 * (idx + 1) / total,
-                            f"쇼호스트 움직임 만드는 중 ({idx + 1}/{total})",
-                        )
-
-                return generated_list, tgt_fps
-
-            generated_list, tgt_fps = await loop.run_in_executor(None, run_generation)
-
-            update_task(task_id, "saving", 0.9, "비디오 저장 중...")
-
-            # Stage 4: Save video
+            # Output path — both paths write here.
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             filename = f"res_{timestamp}_{task_id[:8]}.mp4"
             output_path = os.path.join(config.OUTPUTS_DIR, filename)
 
-            def save_video():
-                import imageio
-                import numpy as np
-                import subprocess
+            # Branch: torchrun subprocess (USP 2GPU, default off) vs legacy
+            # in-process world_size=1. Flag at FLASHTALK_OPTIONS.use_torchrun_subprocess.
+            if config.FLASHTALK_OPTIONS.get("use_torchrun_subprocess"):
+                _ok = await _run_torchrun_inference(
+                    task_id=task_id,
+                    host_image=host_image,
+                    audio_path=audio_path,
+                    prompt=prompt,
+                    seed=seed,
+                    target_h=target_h,
+                    target_w=target_w,
+                    output_path=output_path,
+                )
+                if not _ok:
+                    return
+                tgt_fps = 25  # informational; manifest uses output_path bytes
+            else:
+                # Stage 1: Load pipeline if needed
+                update_task(task_id, "loading", 0.1, "모델 로딩 중...")
+                await loop.run_in_executor(None, lambda: _ensure_flashtalk_pipeline(cpu_offload))
+                update_task(task_id, "preparing", 0.2, f"데이터 준비 중... ({target_w}x{target_h})")
 
-                temp_path = output_path.replace(".mp4", "_temp.mp4")
-                with imageio.get_writer(temp_path, format='mp4', mode='I', fps=tgt_fps, codec='h264', ffmpeg_params=['-bf', '0']) as writer:
-                    for frames in generated_list:
-                        frames_np = frames.numpy().astype(np.uint8)
-                        for i in range(frames_np.shape[0]):
-                            writer.append_data(frames_np[i])
+                # Stage 2: Prepare base data with custom resolution
+                def prepare_data():
+                    from flash_talk.inference import infer_params
+                    from flash_talk.src.pipeline.flash_talk_pipeline import FlashTalkPipeline
+                    target_size = (target_h, target_w)
+                    pipeline.prepare_params(
+                        input_prompt=prompt,
+                        cond_image=host_image,
+                        target_size=target_size,
+                        frame_num=infer_params['frame_num'],
+                        motion_frames_num=infer_params['motion_frames_num'],
+                        sampling_steps=infer_params['sample_steps'],
+                        seed=seed,
+                        shift=infer_params['sample_shift'],
+                        color_correction_strength=infer_params['color_correction_strength'],
+                    )
 
-                cmd = ['ffmpeg', '-y', '-i', temp_path, '-i', audio_path, '-c:v', 'copy', '-c:a', 'aac', '-shortest', output_path]
-                subprocess.run(cmd, check=True, capture_output=True)
+                await loop.run_in_executor(None, prepare_data)
 
-                if os.path.exists(temp_path):
-                    os.remove(temp_path)
+                update_task(task_id, "generating", 0.3, "비디오 생성 중...")
 
-            await loop.run_in_executor(None, save_video)
+                # Stage 3: Generate video chunks
+                def run_generation():
+                    import numpy as np
+                    import librosa
+                    import torch
+                    from collections import deque
+                    from flash_talk.inference import get_audio_embedding, run_pipeline, infer_params
+
+                    sample_rate = infer_params['sample_rate']
+                    tgt_fps = infer_params['tgt_fps']
+                    cached_audio_duration = infer_params['cached_audio_duration']
+                    frame_num = infer_params['frame_num']
+                    motion_frames_num = infer_params['motion_frames_num']
+                    slice_len = frame_num - motion_frames_num
+
+                    human_speech_array_all, _ = librosa.load(audio_path, sr=sample_rate, mono=True)
+
+                    # Trim leading/trailing silence with safety padding so chunk
+                    # boundaries don't open on dead air. Loudness norm in
+                    # multitalk_utils.loudness_norm runs later — trim first.
+                    if config.AUDIO_TRIM_ENABLED and len(human_speech_array_all) > 0:
+                        orig_len = len(human_speech_array_all)
+                        trimmed, _idx = librosa.effects.trim(
+                            human_speech_array_all, top_db=config.AUDIO_TRIM_TOP_DB
+                        )
+                        pad_samples = int(config.AUDIO_TRIM_PAD_MS * sample_rate / 1000)
+                        if pad_samples > 0:
+                            pad = np.zeros(pad_samples, dtype=trimmed.dtype)
+                            trimmed = np.concatenate([pad, trimmed, pad])
+                        if len(trimmed) >= sample_rate * 0.5:  # never drop below 0.5s
+                            logger.info(
+                                f"audio trim: {orig_len/sample_rate:.2f}s → "
+                                f"{len(trimmed)/sample_rate:.2f}s "
+                                f"(top_db={config.AUDIO_TRIM_TOP_DB}, pad={config.AUDIO_TRIM_PAD_MS}ms)"
+                            )
+                            human_speech_array_all = trimmed
+                        else:
+                            logger.warning(
+                                f"audio trim skipped: result too short "
+                                f"({len(trimmed)/sample_rate:.2f}s < 0.5s)"
+                            )
+
+                    # Pre-attenuate to target LUFS. FlashTalk's internal
+                    audio_encode_mode = config.FLASHTALK_OPTIONS.get("audio_encode_mode", "stream")
+                    generated_list = []
+
+                    if audio_encode_mode == 'once':
+                        human_speech_array_frame_num = frame_num * sample_rate // tgt_fps
+                        human_speech_array_slice_len = slice_len * sample_rate // tgt_fps
+
+                        remainder = (len(human_speech_array_all) - human_speech_array_frame_num) % human_speech_array_slice_len
+                        if remainder > 0:
+                            pad_length = human_speech_array_slice_len - remainder
+                            human_speech_array_all = np.concatenate([human_speech_array_all, np.zeros(pad_length, dtype=human_speech_array_all.dtype)])
+
+                        audio_embedding_all = get_audio_embedding(pipeline, human_speech_array_all)
+                        chunks = [audio_embedding_all[:, i * slice_len: i * slice_len + frame_num].contiguous()
+                                  for i in range((audio_embedding_all.shape[1] - frame_num) // slice_len)]
+
+                        total = len(chunks)
+                        for idx, chunk in enumerate(chunks):
+                            torch.cuda.synchronize()
+                            video = run_pipeline(pipeline, chunk)
+                            if idx != 0:
+                                video = video[motion_frames_num:]
+                            generated_list.append(video.cpu())
+                            logger.info(f"Chunk {idx}/{total} done")
+                            # Per-chunk progress: scale 0.3 → 0.9 linearly across chunks.
+                            # Without this the UI freezes at 30% for the full inference
+                            # window (~60-90s/chunk × 45 chunks = 45+ min for a typical
+                            # script), making a healthy job look hung.
+                            update_task(
+                                task_id, "generating",
+                                0.3 + 0.6 * (idx + 1) / total,
+                                f"쇼호스트 움직임 만드는 중 ({idx + 1}/{total})",
+                            )
+
+                    else:  # stream
+                        human_speech_array_slice_len = slice_len * sample_rate // tgt_fps
+                        cached_audio_length_sum = sample_rate * cached_audio_duration
+                        audio_end_idx = cached_audio_duration * tgt_fps
+                        audio_start_idx = audio_end_idx - frame_num
+
+                        audio_dq = deque([0.0] * cached_audio_length_sum, maxlen=cached_audio_length_sum)
+
+                        remainder = len(human_speech_array_all) % human_speech_array_slice_len
+                        if remainder > 0:
+                            pad_length = human_speech_array_slice_len - remainder
+                            human_speech_array_all = np.concatenate([human_speech_array_all, np.zeros(pad_length, dtype=human_speech_array_all.dtype)])
+
+                        slices = human_speech_array_all.reshape(-1, human_speech_array_slice_len)
+
+                        total = len(slices)
+                        for idx, audio_slice in enumerate(slices):
+                            audio_dq.extend(audio_slice.tolist())
+                            audio_array = np.array(audio_dq)
+                            audio_embedding = get_audio_embedding(pipeline, audio_array, audio_start_idx, audio_end_idx)
+
+                            torch.cuda.synchronize()
+                            video = run_pipeline(pipeline, audio_embedding)
+                            video = video[motion_frames_num:]
+                            generated_list.append(video.cpu())
+                            logger.info(f"Chunk {idx}/{total} done")
+                            # Per-chunk progress (see 'once' branch above for rationale).
+                            update_task(
+                                task_id, "generating",
+                                0.3 + 0.6 * (idx + 1) / total,
+                                f"쇼호스트 움직임 만드는 중 ({idx + 1}/{total})",
+                            )
+
+                    return generated_list, tgt_fps
+
+                generated_list, tgt_fps = await loop.run_in_executor(None, run_generation)
+
+                update_task(task_id, "saving", 0.9, "비디오 저장 중...")
+
+                # Stage 4: Save video (output_path already computed above)
+                def save_video():
+                    import imageio
+                    import numpy as np
+                    import subprocess
+
+                    temp_path = output_path.replace(".mp4", "_temp.mp4")
+                    with imageio.get_writer(temp_path, format='mp4', mode='I', fps=tgt_fps, codec='h264', ffmpeg_params=['-bf', '0']) as writer:
+                        for frames in generated_list:
+                            frames_np = frames.numpy().astype(np.uint8)
+                            for i in range(frames_np.shape[0]):
+                                writer.append_data(frames_np[i])
+
+                    cmd = ['ffmpeg', '-y', '-i', temp_path, '-i', audio_path, '-c:v', 'copy', '-c:a', 'aac', '-shortest', output_path]
+                    subprocess.run(cmd, check=True, capture_output=True)
+
+                    if os.path.exists(temp_path):
+                        os.remove(temp_path)
+
+                await loop.run_in_executor(None, save_video)
 
             # Record
             task_states[task_id]["output_path"] = output_path
