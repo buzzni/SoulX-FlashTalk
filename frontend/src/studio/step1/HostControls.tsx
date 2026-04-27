@@ -62,7 +62,7 @@ export function HostControls({
 
       <Field
         label="이미지 품질"
-        hint="1단계와 2단계 모두에 적용돼요 · 고화질일수록 생성 시간이 길어져요 (2K ~2배, 4K ~4배)"
+        hint="1단계와 2단계 모두에 적용돼요"
       >
         <Segmented
           value={imageQuality}

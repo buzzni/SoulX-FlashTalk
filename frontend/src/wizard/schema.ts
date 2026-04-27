@@ -305,20 +305,16 @@ export interface ResolutionMeta {
   label: string;
   width: number;
   height: number;
-  /** Estimated render output size, e.g. "약 28MB". */
-  size: string;
-  /** Subjective speed label, e.g. "빠름", "보통", "느림". */
-  speed: string;
 }
 
 /** Master meta table — derive everything else from this. Keeps store
  * lean (only the key is persisted) and consumers read computed
  * dimensions through `resolutionMeta(key)`. */
 export const RESOLUTION_META: Record<ResolutionKey, ResolutionMeta> = {
-  '448p': { key: '448p', label: '보통 화질', width: 448, height: 768, size: '약 8MB', speed: '빠름' },
-  '480p': { key: '480p', label: '기본 화질', width: 480, height: 832, size: '약 14MB', speed: '빠름' },
-  '720p': { key: '720p', label: '고화질(HD)', width: 720, height: 1280, size: '약 28MB', speed: '보통' },
-  '1080p': { key: '1080p', label: '최고 화질(FHD)', width: 1080, height: 1920, size: '약 62MB', speed: '느림' },
+  '448p': { key: '448p', label: '보통 화질', width: 448, height: 768 },
+  '480p': { key: '480p', label: '기본 화질', width: 480, height: 832 },
+  '720p': { key: '720p', label: '고화질(HD)', width: 720, height: 1280 },
+  '1080p': { key: '1080p', label: '최고 화질(FHD)', width: 1080, height: 1920 },
 };
 
 export function resolutionMeta(key: ResolutionKey): ResolutionMeta {
