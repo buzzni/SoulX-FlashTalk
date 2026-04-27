@@ -17,9 +17,9 @@ import {
   Moon,
   Sun,
 } from 'lucide-react';
-import { getUser, subscribe } from '../stores/authStore';
 import { getTheme, subscribeTheme, toggleTheme } from '../lib/theme';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
+import { Brand } from '../components/brand';
 
 interface SidebarProps {
   active: 'home' | 'results' | 'mypage';
@@ -27,32 +27,16 @@ interface SidebarProps {
 
 export function Sidebar({ active }: SidebarProps) {
   const navigate = useNavigate();
-  const user = useSyncExternalStore(subscribe, getUser, getUser);
   const theme = useSyncExternalStore(subscribeTheme, getTheme, getTheme);
-  const display = user?.display_name || user?.user_id || '게스트';
-  const initial = (display[0] || '?').toUpperCase();
 
   return (
     <aside className="hidden md:flex flex-col bg-sidebar-background border-r border-sidebar-border px-3.5 py-4">
-      <Link
+      <Brand
+        size="sm"
         to="/"
-        className="flex items-center gap-3 px-2 py-2 mb-3 rounded-md no-underline text-foreground transition-colors hover:bg-card"
-      >
-        <span
-          aria-hidden
-          className="grid place-items-center w-8 h-8 rounded-md bg-foreground text-background font-bold text-[14px]"
-        >
-          {initial}
-        </span>
-        <span className="flex flex-col gap-0.5 min-w-0">
-          <span className="font-bold text-[14px] tracking-[-0.018em] truncate">
-            FlashTalk
-          </span>
-          <span className="text-[11px] text-muted-foreground truncate">
-            {display} 님의 작업실
-          </span>
-        </span>
-      </Link>
+        title="홈으로"
+        className="px-2 py-2 mb-3 rounded-md hover:bg-card transition-colors"
+      />
 
       <button
         type="button"

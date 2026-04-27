@@ -8,6 +8,7 @@ import { FormEvent, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { humanizeError } from '../api/http';
 import { login } from '../stores/authStore';
+import { Brand } from '../components/brand';
 
 export default function LoginPage() {
   const navigate = useNavigate();
@@ -41,21 +42,8 @@ export default function LoginPage() {
     <div className="min-h-screen flex items-center justify-center bg-background px-5 py-10">
       <div className="w-full max-w-sm animate-rise">
         {/* Workspace mark */}
-        <div className="flex items-center gap-3 mb-7">
-          <span
-            aria-hidden
-            className="grid place-items-center w-9 h-9 rounded-md bg-foreground text-background font-bold text-[15px]"
-          >
-            F
-          </span>
-          <div className="flex flex-col">
-            <span className="font-bold text-[15px] tracking-[-0.018em]">
-              FlashTalk
-            </span>
-            <span className="text-[11.5px] text-muted-foreground">
-              AI 쇼호스트 영상 작업실
-            </span>
-          </div>
+        <div className="mb-7">
+          <Brand size="lg" />
         </div>
 
         <h1 id="login-heading" className="headline-section m-0 mb-1.5">

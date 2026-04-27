@@ -1,16 +1,16 @@
 /**
  * TopBar — wizard + render header.
  *
- * Workspace mark + "HostStudio" wordmark + Korean step pills (1 / 2 / 3
- * with circular numbered dots, Korean labels). Visual styling lives in
- * studio/styles/app.css under `.topbar` / `.brand` / `.step-pill`.
+ * Brand lockup + Korean step pills (1 / 2 / 3 with circular numbered
+ * dots, Korean labels). Visual styling lives in studio/styles/app.css
+ * under `.topbar` / `.step-pill`; the brand mark is the shared
+ * `<Brand>` component.
  */
-import { Fragment, type ReactNode, useSyncExternalStore } from 'react';
-import { Link } from 'react-router-dom';
+import { Fragment, type ReactNode } from 'react';
 import { Check } from 'lucide-react';
 import { WizardButton as Button } from '@/components/wizard-button';
 import { ProfileMenu } from './ProfileMenu';
-import { getUser, subscribe } from '../stores/authStore';
+import { Brand } from '../components/brand';
 import type { WizardValidity } from './wizardValidation';
 
 export const STEPS = [
@@ -28,18 +28,10 @@ export interface TopBarProps {
 }
 
 export function TopBar({ step, valid, onStepClick, onReset, queueSlot }: TopBarProps) {
-  const user = useSyncExternalStore(subscribe, getUser, getUser);
-  const display = user?.display_name || user?.user_id || 'F';
-  const initial = (display[0] || 'F').toUpperCase();
-
   return (
     <header className="topbar">
       <div style={{ display: 'flex', alignItems: 'center', gap: 20 }}>
-        <Link to="/" className="brand" style={{ textDecoration: 'none', color: 'inherit' }} title="홈으로">
-          <div className="brand-mark" aria-hidden>{initial}</div>
-          <span>FlashTalk</span>
-          <span className="brand-tag">AI 쇼호스트 영상</span>
-        </Link>
+        <Brand size="md" to="/" title="홈으로" />
         {step !== null && (
           <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginLeft: 8 }}>
             {STEPS.map((s, i) => {

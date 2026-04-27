@@ -12,7 +12,7 @@
  * from a single backend endpoint, so there's no more
  * "which source has this field?" gymnastics.
  */
-import { useEffect, useState, useSyncExternalStore } from 'react';
+import { useEffect, useState } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { WizardBadge as Badge } from '@/components/wizard-badge';
 import { WizardButton as Button } from '@/components/wizard-button';
@@ -27,7 +27,7 @@ import { Confetti } from './shared/Confetti';
 import { ResultVideoCard } from './result/ResultVideoCard';
 import { ResultStats } from './result/ResultStats';
 import { ResultActions } from './result/ResultActions';
-import { getUser, subscribe } from '../stores/authStore';
+import { Brand } from '../components/brand';
 import { Spinner } from '../components/spinner';
 import { videoTitle, formatRelativeDate, formatDuration } from '../lib/format';
 
@@ -155,20 +155,13 @@ export default function ResultPage() {
     }
   };
 
-  const user = useSyncExternalStore(subscribe, getUser, getUser);
-  const display = user?.display_name || user?.user_id || 'F';
-  const initial = (display[0] || 'F').toUpperCase();
 
   return (
     <div className="studio-root" data-density="comfortable">
       <div className="app-shell" data-screen-label="06 Result">
         <header className="topbar">
           <div style={{ display: 'flex', alignItems: 'center', gap: 20 }}>
-            <Link to="/" className="brand" style={{ textDecoration: 'none', color: 'inherit' }} title="홈으로">
-              <div className="brand-mark" aria-hidden>{initial}</div>
-              <span>FlashTalk</span>
-              <span className="brand-tag">완성된 영상</span>
-            </Link>
+            <Brand size="md" to="/" title="홈으로" />
           </div>
           <div className="topbar-right">
             <span className="meta">자동 저장됨</span>
