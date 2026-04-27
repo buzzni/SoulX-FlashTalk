@@ -23,6 +23,7 @@ import uvicorn
 import config
 from modules import auth as auth_module
 from modules import db as db_module
+from modules.job_runner import job_runner
 from modules.task_queue import task_queue
 from modules.schemas import (
     HistoryResponse,
@@ -887,11 +888,19 @@ async def startup_event():
     task_queue.register_handler("conversation", _queue_conversation_handler)
     await task_queue.start()
 
+    # GenerationJob runner: recovers any orphaned pending/streaming rows from
+    # the prior process and starts the heartbeat sweep. Handlers (host /
+    # composite) are registered in steps 3-4 of streaming-resume Phase A.
+    await job_runner.start()
+
     logger.info("SoulX-FlashTalk API server started (queue worker active)")
 
 
 @app.on_event("shutdown")
 async def shutdown_event():
+    # Stop the JobRunner BEFORE closing the DB so the final mark_failed
+    # writes for in-flight jobs land cleanly.
+    await job_runner.stop()
     await db_module.close()
 
 

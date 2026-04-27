@@ -356,3 +356,51 @@ async def update_heartbeat(job_id: str) -> bool:
         return_document=ReturnDocument.AFTER,
     )
     return updated is not None
+
+
+# ---------------------------------------------------------------------------
+# Public API — bulk recovery (JobRunner-owned).
+# ---------------------------------------------------------------------------
+
+async def mark_active_as_failed(error: str) -> int:
+    """Bulk transition pending+streaming → failed. Used by JobRunner.start()
+    to reap orphaned rows: the in-process submit registry is lost on restart,
+    so any active row left over from a prior process can never make progress.
+
+    Returns the number of rows transitioned."""
+    now = _now()
+    res = await _coll().update_many(
+        {"state": {"$in": list(ACTIVE_STATES)}},
+        {"$set": {"state": "failed", "error": error, "updated_at": now}},
+    )
+    return int(res.modified_count)
+
+
+async def mark_heartbeat_stale_as_failed(
+    cutoff: datetime,
+    *,
+    error: str = "worker timeout (no heartbeat)",
+) -> int:
+    """Bulk transition: streaming rows whose heartbeat_at predates cutoff →
+    failed. Used by the periodic sweep to catch silent stalls (disk full,
+    GPU hang) where the worker stops emitting events but the task never
+    raises.
+
+    The partial index `state_heartbeat_streaming` covers this query. A
+    streaming row with heartbeat_at=None is also considered stale (the
+    worker never even bumped its first heartbeat) — match `$lt cutoff`
+    OR `$exists False` to cover both shapes.
+
+    Returns the number of rows transitioned."""
+    now = _now()
+    res = await _coll().update_many(
+        {
+            "state": "streaming",
+            "$or": [
+                {"heartbeat_at": {"$lt": cutoff}},
+                {"heartbeat_at": None},
+            ],
+        },
+        {"$set": {"state": "failed", "error": error, "updated_at": now}},
+    )
+    return int(res.modified_count)

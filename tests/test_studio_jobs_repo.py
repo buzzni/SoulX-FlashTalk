@@ -351,3 +351,99 @@ async def test_indexes_present(repo_db):
     assert "state_heartbeat_streaming" in idx_names
     assert "state_updated_terminal" in idx_names
     assert "user_input_hash_active_uniq" in idx_names
+
+
+# ── bulk recovery (JobRunner-owned) ────────────────────────────────────
+
+async def test_mark_active_as_failed_transitions_pending_and_streaming(repo_db):
+    """At startup, both pending and streaming are unreachable (in-process
+    submit registry was lost) — both transition to failed."""
+    a = await repo.create(user_id="u1", kind="host",
+                          input_hash="a", input_blob={})
+    # b stays pending
+    b = await repo.create(user_id="u1", kind="host",
+                          input_hash="b", input_blob={})
+    await repo.mark_streaming(a["id"])
+
+    # Pre-existing terminal rows must NOT be touched.
+    c = await repo.create(user_id="u1", kind="host",
+                          input_hash="c", input_blob={})
+    await repo.mark_streaming(c["id"])
+    await repo.mark_ready(c["id"], batch_id="b")
+
+    n = await repo.mark_active_as_failed(error="restart")
+    assert n == 2
+
+    snap_a = await repo.get_by_id("u1", a["id"])
+    snap_b = await repo.get_by_id("u1", b["id"])
+    snap_c = await repo.get_by_id("u1", c["id"])
+    assert snap_a["state"] == "failed"
+    assert snap_a["error"] == "restart"
+    assert snap_b["state"] == "failed"
+    assert snap_c["state"] == "ready"  # untouched
+
+
+async def test_mark_active_as_failed_empty_returns_zero(repo_db):
+    n = await repo.mark_active_as_failed(error="x")
+    assert n == 0
+
+
+async def test_mark_heartbeat_stale_as_failed(repo_db):
+    """Streaming rows with heartbeat older than cutoff → failed."""
+    from datetime import datetime, timedelta, timezone
+
+    db = repo_db
+    a = await repo.create(user_id="u1", kind="host",
+                          input_hash="a", input_blob={})
+    b = await repo.create(user_id="u1", kind="host",
+                          input_hash="b", input_blob={})
+    await repo.mark_streaming(a["id"])
+    await repo.mark_streaming(b["id"])
+
+    # Backdate a's heartbeat to simulate a stalled worker.
+    long_ago = datetime.now(timezone.utc) - timedelta(minutes=30)
+    await db.generation_jobs.update_one(
+        {"_id": a["id"]}, {"$set": {"heartbeat_at": long_ago}},
+    )
+
+    cutoff = datetime.now(timezone.utc) - timedelta(minutes=5)
+    n = await repo.mark_heartbeat_stale_as_failed(cutoff)
+    assert n == 1
+
+    snap_a = await repo.get_by_id("u1", a["id"])
+    snap_b = await repo.get_by_id("u1", b["id"])
+    assert snap_a["state"] == "failed"
+    assert "heartbeat" in (snap_a["error"] or "")
+    assert snap_b["state"] == "streaming"  # fresh heartbeat, untouched
+
+
+async def test_mark_heartbeat_stale_includes_null_heartbeat(repo_db):
+    """A streaming row with no heartbeat ever set is also stale (the worker
+    never bumped it)."""
+    from datetime import datetime, timedelta, timezone
+
+    db = repo_db
+    a = await repo.create(user_id="u1", kind="host",
+                          input_hash="a", input_blob={})
+    await repo.mark_streaming(a["id"])
+    await db.generation_jobs.update_one(
+        {"_id": a["id"]}, {"$set": {"heartbeat_at": None}},
+    )
+
+    cutoff = datetime.now(timezone.utc) - timedelta(minutes=5)
+    n = await repo.mark_heartbeat_stale_as_failed(cutoff)
+    assert n == 1
+
+
+async def test_mark_heartbeat_stale_skips_non_streaming(repo_db):
+    """Pending and terminal rows are not touched."""
+    from datetime import datetime, timedelta, timezone
+
+    a = await repo.create(user_id="u1", kind="host",
+                          input_hash="a", input_blob={})
+    # a stays pending
+    cutoff = datetime.now(timezone.utc) + timedelta(minutes=5)  # everything stale
+    n = await repo.mark_heartbeat_stale_as_failed(cutoff)
+    assert n == 0
+    snap = await repo.get_by_id("u1", a["id"])
+    assert snap["state"] == "pending"
