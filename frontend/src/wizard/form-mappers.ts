@@ -15,7 +15,14 @@
  *     of truth for everything not in the form.
  */
 
-import { HostSchema, type Host } from './schema';
+import {
+  BackgroundSchema,
+  CompositionSettingsSchema,
+  HostSchema,
+  ProductsSchema,
+  type Host,
+} from './schema';
+import { z } from 'zod';
 
 // ────────────────────────────────────────────────────────────────────
 // Step 1 — Host
@@ -44,3 +51,31 @@ export function formValuesToHostSlice(values: HostFormValues, prev: Host): Host 
     temperature: values.temperature,
   };
 }
+
+// ────────────────────────────────────────────────────────────────────
+// Step 2 — Products + Background + Composition.settings
+// ────────────────────────────────────────────────────────────────────
+
+/**
+ * Step 2's form spans three store slices: `products`, `background`,
+ * and `composition.settings`. `composition.generation` is the
+ * composite-stream lifecycle (state machine, batchId, variants,
+ * selected) and stays in the store — it's never user-edited and
+ * MUST NOT enter the form, otherwise streaming candidate events
+ * trigger spurious form resets that wipe in-progress edits.
+ *
+ * `imageQuality`, `resolution`, and `playlistId` are top-level wizard
+ * state owned by other steps; they don't appear here either.
+ *
+ * The container inlines the projection (`{products, background,
+ * settings: composition.settings}`) so it can memoize on the narrow
+ * deps; we don't ship a `step2SliceToFormValues` helper because the
+ * indirection would re-introduce the temptation to depend on the
+ * full `composition` object.
+ */
+export const Step2FormValuesSchema = z.object({
+  products: ProductsSchema,
+  background: BackgroundSchema,
+  settings: CompositionSettingsSchema,
+});
+export type Step2FormValues = z.infer<typeof Step2FormValuesSchema>;

@@ -8,15 +8,21 @@
  * Tier 2 (sub-mode within "이미 있는"): preset gallery / upload tile /
  *   external URL input.
  *
- * Schema-typed (Phase 2a). Receives a `Background` tagged union from
- * the store, emits a new full `Background` value via `onBackgroundChange`.
- * No partial-patch — replacing the whole slice with a new tagged value
- * makes invalid combinations (preset + url + prompt all set) impossible.
+ * Schema-typed (Phase 2a). Reads/writes through `useFormContext` —
+ * the parent Step2Composite owns the form via `<FormProvider>`.
+ * Tagged-union shape swaps go through `setValue('background', newBg,
+ * {shouldDirty:true})`; inline scalar edits (url, prompt) use
+ * `register` / `setValue` to keep typing cheap.
  */
 
+import { useFormContext } from 'react-hook-form';
 import Icon from '../Icon.jsx';
 import { Field } from '@/components/field';
 import { UploadTile } from '@/components/upload-tile';
+import {
+  uploadFileFromAsset,
+  localAssetFromUploadFile,
+} from '@/components/upload-tile-bridge';
 import { OptionCard } from '@/components/option-card';
 import { WizardTabs, WizardTab } from '@/components/wizard-tabs';
 import {
@@ -36,14 +42,9 @@ import {
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import type { Background, LocalAsset, ServerAsset } from '@/wizard/schema';
-import { isLocalAsset, isServerAsset } from '@/wizard/normalizers';
+import { isServerAsset } from '@/wizard/normalizers';
+import type { Step2FormValues } from '@/wizard/form-mappers';
 
-// Preset = location concept the AI generates a fresh background for.
-// We deliberately don't show a "swatch" preview because the gradient
-// would be arbitrary — AI output isn't constrained to a particular
-// color palette, and a fake colored tile suggests a literal preview
-// that doesn't exist. An icon communicates the *kind* of place
-// without lying about the result.
 const BG_PRESETS: { id: string; label: string; desc: string; icon: LucideIcon }[] = [
   { id: 'studio_white', label: '깔끔한 화이트', desc: '어떤 제품이든 무난', icon: Square },
   { id: 'studio_warm', label: '따뜻한 스튜디오', desc: '뷰티·패션', icon: Sun },
@@ -56,8 +57,6 @@ const BG_PRESETS: { id: string; label: string; desc: string; icon: LucideIcon }[
 ];
 
 export interface BackgroundPickerProps {
-  background: Background;
-  onBackgroundChange: (next: Background) => void;
   onPickServerFile: () => void;
 }
 
@@ -76,24 +75,14 @@ function pickSubModeFor(bg: Background): PickSubMode {
   }
 }
 
-export function BackgroundPicker({
-  background,
-  onBackgroundChange,
-  onPickServerFile,
-}: BackgroundPickerProps) {
+export function BackgroundPicker({ onPickServerFile }: BackgroundPickerProps) {
+  const { setValue, watch } = useFormContext<Step2FormValues>();
+  const background = watch('background');
   const isAi = background.kind === 'prompt';
   const pickSubMode: PickSubMode = pickSubModeFor(background);
 
-  const switchToPick = () => {
-    if (background.kind === 'prompt') {
-      onBackgroundChange({ kind: 'preset', presetId: null });
-    }
-  };
-  const switchToAi = () => {
-    if (background.kind !== 'prompt') {
-      onBackgroundChange({ kind: 'prompt', prompt: '' });
-    }
-  };
+  const swap = (next: Background) =>
+    setValue('background', next, { shouldDirty: true, shouldValidate: true });
 
   return (
     <>
@@ -105,7 +94,9 @@ export function BackgroundPicker({
           title="이미 있는 이미지 쓰기"
           desc="추천 장소 · 내 사진 · 링크 중에서 골라요"
           meta="즉시 적용"
-          onClick={switchToPick}
+          onClick={() => {
+            if (background.kind === 'prompt') swap({ kind: 'preset', presetId: null });
+          }}
         />
         <OptionCard
           active={isAi}
@@ -113,7 +104,9 @@ export function BackgroundPicker({
           title="AI로 새로 만들기"
           desc="원하는 장소·분위기를 글로 적으면 AI가 만들어줘요"
           meta="합성 시 ~25초 추가"
-          onClick={switchToAi}
+          onClick={() => {
+            if (background.kind !== 'prompt') swap({ kind: 'prompt', prompt: '' });
+          }}
         />
       </div>
 
@@ -125,9 +118,9 @@ export function BackgroundPicker({
               value={pickSubMode}
               onValueChange={(v) => {
                 const next = v as PickSubMode;
-                if (next === 'preset') onBackgroundChange({ kind: 'preset', presetId: null });
-                else if (next === 'upload') onBackgroundChange({ kind: 'upload', asset: null });
-                else onBackgroundChange({ kind: 'url', url: '' });
+                if (next === 'preset') swap({ kind: 'preset', presetId: null });
+                else if (next === 'upload') swap({ kind: 'upload', asset: null });
+                else swap({ kind: 'url', url: '' });
               }}
               className="mb-3"
             >
@@ -152,7 +145,7 @@ export function BackgroundPicker({
                       key={p.id}
                       type="button"
                       className={`bg-preset-tile${on ? ' bg-preset-tile--on' : ''}`}
-                      onClick={() => onBackgroundChange({ kind: 'preset', presetId: p.id })}
+                      onClick={() => swap({ kind: 'preset', presetId: p.id })}
                     >
                       <PresetIcon className="bg-preset-tile__icon" strokeWidth={1.6} />
                       <div className="bg-preset-tile__text">
@@ -166,7 +159,11 @@ export function BackgroundPicker({
             )}
 
             {background.kind === 'upload' && (
-              <UploadView asset={background.asset} onChange={onBackgroundChange} onPickServerFile={onPickServerFile} />
+              <UploadView
+                asset={background.asset}
+                onChange={swap}
+                onPickServerFile={onPickServerFile}
+              />
             )}
 
             {background.kind === 'url' && (
@@ -179,7 +176,7 @@ export function BackgroundPicker({
                     className="input has-prefix"
                     placeholder="예) https://... 로 시작하는 이미지 링크"
                     value={background.url}
-                    onChange={(e) => onBackgroundChange({ kind: 'url', url: e.target.value })}
+                    onChange={(e) => swap({ kind: 'url', url: e.target.value })}
                   />
                 </div>
               </Field>
@@ -194,7 +191,7 @@ export function BackgroundPicker({
                 className="textarea"
                 placeholder="예) 밝고 깨끗한 모던 주방, 큰 창문으로 자연광이 들어오는 느낌"
                 value={background.prompt}
-                onChange={(e) => onBackgroundChange({ kind: 'prompt', prompt: e.target.value })}
+                onChange={(e) => swap({ kind: 'prompt', prompt: e.target.value })}
                 style={{ minHeight: 120 }}
               />
             </Field>
@@ -216,8 +213,9 @@ interface UploadViewProps {
 }
 
 function UploadView({ asset, onChange, onPickServerFile }: UploadViewProps) {
-  // Server-asset state — already uploaded, render the picked-file
-  // confirmation row.
+  // Server-asset state shows the picked-file confirmation row (custom
+  // markup with rename + delete affordances). Local-file state hands
+  // the wrapper shape back to UploadTile via the shared bridge helper.
   if (isServerAsset(asset)) {
     return (
       <div className="flex-col gap-2">
@@ -246,34 +244,13 @@ function UploadView({ asset, onChange, onPickServerFile }: UploadViewProps) {
     );
   }
 
-  // Local-file state — user dropped a file but upload hasn't completed
-  // (we eagerly fire upload on file pick, but the visual handoff to
-  // server-asset state happens once the upload promise resolves and
-  // the parent rewrites this slice).
-  const localFile = isLocalAsset(asset)
-    ? { url: asset.previewUrl, name: asset.name }
-    : null;
-
   return (
     <div className="flex-col gap-2">
       <UploadTile
-        file={localFile}
+        file={uploadFileFromAsset(asset)}
         onFile={(f) => {
-          if (!f) {
-            onChange({ kind: 'upload', asset: null });
-            return;
-          }
-          // f is the UploadTile's wrapper { _file, url, name } — convert
-          // to LocalAsset shape. The actual upload-then-swap-to-server-
-          // asset is the parent's job (Step2Composite wires its
-          // useUploadReferenceImage hook on file pick).
-          const file = (f as { _file?: File })._file;
-          if (file instanceof File) {
-            onChange({
-              kind: 'upload',
-              asset: { file, previewUrl: f.url ?? '', name: f.name ?? file.name },
-            });
-          }
+          const localAsset = localAssetFromUploadFile(f);
+          onChange({ kind: 'upload', asset: localAsset });
         }}
         onRemove={() => onChange({ kind: 'upload', asset: null })}
         label="배경 사진 올리기"

@@ -1,20 +1,38 @@
 /**
  * Step2Composite — wizard Step 2 container.
  *
- * Post-Phase-4b: orchestrates 4 sub-components (ProductList,
- * BackgroundPicker, CompositionControls, CompositionVariants) +
- * the existing ServerFilePicker modal. Generation flow uses
- * useCompositeGeneration, which handles the full SSE event set
- * (init / candidate / error / fatal / done) with slot-aware
- * variant state.
+ * Owns a react-hook-form instance whose values span three store
+ * slices: `products`, `background`, and `composition.settings`.
+ * `composition.generation` (the SSE-driven state machine) is owned
+ * by the store and never enters the form.
  *
- * Uploads now happen eagerly via useUploadReferenceImage when the
- * user picks a product / background file — stale-result rejection
- * means a late upload can't overwrite a newer choice.
+ * Sync flow mirrors Step1Host:
+ *   - store → form: a synthetic slice memo combines the three form-
+ *     owned values (products, background, composition.settings — NOT
+ *     composition.generation); useFormZustandSync resets the form
+ *     when any reference changes. Subscribing to settings only (not
+ *     the whole composition) keeps streaming candidate events from
+ *     wiping in-progress edits.
+ *   - form → store: useDebouncedFormSync flushes once per 300ms idle
+ *     window; the onChange does ONE updateState call so subscribers
+ *     see one render, one selector run.
+ *
+ * Mode swaps inside Background and per-product source kind go through
+ * the form via setValue, then debounce-flush back to the store. The
+ * tagged-union shape replacement is whole-object so invalid combos
+ * (preset + url + prompt set together) are impossible.
+ *
+ * Generation triggers go through form.handleSubmit so a click inside
+ * the 300ms debounce window still gets the latest validated values.
+ * Eager uploads of LocalAsset products / background fire INSIDE submit
+ * before the API call; the upload completion is written back to the
+ * form via setValue so the persisted shape reflects the server paths.
  */
 
-import { useRef, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import { Image as ImageIcon } from 'lucide-react';
+import { FormProvider, useForm } from 'react-hook-form';
+import { zodResolver } from '@hookform/resolvers/zod';
 import { WizardBadge as Badge } from '@/components/wizard-badge';
 import { WizardButton as Button } from '@/components/wizard-button';
 import { WizardCard as Card } from '@/components/wizard-card';
@@ -23,9 +41,10 @@ import { applyPickedFileToProducts } from '../picker_handler.js';
 import { useCompositeGeneration, type CompositionVariant } from '../../hooks/useCompositeGeneration';
 import { useUploadReferenceImage } from '../../hooks/useUploadReferenceImage';
 import { uploadBackgroundImage, uploadReferenceImage } from '../../api/upload';
-import { selectComposite as selectCompositeApi, type CompositeInput } from '../../api/composite';
-import { imageIdFromPath, makeRandomSeeds } from '../../api/mapping';
-import { ProductList, type Product } from './ProductList';
+import { selectComposite as selectCompositeApi } from '../../api/composite';
+import { makeRandomSeeds } from '../../api/mapping';
+import { useWizardStore } from '../../stores/wizardStore';
+import { ProductList } from './ProductList';
 import { BackgroundPicker } from './BackgroundPicker';
 import { CompositionControls } from './CompositionControls';
 import { CompositionVariants } from './CompositionVariants';
@@ -33,165 +52,163 @@ import { StepHeading } from '@/routes/StepHeading';
 import type {
   Background,
   Composition,
-  CompositionSettings,
   CompositionVariant as SchemaCompositionVariant,
   ImageQuality,
+  Product,
+  Products,
 } from '@/wizard/schema';
 import { isBackgroundReady } from '@/wizard/schema';
-import { isLocalAsset, isServerAsset } from '@/wizard/normalizers';
+import { isLocalAsset } from '@/wizard/normalizers';
+import { toCompositeRequest } from '@/wizard/api-mappers';
+import { Step2FormValuesSchema, type Step2FormValues } from '@/wizard/form-mappers';
+import { useFormZustandSync } from '@/hooks/wizard/useFormZustandSync';
+import { useDebouncedFormSync } from '@/hooks/wizard/useDebouncedFormSync';
 
-const DEFAULT_SEEDS = [10, 42, 77, 128];
-
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type UpdateFn = (updater: (state: any) => any) => void;
+const identity = (s: Step2FormValues): Step2FormValues => s;
 
 export interface Step2CompositeProps {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   state: any;
-  update: UpdateFn;
 }
 
-export default function Step2Composite({ state, update }: Step2CompositeProps) {
-  const products = (state.products ?? []) as Product[];
-  const background = (state.background ?? { kind: 'preset', presetId: null }) as Background;
-  const composition = state.composition as Composition;
+export default function Step2Composite({ state }: Step2CompositeProps) {
+  const products = useWizardStore((s) => s.products);
+  const background = useWizardStore((s) => s.background);
+  const composition = useWizardStore((s) => s.composition);
+  // Settings is the only composition sub-slice the form owns.
+  // Subscribing at this granularity prevents SSE candidate events
+  // (which mutate composition.generation) from triggering a form
+  // reset that would wipe in-progress edits to direction/shot/angle.
+  const settings = useWizardStore((s) => s.composition.settings);
+  const updateState = useWizardStore((s) => s.updateState);
+  // selectComposite touches only composition.generation; bypasses the
+  // form (the form doesn't own lifecycle). setComposition stays for
+  // that one path.
+  const setComposition = useWizardStore((s) => s.setComposition);
+  const imageQuality: ImageQuality = (state.imageQuality as ImageQuality) || '1K';
 
   const gen = useCompositeGeneration();
+  const regenerate = gen.regenerate;
   const productUpload = useUploadReferenceImage(uploadReferenceImage);
   const backgroundUpload = useUploadReferenceImage(uploadBackgroundImage);
   const attemptsRef = useRef<number>(composition.generation.state === 'ready' ? 1 : 0);
   const [pickerFor, setPickerFor] = useState<'products' | 'bg' | null>(null);
 
-  const setProducts: ProductListProps['onProductsChange'] = (next) =>
-    update((s) => ({
-      ...s,
-      products: typeof next === 'function' ? next(s.products ?? []) : next,
-    }));
-  const setBg = (next: Background | ((prev: Background) => Background)) =>
-    update((s) => ({
-      ...s,
-      background: typeof next === 'function' ? next(s.background) : next,
-    }));
-  /** Schema-typed: replace just the settings sub-slice. Generation is
-   * managed separately by useCompositeGeneration. */
-  const setSettings = (patch: Partial<CompositionSettings>) =>
-    update((s) => ({
-      ...s,
-      composition: {
-        ...(s.composition as Composition),
-        settings: { ...(s.composition as Composition).settings, ...patch },
-      },
-    }));
+  // Form-shaped projection. Memo keys on the three sub-slice refs
+  // (settings instead of composition) so streaming candidate events
+  // can't blow away the form. `useFormZustandSync` triggers `form.reset`
+  // when this ref changes; with a hard reset (`keepDirty:false`, see
+  // useFormZustandSync.ts memory) we MUST keep the deps narrow.
+  const sliceValues = useMemo<Step2FormValues>(
+    () => ({ products, background, settings }),
+    [products, background, settings],
+  );
 
-  const bgReady = isBackgroundReady(background);
+  const form = useForm<Step2FormValues>({
+    resolver: zodResolver(Step2FormValuesSchema),
+    defaultValues: sliceValues,
+    mode: 'onBlur',
+  });
+
+  useFormZustandSync(form, sliceValues, identity);
+
+  // Single `updateState` call batches the three sub-slice writes — one
+  // zustand `set`, one re-render, one selector run per subscriber per
+  // debounce flush. composition.generation passes through prev so the
+  // streaming state machine isn't disturbed.
+  const onChange = useCallback(
+    (values: Step2FormValues) => {
+      updateState((s) => ({
+        products: values.products,
+        background: values.background,
+        composition: { ...s.composition, settings: values.settings },
+      }));
+    },
+    [updateState],
+  );
+  useDebouncedFormSync(form, onChange, 300);
+
+  // Live values for derived UI state. Reading from the form keeps the
+  // editor swap instantaneous; the store sync is debounced 300ms behind.
+  const watchedBackground = form.watch('background');
+  const watchedProducts = form.watch('products');
+  const bgReady = isBackgroundReady(watchedBackground);
   const productsReady =
-    products.length > 0 && products.some((p) => p.source.kind !== 'empty');
+    watchedProducts.length > 0 && watchedProducts.some((p) => p.source.kind !== 'empty');
   const canGenerate = bgReady && productsReady;
   const missingReason = !canGenerate
     ? `${!productsReady ? '제품 사진을 먼저 올려주세요. ' : ''}${!bgReady ? '배경을 선택해주세요.' : ''}`
     : null;
 
-  // Kicks product uploads for any LocalAsset row, same for the
-  // background. We do this inside the generate click so uploads
-  // stale-reject correctly — a user hammering "합성" then swapping files
-  // shouldn't see A's upload override B's state.
-  const generate = async () => {
-    const attempt = attemptsRef.current;
-    const seeds = attempt === 0 ? undefined : makeRandomSeeds(4);
-    attemptsRef.current = attempt + 1;
+  const submit = useMemo(
+    () =>
+      form.handleSubmit(async (values) => {
+        const attempt = attemptsRef.current;
+        const seeds = attempt === 0 ? undefined : makeRandomSeeds(4);
+        attemptsRef.current = attempt + 1;
 
-    // Upload pending product files. Schema discriminator handles all
-    // four source modes.
-    const uploaded: Product[] = await Promise.all(
-      products.map(async (p): Promise<Product> => {
-        if (p.source.kind !== 'localFile') return p;
-        const r = await productUpload.upload(p.source.asset.file);
-        if (!r?.path) return p;
-        return {
-          ...p,
-          source: {
-            kind: 'uploaded',
-            asset: { path: r.path, url: r.url, name: p.source.asset.name },
-          },
-        };
+        // Product + background uploads are independent — fire them in
+        // parallel. Stale-result rejection inside useUploadReferenceImage
+        // means a late response can't overwrite a newer pick.
+        const productJobs = values.products.map(async (p): Promise<Product> => {
+          if (p.source.kind !== 'localFile') return p;
+          const r = await productUpload.upload(p.source.asset.file);
+          if (!r?.path) return p;
+          return {
+            ...p,
+            source: {
+              kind: 'uploaded',
+              asset: { path: r.path, url: r.url, name: p.source.asset.name },
+            },
+          };
+        });
+        const bgJob: Promise<Background> = (async () => {
+          if (values.background.kind !== 'upload' || !isLocalAsset(values.background.asset)) {
+            return values.background;
+          }
+          const r = await backgroundUpload.upload(values.background.asset.file);
+          if (!r?.path) return values.background;
+          return {
+            kind: 'upload',
+            asset: { path: r.path, url: r.url, name: values.background.asset.name },
+          };
+        })();
+        const [uploadedProducts, uploadedBg] = await Promise.all([
+          Promise.all(productJobs),
+          bgJob,
+        ]);
+
+        // Reflect upload results in form state (and downstream store).
+        form.setValue('products', uploadedProducts, { shouldDirty: true });
+        if (uploadedBg !== values.background) {
+          form.setValue('background', uploadedBg, { shouldDirty: true });
+        }
+
+        const apiInput = toCompositeRequest({
+          host: state.host,
+          products: uploadedProducts,
+          background: uploadedBg,
+          composition: { ...composition, settings: values.settings },
+          imageQuality,
+        });
+        await regenerate(apiInput, seeds, { rembg: values.settings.rembg });
       }),
-    );
-    update((s) => ({ ...s, products: uploaded }));
-
-    // Upload pending background file (if upload mode + LocalAsset).
-    let bg = background;
-    if (bg.kind === 'upload' && isLocalAsset(bg.asset)) {
-      const r = await backgroundUpload.upload(bg.asset.file);
-      if (r?.path) {
-        bg = {
-          kind: 'upload',
-          asset: { path: r.path, url: r.url, name: bg.asset.name },
-        };
-        setBg(bg);
-      }
-    }
-
-    // Phase 2b: host is schema-typed. selectedPath comes from
-    // generation.selected when state === 'ready'.
-    const hostSelectedPath =
-      state.host?.generation?.state === 'ready'
-        ? state.host.generation.selected?.path ?? null
-        : null;
-
-    // Schema Products → composite API's product shape (path-only).
-    const apiProducts = uploaded
-      .map((p): { path: string } | null => {
-        if (p.source.kind === 'uploaded') return { path: p.source.asset.path };
-        return null;
-      })
-      .filter((x): x is { path: string } => x !== null);
-
-    await gen.regenerate(
-      {
-        host: { selectedPath: hostSelectedPath },
-        products: apiProducts,
-        background: backgroundToLegacyApi(bg),
-        composition: {
-          direction: composition.settings.direction,
-          shot: composition.settings.shot,
-          angle: composition.settings.angle,
-          temperature: composition.settings.temperature,
-        },
-        imageSize: (state.imageQuality as ImageQuality) ?? '1K',
-      },
-      seeds,
-      { rembg: composition.settings.rembg },
-    );
-  };
-
-  // Inline mapper — schema Background → composite API's expected
-  // background shape. Lives here for now (Phase 2a touches one slice
-  // only); when other slices migrate, this consolidates into
-  // wizard/api-mappers.ts toCompositeRequest.
-  function backgroundToLegacyApi(bg: Background): CompositeInput['background'] {
-    switch (bg.kind) {
-      case 'preset':
-        return { source: 'preset', preset: bg.presetId };
-      case 'upload':
-        return {
-          source: 'upload',
-          uploadPath: isServerAsset(bg.asset) ? bg.asset.path : null,
-        };
-      case 'url':
-        return { source: 'url' as const };
-      case 'prompt':
-        return { source: 'prompt', prompt: bg.prompt };
-    }
-  }
+    [
+      form,
+      productUpload,
+      backgroundUpload,
+      regenerate,
+      state.host,
+      composition,
+      imageQuality,
+    ],
+  );
 
   const selectComposite = (v: CompositionVariant) => {
     if (!v.url || !v.path || !v.imageId) return;
     const imageId = v.imageId;
-    update((s) => {
-      const prev = s.composition as Composition;
-      if (prev.generation.state !== 'ready' && prev.generation.state !== 'streaming') {
-        return s;
-      }
+    setComposition((prev) => {
+      if (prev.generation.state !== 'ready' && prev.generation.state !== 'streaming') return prev;
       const variants = prev.generation.state === 'ready' ? prev.generation.variants : [];
       const prevSelected = prev.generation.state === 'ready' ? prev.generation.prevSelected : null;
       const selected: SchemaCompositionVariant = {
@@ -201,36 +218,32 @@ export default function Step2Composite({ state, update }: Step2CompositeProps) {
         path: v.path as string,
       };
       return {
-        ...s,
-        composition: {
-          ...prev,
-          generation: {
-            state: 'ready',
-            batchId: prev.generation.state === 'ready' ? prev.generation.batchId : null,
-            variants,
-            selected,
-            prevSelected,
-          },
+        ...prev,
+        generation: {
+          state: 'ready',
+          batchId: prev.generation.state === 'ready' ? prev.generation.batchId : null,
+          variants,
+          selected,
+          prevSelected,
         },
       };
     });
     selectCompositeApi(imageId).catch((e) => {
-      // eslint-disable-next-line no-console
       console.warn('composite select sync failed (non-fatal):', e);
     });
   };
 
   const handlePickedServerFile = (f: unknown) => {
     if (pickerFor === 'bg') {
-      // ServerFilePicker hands back { filename, path, url, ... } — convert
-      // to a schema Background of kind 'upload' with a ServerAsset.
       const file = f as { filename?: string; path: string; url?: string };
-      setBg({
-        kind: 'upload',
-        asset: { path: file.path, url: file.url, name: file.filename },
-      });
+      form.setValue(
+        'background',
+        { kind: 'upload', asset: { path: file.path, url: file.url, name: file.filename } },
+        { shouldDirty: true, shouldValidate: true },
+      );
     } else if (pickerFor === 'products') {
-      setProducts((ps) => applyPickedFileToProducts(ps, f));
+      const next = applyPickedFileToProducts(form.getValues('products'), f);
+      form.setValue('products', next as Products, { shouldDirty: true, shouldValidate: true });
     }
     setPickerFor(null);
   };
@@ -240,105 +253,86 @@ export default function Step2Composite({ state, update }: Step2CompositeProps) {
       ? composition.generation.selected.imageId
       : null;
 
+  const addEmptyProduct = () => {
+    const next: Products = [
+      ...form.getValues('products'),
+      { id: Date.now().toString(36), source: { kind: 'empty' } },
+    ];
+    form.setValue('products', next, { shouldDirty: true });
+  };
+
   return (
-    <div className="step-page-split step-page-split--50-50">
-      <div className="step-page-form">
-        <StepHeading
-          step={2}
-          title="제품과 배경 합성하기"
-          description="쇼호스트·제품·배경을 한 장의 사진으로 합쳐요. 이 스틸 이미지가 다음 단계(음성·영상)의 바탕이 돼요."
-          eyebrow="영상 위저드"
-        />
+    <FormProvider {...form}>
+      <div className="step-page-split step-page-split--50-50">
+        <div className="step-page-form">
+          <StepHeading
+            step={2}
+            title="제품과 배경 합성하기"
+            description="쇼호스트·제품·배경을 한 장의 사진으로 합쳐요. 이 스틸 이미지가 다음 단계(음성·영상)의 바탕이 돼요."
+            eyebrow="영상 위저드"
+          />
 
+          <Card
+            title="소개할 상품"
+            subtitle="여러 개 추가할 수 있어요. 구도 지시에서 ①②③ 번호로 지칭해요"
+            action={
+              <div style={{ display: 'flex', gap: 6 }}>
+                <Button icon="file" size="sm" onClick={() => setPickerFor('products')}>
+                  서버 파일 선택
+                </Button>
+                <Button icon="plus" size="sm" onClick={addEmptyProduct}>
+                  제품 추가
+                </Button>
+              </div>
+            }
+          >
+            <ProductList />
+          </Card>
 
-      <Card
-        title="소개할 상품"
-        subtitle="여러 개 추가할 수 있어요. 구도 지시에서 ①②③ 번호로 지칭해요"
-        action={
-          <div style={{ display: 'flex', gap: 6 }}>
-            <Button icon="file" size="sm" onClick={() => setPickerFor('products')}>
-              서버 파일 선택
-            </Button>
-            <Button
-              icon="plus"
-              size="sm"
-              onClick={() =>
-                setProducts((ps) => [
-                  ...ps,
-                  { id: Date.now().toString(36), source: { kind: 'empty' } },
-                ])
-              }
-            >
-              제품 추가
-            </Button>
-          </div>
-        }
-      >
-        <ProductList
-          products={products}
-          rembgKeep={!composition.settings.rembg}
-          onProductsChange={setProducts}
-          onRembgChange={(remove) => setSettings({ rembg: remove })}
-          onPickServerFile={() => setPickerFor('products')}
-        />
-      </Card>
+          <Card title="배경" subtitle="어디서 촬영한 느낌으로 보이게 할지 골라주세요">
+            <BackgroundPicker onPickServerFile={() => setPickerFor('bg')} />
+          </Card>
 
-      <Card title="배경" subtitle="어디서 촬영한 느낌으로 보이게 할지 골라주세요">
-        <BackgroundPicker
-          background={background}
-          onBackgroundChange={setBg}
-          onPickServerFile={() => setPickerFor('bg')}
-        />
-      </Card>
+          <Card
+            title="구도 — 어떻게 놓여있게 할까요?"
+            subtitle="쇼호스트 자세·제품 위치를 자유롭게 적어주세요. 배경에 있는 가구·공간에 맞춰 합성돼요."
+          >
+            <CompositionControls
+              generating={gen.isLoading}
+              errorMsg={gen.error}
+              canGenerate={canGenerate}
+              missingReason={missingReason}
+              onGenerate={submit}
+            />
+          </Card>
 
-      <Card
-        title="구도 — 어떻게 놓여있게 할까요?"
-        subtitle="쇼호스트 자세·제품 위치를 자유롭게 적어주세요. 배경에 있는 가구·공간에 맞춰 합성돼요."
-      >
-        <CompositionControls
-          settings={composition.settings}
-          products={products}
-          generating={gen.isLoading}
-          errorMsg={gen.error}
-          canGenerate={canGenerate}
-          missingReason={missingReason}
-          onSettingsChange={setSettings}
-          onGenerate={generate}
-        />
-      </Card>
+          <ServerFilePicker
+            open={pickerFor !== null}
+            kind="image"
+            onClose={() => setPickerFor(null)}
+            onSelect={handlePickedServerFile}
+          />
+        </div>
 
-      <ServerFilePicker
-        open={pickerFor !== null}
-        kind="image"
-        onClose={() => setPickerFor(null)}
-        onSelect={handlePickedServerFile}
-      />
+        <div className="step-page-canvas">
+          <CompositeCanvas
+            composition={composition}
+            variants={gen.variants}
+            prevSelected={gen.prevSelected}
+            selectedImageId={selectedImageId}
+            isLoading={gen.isLoading}
+            onSelect={selectComposite}
+            onRegenerate={submit}
+            canRegenerate={canGenerate}
+          />
+        </div>
       </div>
-
-      {/* RIGHT — composite canvas. Final picked composite shows as the
-       * apex 9:16 still; variants strip below for picking from the
-       * just-generated batch. Codex framing: "scene staging — canvas
-       * primary, controls contextual". Direct-manipulation chips
-       * (배경 교체 / 다시 합성 / 제품 더 크게) is a follow-up; this
-       * iteration just makes the canvas the visual primary. */}
-      <div className="step-page-canvas">
-        <CompositeCanvas
-          composition={composition}
-          variants={gen.variants}
-          prevSelected={gen.prevSelected}
-          selectedImageId={selectedImageId}
-          isLoading={gen.isLoading}
-          onSelect={selectComposite}
-          onRegenerate={generate}
-          canRegenerate={canGenerate}
-        />
-      </div>
-    </div>
+    </FormProvider>
   );
 }
 
 interface CompositeCanvasProps {
-  composition: Composition & { generated?: boolean; selectedUrl?: string | null };
+  composition: Composition;
   variants: CompositionVariant[];
   prevSelected: CompositionVariant | null;
   selectedImageId: string | null;
@@ -358,9 +352,6 @@ function CompositeCanvas({
   onRegenerate,
   canRegenerate,
 }: CompositeCanvasProps) {
-  // Phase 2c: composition is schema-shaped. Selection commitment lives
-  // on generation.selected; ready-with-no-selection state still
-  // counts as "user has variants but hasn't picked yet".
   const selected =
     composition.generation.state === 'ready' ? composition.generation.selected : null;
   const hasSelection = selected !== null;
@@ -419,5 +410,3 @@ function CompositeCanvas({
     </section>
   );
 }
-
-type ProductListProps = React.ComponentProps<typeof ProductList>;
