@@ -17,7 +17,7 @@
  */
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useQueue } from '../stores/queueStore';
+import { useQueue, usePolling } from '../stores/queueStore';
 import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover';
 import { QueueTrigger } from './queue/QueueTrigger';
 import { QueuePanel } from './queue/QueuePanel';
@@ -27,6 +27,10 @@ export default function QueueStatus() {
   const navigate = useNavigate();
   const { data: queueData, error, refresh } = useQueue();
   const [open, setOpen] = useState(false);
+  // Popover open → promote to the 4 s active tier so the panel rows
+  // refresh quickly. Popover closed → null tier (no extra sub),
+  // store falls back to the 30 s background tier from useQueue alone.
+  usePolling(open ? 'active' : null);
   const { cancellingIds, cancelError, cancel } = useQueueActions(refresh);
 
   const loading = !queueData;

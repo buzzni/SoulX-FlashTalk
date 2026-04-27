@@ -335,9 +335,6 @@ export default function Step3Audio({ state, update }: Step3AudioProps) {
   }, [watchedSource, watchedAudio]);
 
   const combinedScript = buildScript(watchedParagraphs);
-  const estDuration = Math.round(
-    combinedScript.replace(/\[breath\]/g, '').replace(/\s+/g, '').length * 0.3,
-  );
   const generatedSrc =
     voiceGeneration && voiceGeneration.state === 'ready'
       ? voiceGeneration.audio.url || null
@@ -476,7 +473,7 @@ export default function Step3Audio({ state, update }: Step3AudioProps) {
               <GenerateBar
                 label={
                   isGenerated
-                    ? `음성 준비 완료 · ${estDuration}초`
+                    ? '음성 준비 완료'
                     : '대본 입력 후 만들기 버튼을 눌러주세요'
                 }
                 done={!!isGenerated}
@@ -533,7 +530,7 @@ export default function Step3Audio({ state, update }: Step3AudioProps) {
          * preview. Codex framing: "pre-render review booth, not form
          * completion". */}
         <div className="step-page-canvas">
-          <RenderBooth state={state} estDuration={estDuration} />
+          <RenderBooth state={state} />
         </div>
       </div>
     </FormProvider>
@@ -542,10 +539,9 @@ export default function Step3Audio({ state, update }: Step3AudioProps) {
 
 interface RenderBoothProps {
   state: Step3AudioState;
-  estDuration: number;
 }
 
-function RenderBooth({ state, estDuration }: RenderBoothProps) {
+function RenderBooth({ state }: RenderBoothProps) {
   const navigate = useNavigate();
   const valid = computeValidity(state);
   const allValid = isAllValid(valid);
@@ -617,7 +613,7 @@ function RenderBooth({ state, estDuration }: RenderBoothProps) {
             <FileText className="size-3" strokeWidth={2.2} /> 대본
           </dt>
           <dd>
-            {scriptLen > 0 ? `${scriptLen.toLocaleString()}자 · 약 ${estDuration}초` : '대본을 적어주세요'}
+            {scriptLen > 0 ? `${scriptLen.toLocaleString()}자` : '대본을 적어주세요'}
           </dd>
         </div>
         <div className="render-fact">

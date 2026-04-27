@@ -2,14 +2,12 @@
  * ResolutionPicker — 4-tile video-quality picker.
  *
  * Emits a `ResolutionKey` string only — full meta
- * (width/height/size/speed/label) is derived via `resolutionMeta(key)`
- * from wizard/schema so consumers don't copy-paste an object already
- * in the canonical table.
+ * (width/height/label) is derived via `resolutionMeta(key)` from
+ * wizard/schema so consumers don't copy-paste an object already in the
+ * canonical table.
  */
 import type { ResolutionKey } from '@/wizard/schema';
 import { RESOLUTION_META } from '@/wizard/schema';
-
-const WARN_KEYS = new Set<ResolutionKey>(['1080p']);
 
 const RES_OPTION_KEYS: ResolutionKey[] = ['448p', '480p', '720p', '1080p'];
 
@@ -23,7 +21,6 @@ export function ResolutionPicker({ selectedKey, onSelect }: ResolutionPickerProp
     <div className="res-grid">
       {RES_OPTION_KEYS.map((key) => {
         const r = RESOLUTION_META[key];
-        const warn = WARN_KEYS.has(key);
         return (
         <button
           key={r.key}
@@ -35,12 +32,6 @@ export function ResolutionPicker({ selectedKey, onSelect }: ResolutionPickerProp
           </div>
           <div className="res-dim">
             {key} · {r.width}×{r.height}
-          </div>
-          <div className="res-meta" style={{ marginTop: 10 }}>
-            <span style={{ fontWeight: warn ? 600 : 500, color: warn ? 'var(--warn-text)' : undefined }}>
-              {r.speed}
-            </span>
-            <span>{r.size}</span>
           </div>
         </button>
         );

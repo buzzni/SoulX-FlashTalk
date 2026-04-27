@@ -136,7 +136,7 @@ describe('useHostStream — SSE → TQ bridge', () => {
     streamHostMock.mockImplementation(() => {
       // Iterator that throws as soon as it's awaited — a network-level
       // failure on the very first read.
-      // eslint-disable-next-line @typescript-eslint/require-await
+      // eslint-disable-next-line require-yield
       return (async function* () {
         throw new Error('boom');
       })();

@@ -32,8 +32,6 @@
   --accent-text: var(--primary-on-soft);
   --accent-strong: var(--primary-hover);
 
-  --success: var(--success);
-  --success-soft: var(--success-soft);
   --warn: var(--amber);
   --warn-soft: var(--amber-soft);
   --warn-text: var(--amber-on-soft);
