@@ -58,4 +58,3 @@ export { cancelQueuedTask, fetchQueue } from '../api/queue';
 export { fetchHistory } from '../api/history';
 export { fetchResult } from '../api/result';
 export { getVideoMeta, listServerFiles } from '../api/file';
-export { subscribeProgress } from '../api/progress';

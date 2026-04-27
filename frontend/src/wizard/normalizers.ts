@@ -423,7 +423,7 @@ function migrateResolution(raw: unknown): ResolutionKey {
   return '448p';
 }
 
-function migrateImageQuality(raw: unknown): ImageQuality {
+export function migrateImageQuality(raw: unknown): ImageQuality {
   return raw === '2K' || raw === '4K' ? raw : '1K';
 }
 

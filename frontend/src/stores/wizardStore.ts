@@ -24,9 +24,11 @@ import type {
   Background,
   Composition,
   Host,
+  ImageQuality,
   Product,
   ResolutionKey,
   Voice,
+  WizardState,
 } from '../wizard/schema';
 import {
   INITIAL_BACKGROUND,
@@ -36,6 +38,7 @@ import {
   WizardStateSerializedSchema,
 } from '../wizard/schema';
 import {
+  migrateImageQuality,
   migrateLegacy as migrateLegacyToSchema,
   persistBackground,
   persistComposition,
@@ -43,40 +46,9 @@ import {
   persistVoice,
 } from '../wizard/normalizers';
 
-// ────────────────────────────────────────────────────────────────────
-// Wizard state shape — every slice is schema-typed. The store mirrors
-// `WizardStateSchema` from wizard/schema.ts; adding a field requires
-// updating both, plus normalizers (migrate + persist) and api-mappers.
-//
-// Lane B.5 (D11): retired the dead top-level `script: string` (voice
-// already owns the script via `voice.script`), retired the
-// `[k: string]: unknown` escape hatch, and added top-level
-// `playlistId: string | null` to match the schema. Lane C bumps the
-// persist envelope to v8 so `safeParse` can run on hydrate without
-// rejecting every existing user blob.
-// ────────────────────────────────────────────────────────────────────
-
-export interface WizardState {
-  host: Host;
-  products: Product[];
-  background: Background;
-  composition: Composition;
-  voice: Voice;
-  /** Just the key — full meta (width/height/size/speed/label) is
-   * derived via `resolutionMeta` from wizard/schema. */
-  resolution: ResolutionKey;
-  imageQuality: string;
-  /** Optional playlist to bundle the resulting video into. Null = 미지정. */
-  playlistId: string | null;
-  /** Bumped on every `reset()`. Step pages use this as a React key so
-   * "처음부터 다시" forces a remount, clearing hook-local state (variants,
-   * prevSelected, etc.) without requiring a page refresh. */
-  wizardEpoch: number;
-  /** ms since epoch of the last successful slice write. Drives
-   * <AutoSaveIndicator />. Null until the first user edit (so the
-   * "방금 전 저장됨" badge doesn't flash on a fresh wizard). */
-  lastSavedAt: number | null;
-}
+// Wizard state shape lives in wizard/schema.ts. Re-exported here so
+// adding a field flows through one type, not two.
+export type { WizardState };
 
 // ────────────────────────────────────────────────────────────────────
 // Initial state — derived from the per-slice INITIAL_* constants in
@@ -110,7 +82,7 @@ export interface WizardActions {
   setComposition: (next: Composition | ((prev: Composition) => Composition)) => void;
   setVoice: (next: Voice | ((prev: Voice) => Voice)) => void;
   setResolution: (r: ResolutionKey) => void;
-  setImageQuality: (q: string) => void;
+  setImageQuality: (q: ImageQuality) => void;
   setPlaylistId: (id: string | null) => void;
   /** Stamp lastSavedAt = Date.now() — RHF/debounced sync hooks call
    * this directly when they want to surface the "방금 전 저장됨" badge
@@ -160,8 +132,7 @@ function migrateLegacyStateOnce(): void {
       composition: migrateLegacyToSchema({ composition: legacy.composition }).composition,
       voice: migrateLegacyToSchema({ voice: legacy.voice }).voice,
       resolution: migrateLegacyToSchema({ resolution: legacy.resolution }).resolution,
-      imageQuality:
-        (typeof legacy.imageQuality === 'string' ? legacy.imageQuality : INITIAL_WIZARD_STATE.imageQuality),
+      imageQuality: migrateImageQuality(legacy.imageQuality),
       playlistId: playlistRaw,
     };
 
@@ -300,11 +271,9 @@ export function migrateWizardEnvelope(
     }
     return INITIAL_WIZARD_STATE;
   }
-  // The serialized schema and the runtime schema agree on every field
-  // that survives JSON round-trip; LocalAsset slots that the runtime
-  // shape allows (File handles, blob URLs) are filtered to null/empty
-  // by the persisted schema. The runtime cast is therefore safe.
-  return parsed.data as unknown as WizardState;
+  // Serialized schema narrows the runtime LocalAsset slots; widening
+  // back to WizardState is safe.
+  return parsed.data as WizardState;
 }
 
 // ────────────────────────────────────────────────────────────────────
@@ -438,7 +407,7 @@ export const useBackground = (): Background => useWizardStore((s) => s.backgroun
 export const useComposition = (): Composition => useWizardStore((s) => s.composition);
 export const useVoice = (): Voice => useWizardStore((s) => s.voice);
 export const useResolution = (): ResolutionKey => useWizardStore((s) => s.resolution);
-export const useImageQuality = (): string => useWizardStore((s) => s.imageQuality);
+export const useImageQuality = (): ImageQuality => useWizardStore((s) => s.imageQuality);
 export const usePlaylistId = (): string | null => useWizardStore((s) => s.playlistId);
 export const useWizardEpoch = (): number => useWizardStore((s) => s.wizardEpoch);
 export const useLastSavedAt = (): number | null => useWizardStore((s) => s.lastSavedAt);

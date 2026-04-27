@@ -86,4 +86,71 @@ describe('useTaskProgress', () => {
     expect(result.current.data).toBeUndefined();
     expect(global.fetch).not.toHaveBeenCalled();
   });
+
+  it('stops polling once stage is terminal (complete/error)', async () => {
+    let callCount = 0;
+    global.fetch = vi.fn().mockImplementation(async () => {
+      callCount += 1;
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ task_id: 't-4', stage: 'complete', progress: 1, message: '완료' }),
+      };
+    });
+    const client = makeClient();
+    const { result } = renderHook(() => useTaskProgress('t-4', { writeTabTitle: false }), {
+      wrapper: wrapper(client),
+    });
+    await waitFor(() => expect(result.current.data?.stage).toBe('complete'));
+    const callsAtTerminal = callCount;
+    // Assert the predicate directly — refetchInterval reads the
+    // cached Query and should return false once stage is terminal.
+    const query = client.getQueryCache().find({ queryKey: ['task-state', 't-4'] });
+    expect(query).toBeDefined();
+    const interval = (query!.options as { refetchInterval?: unknown }).refetchInterval;
+    const intervalResult = typeof interval === 'function' ? interval(query!) : interval;
+    expect(intervalResult).toBe(false);
+    expect(callCount).toBe(callsAtTerminal);
+  });
+
+  it('aborts the in-flight fetch when the consumer unmounts', async () => {
+    let abortCalled = false;
+    global.fetch = vi.fn().mockImplementation((_url, init: RequestInit | undefined) => {
+      return new Promise((_resolve, reject) => {
+        init?.signal?.addEventListener('abort', () => {
+          abortCalled = true;
+          reject(Object.assign(new Error('aborted'), { name: 'AbortError' }));
+        });
+      });
+    });
+    const client = makeClient();
+    const { unmount } = renderHook(() => useTaskProgress('t-5', { writeTabTitle: false }), {
+      wrapper: wrapper(client),
+    });
+    // Let TQ launch the queryFn so the fetch is in-flight.
+    await waitFor(() => expect(global.fetch).toHaveBeenCalled());
+    unmount();
+    // The abort propagates synchronously through the listener.
+    await new Promise((r) => setTimeout(r, 10));
+    expect(abortCalled).toBe(true);
+  });
+
+  it('surfaces isError + failureCount after the retry budget exhausts', async () => {
+    global.fetch = vi.fn().mockRejectedValue(new TypeError('network down'));
+    const client = new QueryClient({
+      defaultOptions: {
+        queries: {
+          retry: 3,
+          // retryDelay 1ms so the 3-retry budget exhausts in-test (vs TQ's 5s default).
+          retryDelay: 1,
+          refetchOnWindowFocus: false,
+        },
+      },
+    });
+    const { result } = renderHook(() => useTaskProgress('t-fail', { writeTabTitle: false }), {
+      wrapper: wrapper(client),
+    });
+    await waitFor(() => expect(result.current.isError).toBe(true), { timeout: 5_000 });
+    expect(result.current.failureCount).toBeGreaterThanOrEqual(3);
+  }, 10_000);
 });
