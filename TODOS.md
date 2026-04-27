@@ -171,6 +171,32 @@ Deferred work captured during plan reviews. Each entry includes context for futu
 **Depends on / blocked by**: Step 1 RHF wire-up + Step 2/3 RHF migration (both TODO entries above). All 4 specs need RHF for their assertions to pass; landing this entry standalone would just add a permanently-red CI job.
 
 
+## HTTP Range (206) support for `/api/videos/{task_id}` so `<video preload="metadata">` actually fetches metadata only
+
+**What**: Add HTTP byte-range request handling to the video file endpoint in `app.py` (`/api/videos/{task_id}`). FastAPI's default `FileResponse` does not implement `Range` / `206 Partial Content` — clients that send `Range: bytes=0-...` get the whole file back as a 200. Replace with a streaming response that honors `Range` headers (or use a library like `fastapi-range-response` / a hand-rolled `StreamingResponse` with start/end byte offsets), and verify `Accept-Ranges: bytes` appears in the response headers.
+
+**Why**: `HomePage.tsx` `RecentRow` renders up to 4 recent video thumbnails with `<video src={videoUrl} preload="metadata" muted />` and now reads `e.currentTarget.duration` via `onLoadedMetadata` to display the playback length. Browsers honor `preload="metadata"` only when the server supports byte-range — they fetch the moov atom (~tens of KB) and stop. Without Range, every recent-works card downloads the full MP4 (often several MB) on home page load. With 4 cards on the home page and more on `/results`, this is a hidden bandwidth amplification that scales linearly with thumbnail count.
+
+**Pros**:
+- Home page initial load drops from ~4× full-video downloads to ~4× metadata-only fetches (likely 10-100× bandwidth reduction depending on video size).
+- `<video>` scrubbing and seek-to-position work correctly in the result page player without re-downloading the whole file.
+- Mobile/cellular users stop burning data on metadata extraction — currently every home visit silently pulls megabytes per card.
+- Standards-compliant: every modern HTTP client and CDN expects 206 support for media URLs.
+
+**Cons**:
+- Requires backend changes — handler rewrite, header parsing, edge cases (multi-range requests, malformed `Range` headers, end-of-file boundary). Not a one-line fix.
+- Need to verify whatever proxy/CDN sits in front of the backend (nginx, CloudFront, etc.) doesn't strip or mishandle `Range` — testing path goes through the real network stack.
+- New tests required: full-file GET, `Range: bytes=0-1023`, `Range: bytes=N-` (open-ended), invalid range → 416.
+
+**Context**: Surfaced during `/simplify` efficiency review of PR #12 (chore/home-cards-polish, 2026-04-27). The frontend change shipped using `preload="metadata"` with a duration-extraction state hook, on the assumption that the endpoint supports Range — which inspection of `app.py:1439-1451` (FastAPI `FileResponse`) showed it does not. The frontend works correctly (duration displays) but pays a hidden full-download cost per thumbnail until this lands.
+
+**Effort**: human ~2-3 hours (rewrite handler + add tests + verify through proxy) / CC ~30 min for the handler + tests.
+
+**Priority**: P3 (perf optimization, not a correctness bug — defer until home page bandwidth shows up in metrics or someone files a slow-load complaint).
+
+**Depends on / blocked by**: None.
+
+
 ## Completed
 
 ### Step 1 RHF wire-up (consume Lane D helpers in HostTextForm + HostReferenceUploader)
