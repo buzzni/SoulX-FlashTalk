@@ -101,6 +101,54 @@ export function clearDispatchSnapshot(): void {
   }
 }
 
+// In-flight lock — bridges the gap between POST start and POST response.
+// Without it, a refresh between "click 영상생성" and the task_id landing
+// would see snapshot=null and fire a *second* /api/generate (the original
+// snapshot-based gate only protects after task_id is known). 60s TTL so
+// a crashed dispatch doesn't lock the next session permanently.
+const DISPATCH_INFLIGHT_KEY = storageKey('dispatchInflight');
+const INFLIGHT_TTL_MS = 60_000;
+
+export interface DispatchInflight {
+  signature: string;
+  at: number;
+}
+
+export function setDispatchInflight(signature: string): void {
+  try {
+    const lock: DispatchInflight = { signature, at: Date.now() };
+    sessionStorage.setItem(DISPATCH_INFLIGHT_KEY, JSON.stringify(lock));
+  } catch {
+    /* sessionStorage unavailable */
+  }
+}
+
+export function getDispatchInflight(): DispatchInflight | null {
+  try {
+    const raw = sessionStorage.getItem(DISPATCH_INFLIGHT_KEY);
+    if (!raw) return null;
+    const parsed: unknown = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object') return null;
+    const obj = parsed as Record<string, unknown>;
+    if (typeof obj.signature !== 'string' || typeof obj.at !== 'number') return null;
+    if (Date.now() - obj.at > INFLIGHT_TTL_MS) {
+      sessionStorage.removeItem(DISPATCH_INFLIGHT_KEY);
+      return null;
+    }
+    return { signature: obj.signature, at: obj.at };
+  } catch {
+    return null;
+  }
+}
+
+export function clearDispatchInflight(): void {
+  try {
+    sessionStorage.removeItem(DISPATCH_INFLIGHT_KEY);
+  } catch {
+    /* sessionStorage unavailable */
+  }
+}
+
 /** If the just-completed task was dispatched by this session, reset
  * the wizard and clear the flag. No-op otherwise. Call from BOTH the
  * SSE-done path and the snapshot-shows-completed path so background

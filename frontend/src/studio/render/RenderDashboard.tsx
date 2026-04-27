@@ -23,10 +23,13 @@ import { generateVideo } from '../../api/video';
 import { getVideoMeta } from '../../api/file';
 import { humanizeError } from '../../api/http';
 import {
+  clearDispatchInflight,
   clearDispatchSnapshot,
   clearDraftIfDispatched,
+  getDispatchInflight,
   getDispatchSnapshot,
   markDispatched,
+  setDispatchInflight,
 } from '../../lib/wizardNav';
 import { computeDispatchSignature } from '../../lib/dispatchSignature';
 import { isTaskLive } from '../../api/queue';
@@ -121,6 +124,33 @@ export default function RenderDashboard({
           clearDispatchSnapshot();
         }
 
+        // ── In-flight gate. Bridges the window between POST start and
+        //    task_id landing in sessionStorage. Refresh inside that
+        //    window would otherwise miss the snapshot gate and fire a
+        //    duplicate /api/generate. Poll briefly for the snapshot to
+        //    appear, then attach. Falls through after 6s if the peer
+        //    dispatch never completes (peer crashed / aborted).
+        const inflight = getDispatchInflight();
+        if (inflight && inflight.signature === currentSig) {
+          for (let i = 0; i < 12 && alive; i++) {
+            await new Promise((r) => setTimeout(r, 500));
+            const fresh = getDispatchSnapshot();
+            if (fresh && fresh.signature === currentSig) {
+              navigate(`/render/${fresh.taskId}`, { replace: true });
+              return;
+            }
+            if (!getDispatchInflight()) break; // peer cleared (failed)
+          }
+          // Timed out or peer cleared without writing snapshot. Drop the
+          // stale lock so this mount can fresh-dispatch.
+          clearDispatchInflight();
+        }
+
+        // Acquire the in-flight lock right before the POST so any
+        // concurrent mount (from refresh, double-click, StrictMode)
+        // sees we're already on it.
+        setDispatchInflight(currentSig);
+
         // Audio path lives on `voice.generation.audio.path` (tts /
         // clone) or `voice.audio.path` (upload mode, once the file
         // has uploaded — LocalAsset means still uploading and surfaces
@@ -161,6 +191,9 @@ export default function RenderDashboard({
         // (refresh / back-and-click) recognize this same intent and
         // attach instead of re-POSTing.
         markDispatched(id, { signature: currentSig });
+        // markDispatched wrote the snapshot, so the in-flight lock
+        // has done its job — release it for any subsequent mount.
+        clearDispatchInflight();
         // Promote the URL from /render → /render/:taskId so refresh
         // survives and the task is permalink-able. `replace: true` so
         // the back button skips the transient dispatch URL. No
@@ -169,8 +202,14 @@ export default function RenderDashboard({
         // 'fresh'` forces a full remount with the id as a prop.
         navigate(`/render/${id}`, { replace: true });
       } catch (err) {
-        // AbortError = user navigated away mid-dispatch. Quiet exit.
+        // AbortError = user navigated away mid-dispatch. The POST may
+        // have landed at backend, so we deliberately leave the in-flight
+        // lock alone — the next mount can attach via the snapshot if
+        // markDispatched ran, or wait out the lock TTL if it didn't.
         if ((err as { name?: string })?.name === 'AbortError') return;
+        // Hard failure (network, schema, missing audio path) — release
+        // the lock so the user can retry without a stale 60s wait.
+        clearDispatchInflight();
         if (!alive) return;
         // eslint-disable-next-line no-console
         console.error('render dispatch failed', err);

@@ -7,11 +7,14 @@
 
 import { describe, it, expect, beforeEach } from 'vitest';
 import {
+  clearDispatchInflight,
   clearDispatchSnapshot,
   clearDraftIfDispatched,
   formatDraftAge,
+  getDispatchInflight,
   getDispatchSnapshot,
   markDispatched,
+  setDispatchInflight,
 } from '../wizardNav';
 import { useWizardStore, INITIAL_WIZARD_STATE } from '../../stores/wizardStore';
 
@@ -127,5 +130,50 @@ describe('dispatch snapshot — refresh idempotency', () => {
     // we must not crash, just treat it as absent.
     sessionStorage.setItem('showhost.dispatchSnapshot.v1', 'not-json');
     expect(getDispatchSnapshot()).toBeNull();
+  });
+});
+
+describe('dispatch in-flight lock — refresh-during-POST guard', () => {
+  beforeEach(() => {
+    sessionStorage.clear();
+  });
+
+  it('starts empty', () => {
+    expect(getDispatchInflight()).toBeNull();
+  });
+
+  it('roundtrips signature so a peer mount sees the lock', () => {
+    setDispatchInflight('sig-1');
+    const lock = getDispatchInflight();
+    expect(lock?.signature).toBe('sig-1');
+    expect(typeof lock?.at).toBe('number');
+  });
+
+  it('clearDispatchInflight drops the lock', () => {
+    setDispatchInflight('sig-1');
+    clearDispatchInflight();
+    expect(getDispatchInflight()).toBeNull();
+  });
+
+  it('TTL: stale lock (>60s old) is treated as absent', () => {
+    // Hand-craft an aged entry; reading must auto-clear the stale row.
+    sessionStorage.setItem(
+      'showhost.dispatchInflight.v1',
+      JSON.stringify({ signature: 'sig-1', at: Date.now() - 120_000 }),
+    );
+    expect(getDispatchInflight()).toBeNull();
+    // Auto-cleared
+    expect(sessionStorage.getItem('showhost.dispatchInflight.v1')).toBeNull();
+  });
+
+  it('returns null on malformed JSON without throwing', () => {
+    sessionStorage.setItem('showhost.dispatchInflight.v1', '{"missing":"fields"}');
+    expect(getDispatchInflight()).toBeNull();
+  });
+
+  it('signature mismatch is treated as live but not a match (caller decides)', () => {
+    // The lock helpers don't compare; the caller does. We just round-trip.
+    setDispatchInflight('sig-A');
+    expect(getDispatchInflight()?.signature).toBe('sig-A');
   });
 });

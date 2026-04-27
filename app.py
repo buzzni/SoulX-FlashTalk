@@ -458,9 +458,15 @@ async def _run_torchrun_inference(
         _active_processes.pop(task_id, None)
 
     if timed_out:
+        msg = f"생성 타임아웃 ({timeout_s}s 초과)"
         logger.warning(f"Task {task_id}: torchrun timed out after {timeout_s}s")
-        set_task_error(task_id, f"생성 타임아웃 ({timeout_s}s 초과)")
-        return False
+        set_task_error(task_id, msg)
+        # Raise so the queue worker (_worker_loop) marks the entry as
+        # status="error" via _mark_done(error=...). A bare `return False`
+        # leaves the queue thinking the task completed cleanly while
+        # task_states says error — frontend then shows "완료" on a job
+        # that actually failed.
+        raise RuntimeError(msg)
 
     if proc.returncode == 0 and success_payload:
         return True
@@ -475,16 +481,18 @@ async def _run_torchrun_inference(
     if error_payload:
         kind = error_payload.get("kind", "other")
         if kind == "oom":
-            set_task_error(task_id, "GPU 메모리 부족 — 잠시 후 다시 시도하거나 해상도를 낮춰주세요.")
+            user_msg = "GPU 메모리 부족 — 잠시 후 다시 시도하거나 해상도를 낮춰주세요."
         else:
             short = (error_payload.get("msg") or "")[:200]
-            set_task_error(task_id, f"생성 실패: {short}")
+            user_msg = f"생성 실패: {short}"
     else:
         if "out of memory" in tail.lower():
-            set_task_error(task_id, "GPU 메모리 부족 — 잠시 후 다시 시도하거나 해상도를 낮춰주세요.")
+            user_msg = "GPU 메모리 부족 — 잠시 후 다시 시도하거나 해상도를 낮춰주세요."
         else:
-            set_task_error(task_id, f"워커 프로세스 비정상 종료 (exit={proc.returncode})")
-    return False
+            user_msg = f"워커 프로세스 비정상 종료 (exit={proc.returncode})"
+    set_task_error(task_id, user_msg)
+    # See timeout branch above for why we raise instead of `return False`.
+    raise RuntimeError(user_msg)
 
 
 async def generate_video_task(
@@ -573,7 +581,11 @@ async def generate_video_task(
             # Branch: torchrun subprocess (USP 2GPU, default off) vs legacy
             # in-process world_size=1. Flag at FLASHTALK_OPTIONS.use_torchrun_subprocess.
             if config.FLASHTALK_OPTIONS.get("use_torchrun_subprocess"):
-                _ok = await _run_torchrun_inference(
+                # _run_torchrun_inference raises on failure (after calling
+                # set_task_error). The raise propagates through here to
+                # _worker_loop's except, which marks the queue entry
+                # status="error" — keeping queue + task_states consistent.
+                await _run_torchrun_inference(
                     task_id=task_id,
                     host_image=host_image,
                     audio_path=audio_path,
@@ -583,8 +595,6 @@ async def generate_video_task(
                     target_w=target_w,
                     output_path=output_path,
                 )
-                if not _ok:
-                    return
                 tgt_fps = 25  # informational; manifest uses output_path bytes
             else:
                 # Stage 1: Load pipeline if needed
