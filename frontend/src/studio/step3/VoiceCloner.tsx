@@ -3,12 +3,17 @@
  * into an ElevenLabs voice_id we can then use for TTS generation.
  *
  * Drives the `voice.sample` state machine (empty → pending → cloned).
- * The actual clone-on-generate happens in Step3Audio via
+ * The actual clone-on-generate happens in Step3Audio's submit via
  * useVoiceClone — this component only stages the file (pending) or
  * surfaces the cloned identity (cloned).
+ *
+ * Reads/writes through `useFormContext` — only renders when the
+ * parent narrows on `voice.source === 'clone'`, so 'voice.sample' is
+ * a valid path here.
  */
 
 import { useEffect } from 'react';
+import { useFormContext, useWatch } from 'react-hook-form';
 import Icon from '../Icon.jsx';
 import { Field } from '@/components/field';
 import { UploadTile } from '@/components/upload-tile';
@@ -18,19 +23,24 @@ import {
   type UploadTileFile,
 } from '@/components/upload-tile-bridge';
 import type { VoiceCloneSample } from '@/wizard/schema';
+import type { Step3FormValues } from '@/wizard/form-mappers';
 
-export interface VoiceClonerProps {
-  sample: VoiceCloneSample;
-  onSampleChange: (sample: VoiceCloneSample) => void;
-}
+export function VoiceCloner() {
+  const { control, setValue } = useFormContext<Step3FormValues>();
+  const sample = useWatch({
+    control,
+    name: 'voice.sample' as const,
+  }) as VoiceCloneSample | undefined;
 
-export function VoiceCloner({ sample, onSampleChange }: VoiceClonerProps) {
   // Revoke our blob: previewUrl on replace or unmount.
   useEffect(() => {
     return () => {
-      if (sample.state === 'pending') revokeLocalAssetIfBlob(sample.asset);
+      if (sample && sample.state === 'pending')
+        revokeLocalAssetIfBlob(sample.asset);
     };
   }, [sample]);
+
+  if (!sample) return null;
 
   const tileFile: UploadTileFile | null = (() => {
     if (sample.state === 'pending') {
@@ -46,14 +56,20 @@ export function VoiceCloner({ sample, onSampleChange }: VoiceClonerProps) {
     return null;
   })();
 
+  const writeSample = (next: VoiceCloneSample) =>
+    setValue('voice.sample' as const, next, {
+      shouldDirty: true,
+      shouldValidate: true,
+    });
+
   const handlePick = (next: UploadTileFile | null) => {
     if (sample.state === 'pending') revokeLocalAssetIfBlob(sample.asset);
     const asset = localAssetFromUploadFile(next);
     if (!asset) {
-      onSampleChange({ state: 'empty' });
+      writeSample({ state: 'empty' });
       return;
     }
-    onSampleChange({ state: 'pending', asset });
+    writeSample({ state: 'pending', asset });
   };
 
   return (

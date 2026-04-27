@@ -6,28 +6,46 @@
  * most people never touch them. `voice.pitch` was cut pre-
  * refactor — not an ElevenLabs v3 param and the ffmpeg post-
  * processing pipeline to do it ourselves isn't built.
+ *
+ * Reads/writes through `useFormContext`. Only renders when the
+ * parent narrows on `voice.source !== 'upload'` (advanced doesn't
+ * exist on the upload variant), so `voice.advanced` is a valid path.
  */
 
+import { useFormContext, useWatch } from 'react-hook-form';
 import Icon from '../Icon.jsx';
 import { Field } from '@/components/field';
 import { WizardSlider as Slider } from '@/components/wizard-slider';
 import type { VoiceAdvanced } from '@/wizard/schema';
+import type { Step3FormValues } from '@/wizard/form-mappers';
 
 export interface VoiceAdvancedSettingsProps {
-  advanced: VoiceAdvanced;
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  onAdvancedChange: (next: VoiceAdvanced) => void;
 }
 
 export function VoiceAdvancedSettings({
-  advanced,
   open,
   onOpenChange,
-  onAdvancedChange,
 }: VoiceAdvancedSettingsProps) {
-  const set = (patch: Partial<VoiceAdvanced>) =>
-    onAdvancedChange({ ...advanced, ...patch });
+  const { control, setValue, getValues } = useFormContext<Step3FormValues>();
+  const advanced = useWatch({
+    control,
+    name: 'voice.advanced' as const,
+  }) as VoiceAdvanced | undefined;
+
+  if (!advanced) return null;
+
+  const set = (patch: Partial<VoiceAdvanced>) => {
+    const cur = getValues('voice.advanced' as const) as VoiceAdvanced | undefined;
+    if (!cur) return;
+    setValue(
+      'voice.advanced' as const,
+      { ...cur, ...patch },
+      { shouldDirty: true, shouldValidate: true },
+    );
+  };
+
   return (
     <>
       <div className="field-row" style={{ marginTop: 12 }}>

@@ -11,12 +11,20 @@
  * Character counting subtracts the BREATH_TAG overhead (9 chars
  * each × N-1 paragraphs) so users can type up to the real 5000-
  * char API limit rather than the padded one.
+ *
+ * Reads/writes through `useFormContext` — paragraphs live at
+ * `voice.script.paragraphs`. Per-paragraph edits use setValue on the
+ * indexed path; add/remove rewrite the whole array via setValue.
+ * useFieldArray would require objects (RHF can't bind primitive
+ * arrays through it), so direct setValue keeps the schema as-is.
  */
 
 import { Fragment } from 'react';
+import { useFormContext, useWatch } from 'react-hook-form';
 import Icon from '../Icon.jsx';
 import { Field } from '@/components/field';
-import type { Script } from '@/wizard/schema';
+import type { Step3FormValues } from '@/wizard/form-mappers';
+
 const BREATH_TAG = ' [breath] ';
 export const SCRIPT_LIMIT = 5000;
 
@@ -30,42 +38,52 @@ export function buildScript(paragraphs: string[]): string {
     .join(BREATH_TAG);
 }
 
-export interface ScriptEditorProps {
-  script: Script;
-  onScriptChange: (script: Script) => void;
-}
-
-export function ScriptEditor({ script, onScriptChange }: ScriptEditorProps) {
-  const paragraphs = script.paragraphs.length > 0 ? script.paragraphs : [''];
-  const onParagraphsChange = (next: string[]) => onScriptChange({ paragraphs: next });
+export function ScriptEditor() {
+  const { control, setValue, getValues } = useFormContext<Step3FormValues>();
+  const watched = useWatch({
+    control,
+    name: 'voice.script.paragraphs' as const,
+  }) as string[] | undefined;
+  const paragraphs =
+    watched && watched.length > 0 ? watched : [''];
   const combined = buildScript(paragraphs);
   const totalLen = combined.length;
   const remaining = SCRIPT_LIMIT - totalLen;
   const canAddParagraph = remaining >= BREATH_TAG.length + 1;
 
+  const writeAll = (next: string[]) =>
+    setValue(
+      'voice.script' as const,
+      { paragraphs: next },
+      { shouldDirty: true, shouldValidate: true },
+    );
+
   const updateParagraph = (idx: number, value: string) => {
     // Compute what the new combined length would be; if exceeds, clip the input.
-    const next = paragraphs.slice();
-    const others = next
+    const all = (getValues('voice.script.paragraphs' as const) as string[]) ?? [''];
+    const others = all
       .filter((_, i) => i !== idx)
       .map((p) => (p || '').trim())
       .filter((p) => p.length > 0);
     const baseLen = others.join(BREATH_TAG).length + (others.length > 0 ? BREATH_TAG.length : 0);
     const available = SCRIPT_LIMIT - baseLen;
     const trimmedValue = value.length > available ? value.slice(0, Math.max(0, available)) : value;
+    const next = all.slice();
     next[idx] = trimmedValue;
-    onParagraphsChange(next);
+    writeAll(next);
   };
 
   const addParagraph = () => {
     if (!canAddParagraph) return;
-    onParagraphsChange([...paragraphs, '']);
+    const all = (getValues('voice.script.paragraphs' as const) as string[]) ?? [''];
+    writeAll([...all, '']);
   };
 
   const removeParagraph = (idx: number) => {
-    if (idx === 0) return; // first paragraph is required
-    const next = paragraphs.filter((_, i) => i !== idx);
-    onParagraphsChange(next.length > 0 ? next : ['']);
+    if (idx === 0) return;
+    const all = (getValues('voice.script.paragraphs' as const) as string[]) ?? [''];
+    const next = all.filter((_, i) => i !== idx);
+    writeAll(next.length > 0 ? next : ['']);
   };
 
   return (
