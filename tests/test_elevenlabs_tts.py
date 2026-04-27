@@ -25,7 +25,7 @@ def test_config_includes_new_params():
     opts = config.ELEVENLABS_OPTIONS
     assert opts["use_speaker_boost"] is True  # T-EL1
     assert opts["language_code"] == "ko"  # T-EL2
-    assert opts["speed"] == 1.0  # T-EL3
+    assert opts["speed"] == 0.95  # T-EL3 (Korean lip-sync tuning, 0199480)
 
 
 def test_tts_class_default_model_is_v3():
