@@ -86,4 +86,68 @@ describe('useTaskProgress', () => {
     expect(result.current.data).toBeUndefined();
     expect(global.fetch).not.toHaveBeenCalled();
   });
+
+  it('stops polling once stage is terminal (complete/error)', async () => {
+    let callCount = 0;
+    global.fetch = vi.fn().mockImplementation(async () => {
+      callCount += 1;
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ task_id: 't-4', stage: 'complete', progress: 1, message: '완료' }),
+      };
+    });
+    const client = makeClient();
+    const { result } = renderHook(() => useTaskProgress('t-4', { writeTabTitle: false }), {
+      wrapper: wrapper(client),
+    });
+    await waitFor(() => expect(result.current.data?.stage).toBe('complete'));
+    const callsAtTerminal = callCount;
+    // refetchInterval must return false on 'complete'; wait well past
+    // the 1500ms POLL_MS to confirm no second fetch fires.
+    await new Promise((r) => setTimeout(r, 2_000));
+    expect(callCount).toBe(callsAtTerminal);
+  }, 10_000);
+
+  it('aborts the in-flight fetch when the consumer unmounts', async () => {
+    let abortCalled = false;
+    global.fetch = vi.fn().mockImplementation((_url, init: RequestInit | undefined) => {
+      return new Promise((_resolve, reject) => {
+        init?.signal?.addEventListener('abort', () => {
+          abortCalled = true;
+          reject(Object.assign(new Error('aborted'), { name: 'AbortError' }));
+        });
+      });
+    });
+    const client = makeClient();
+    const { unmount } = renderHook(() => useTaskProgress('t-5', { writeTabTitle: false }), {
+      wrapper: wrapper(client),
+    });
+    // Let TQ launch the queryFn so the fetch is in-flight.
+    await waitFor(() => expect(global.fetch).toHaveBeenCalled());
+    unmount();
+    // The abort propagates synchronously through the listener.
+    await new Promise((r) => setTimeout(r, 10));
+    expect(abortCalled).toBe(true);
+  });
+
+  it('surfaces isError + failureCount after the retry budget exhausts', async () => {
+    global.fetch = vi.fn().mockRejectedValue(new TypeError('network down'));
+    const client = new QueryClient({
+      defaultOptions: {
+        queries: {
+          // Mirror the prod default of 3 retries; fast retryDelay so the
+          // budget exhausts inside the test instead of the 5s default.
+          retry: 3,
+          retryDelay: 1,
+          refetchOnWindowFocus: false,
+        },
+      },
+    });
+    const { result } = renderHook(() => useTaskProgress('t-fail', { writeTabTitle: false }), {
+      wrapper: wrapper(client),
+    });
+    await waitFor(() => expect(result.current.isError).toBe(true), { timeout: 5_000 });
+    expect(result.current.failureCount).toBeGreaterThanOrEqual(3);
+  }, 10_000);
 });

@@ -134,13 +134,3 @@ export interface ResolutionPreset {
   default?: boolean;
 }
 
-export interface WizardState {
-  host: WizardHost;
-  products: WizardProduct[];
-  background: WizardBackground;
-  composition: WizardComposition;
-  voice: WizardVoice;
-  script?: string;
-  resolution?: ResolutionPreset;
-  imageQuality?: '1K' | '2K' | '4K';
-}

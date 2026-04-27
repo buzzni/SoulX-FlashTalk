@@ -421,7 +421,7 @@ export const useBackground = (): Background => useWizardStore((s) => s.backgroun
 export const useComposition = (): Composition => useWizardStore((s) => s.composition);
 export const useVoice = (): Voice => useWizardStore((s) => s.voice);
 export const useResolution = (): ResolutionKey => useWizardStore((s) => s.resolution);
-export const useImageQuality = (): string => useWizardStore((s) => s.imageQuality);
+export const useImageQuality = (): ImageQuality => useWizardStore((s) => s.imageQuality);
 export const usePlaylistId = (): string | null => useWizardStore((s) => s.playlistId);
 export const useWizardEpoch = (): number => useWizardStore((s) => s.wizardEpoch);
 export const useLastSavedAt = (): number | null => useWizardStore((s) => s.lastSavedAt);

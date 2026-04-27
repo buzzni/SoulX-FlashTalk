@@ -17,7 +17,7 @@ import {
   isProductReady,
   isVoiceReady,
 } from '../schema';
-import { migrateLegacy, persistVoice, toPersistable } from '../normalizers';
+import { migrateImageQuality, migrateLegacy, persistVoice, toPersistable } from '../normalizers';
 
 describe('migrateLegacy', () => {
   it('returns INITIAL_WIZARD_STATE for null/undefined/garbage', () => {
@@ -166,6 +166,28 @@ describe('migrateLegacy', () => {
     expect(migrateLegacy({ resolution: { key: '1080p' } }).resolution).toBe('1080p');
     // invalid → default
     expect(migrateLegacy({ resolution: { key: 'foo' } }).resolution).toBe('448p');
+  });
+});
+
+describe('migrateImageQuality', () => {
+  it('preserves the canonical enum members', () => {
+    expect(migrateImageQuality('1K')).toBe('1K');
+    expect(migrateImageQuality('2K')).toBe('2K');
+    expect(migrateImageQuality('4K')).toBe('4K');
+  });
+  it('collapses unknown legacy strings to the 1K default', () => {
+    // Legacy blobs that survived the old `typeof === 'string'` guard
+    // (e.g. 'HD', 'medium') previously persisted as-is; now they
+    // narrow to the schema-valid '1K' fallback.
+    expect(migrateImageQuality('HD')).toBe('1K');
+    expect(migrateImageQuality('medium')).toBe('1K');
+    expect(migrateImageQuality('')).toBe('1K');
+  });
+  it('coerces non-string values to the 1K default', () => {
+    expect(migrateImageQuality(null)).toBe('1K');
+    expect(migrateImageQuality(undefined)).toBe('1K');
+    expect(migrateImageQuality(123)).toBe('1K');
+    expect(migrateImageQuality({})).toBe('1K');
   });
 });
 
