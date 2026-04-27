@@ -19,8 +19,15 @@ import {
   BackgroundSchema,
   CompositionSettingsSchema,
   HostSchema,
+  LocalAssetSchema,
   ProductsSchema,
+  ScriptSchema,
+  ServerAssetSchema,
+  VoiceAdvancedSchema,
+  VoiceCloneSampleSchema,
   type Host,
+  type Voice,
+  type VoiceGeneration,
 } from './schema';
 import { z } from 'zod';
 
@@ -79,3 +86,109 @@ export const Step2FormValuesSchema = z.object({
   settings: CompositionSettingsSchema,
 });
 export type Step2FormValues = z.infer<typeof Step2FormValuesSchema>;
+
+// ────────────────────────────────────────────────────────────────────
+// Step 3 — Voice (excluding generation lifecycle)
+// ────────────────────────────────────────────────────────────────────
+
+/**
+ * Form-controllable subset of the Voice slice. Each variant of the
+ * tagged union drops `generation` (TTS state machine driven by
+ * useTTSGeneration). `voice.sample` (clone-mode upload state machine)
+ * STAYS in the form because user edits drive `empty → pending`; the
+ * `pending → cloned` transition is hook-driven (useVoiceClone) but
+ * still reflected in form state via store→form sync.
+ *
+ * `voice.audio` for upload mode also stays in the form: the user picks
+ * a LocalAsset, eager upload swaps it to ServerAsset (Step 2 pattern).
+ *
+ * `resolution`, `playlistId`, `imageQuality` are top-level wizard
+ * state owned by other concerns; not in the Step 3 form.
+ *
+ * As with Step 2, the container subscribes to NARROW voice fields
+ * (source / script / advanced / voiceId / voiceName / sample / audio)
+ * and excludes `voice.generation` from form values, so SSE/TTS
+ * lifecycle mutations don't trigger a form.reset that would wipe
+ * in-progress edits.
+ */
+export const VoiceFormValuesSchema = z.discriminatedUnion('source', [
+  z.object({
+    source: z.literal('tts'),
+    voiceId: z.string().nullable(),
+    voiceName: z.string().nullable(),
+    advanced: VoiceAdvancedSchema,
+    script: ScriptSchema,
+  }),
+  z.object({
+    source: z.literal('clone'),
+    sample: VoiceCloneSampleSchema,
+    advanced: VoiceAdvancedSchema,
+    script: ScriptSchema,
+  }),
+  z.object({
+    source: z.literal('upload'),
+    audio: z.union([ServerAssetSchema, LocalAssetSchema, z.null()]),
+    script: ScriptSchema,
+  }),
+]);
+export type VoiceFormValues = z.infer<typeof VoiceFormValuesSchema>;
+
+export const Step3FormValuesSchema = z.object({
+  voice: VoiceFormValuesSchema,
+});
+export type Step3FormValues = z.infer<typeof Step3FormValuesSchema>;
+
+export function voiceSliceToFormValues(voice: Voice): VoiceFormValues {
+  if (voice.source === 'upload') {
+    return { source: 'upload', audio: voice.audio, script: voice.script };
+  }
+  if (voice.source === 'clone') {
+    return {
+      source: 'clone',
+      sample: voice.sample,
+      advanced: voice.advanced,
+      script: voice.script,
+    };
+  }
+  return {
+    source: 'tts',
+    voiceId: voice.voiceId,
+    voiceName: voice.voiceName,
+    advanced: voice.advanced,
+    script: voice.script,
+  };
+}
+
+/**
+ * Re-attach `generation` from the previous slice when committing form
+ * values back to the store. Same-variant swaps preserve the lifecycle
+ * (e.g. user edits script while TTS is `ready` — keep `ready`); cross-
+ * variant swaps reset to `idle` (stale lifecycle from a different
+ * source isn't valid). Upload variant has no generation field.
+ */
+export function formValuesToVoiceSlice(values: VoiceFormValues, prev: Voice): Voice {
+  if (values.source === 'upload') {
+    return { source: 'upload', audio: values.audio, script: values.script };
+  }
+  const prevGen: VoiceGeneration =
+    prev.source !== 'upload' && prev.source === values.source
+      ? prev.generation
+      : { state: 'idle' };
+  if (values.source === 'tts') {
+    return {
+      source: 'tts',
+      voiceId: values.voiceId,
+      voiceName: values.voiceName,
+      advanced: values.advanced,
+      script: values.script,
+      generation: prevGen,
+    };
+  }
+  return {
+    source: 'clone',
+    sample: values.sample,
+    advanced: values.advanced,
+    script: values.script,
+    generation: prevGen,
+  };
+}

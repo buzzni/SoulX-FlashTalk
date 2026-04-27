@@ -2,8 +2,12 @@
  * @vitest-environment jsdom
  */
 import { describe, it, expect } from 'vitest';
-import { toCompositeRequest, toHostGenerateRequest } from '../api-mappers';
-import type { Background, Composition, Host, Products } from '../schema';
+import {
+  toCompositeRequest,
+  toHostGenerateRequest,
+  toVoiceGenerateRequest,
+} from '../api-mappers';
+import type { Background, Composition, Host, Products, Voice } from '../schema';
 import { INITIAL_COMPOSITION, INITIAL_HOST } from '../schema';
 
 const READY_HOST: Host = {
@@ -158,5 +162,63 @@ describe('toHostGenerateRequest', () => {
   it('attaches _seeds when provided (attempt > 0 path)', () => {
     const req = toHostGenerateRequest(INITIAL_HOST, '1K', [11, 22, 33, 44]);
     expect(req._seeds).toEqual([11, 22, 33, 44]);
+  });
+});
+
+describe('toVoiceGenerateRequest', () => {
+  const ADVANCED = { speed: 1.1, stability: 0.5, style: 0.3, similarity: 0.75 };
+  const SCRIPT = { paragraphs: ['첫 문단', '두 번째 문단'] };
+
+  it('tts mode emits voiceId from voice.voiceId', () => {
+    const v: Voice = {
+      source: 'tts',
+      voiceId: 'v_minji',
+      voiceName: '민지',
+      advanced: ADVANCED,
+      script: SCRIPT,
+      generation: { state: 'idle' },
+    };
+    const req = toVoiceGenerateRequest(v);
+    expect(req.voice.source).toBe('tts');
+    expect(req.voice.voiceId).toBe('v_minji');
+    expect(req.voice.paragraphs).toEqual(['첫 문단', '두 번째 문단']);
+    expect(req.voice.speed).toBe(1.1);
+    expect(req.voice.similarity).toBe(0.75);
+  });
+
+  it('clone mode emits voiceId from sample.voiceId after clone', () => {
+    const v: Voice = {
+      source: 'clone',
+      sample: { state: 'cloned', voiceId: 'cloned_001', name: '내 목소리' },
+      advanced: ADVANCED,
+      script: SCRIPT,
+      generation: { state: 'idle' },
+    };
+    const req = toVoiceGenerateRequest(v);
+    expect(req.voice.source).toBe('clone');
+    expect(req.voice.voiceId).toBe('cloned_001');
+    expect(req.voice.paragraphs).toEqual(['첫 문단', '두 번째 문단']);
+    expect(req.voice.stability).toBe(0.5);
+  });
+
+  it('clone mode with non-cloned sample falls back to null voiceId', () => {
+    const v: Voice = {
+      source: 'clone',
+      sample: { state: 'empty' },
+      advanced: ADVANCED,
+      script: SCRIPT,
+      generation: { state: 'idle' },
+    };
+    const req = toVoiceGenerateRequest(v);
+    expect(req.voice.voiceId).toBeNull();
+  });
+
+  it('upload mode throws — caller must guard', () => {
+    const v: Voice = {
+      source: 'upload',
+      audio: null,
+      script: SCRIPT,
+    };
+    expect(() => toVoiceGenerateRequest(v)).toThrow(/upload-mode/);
   });
 });
