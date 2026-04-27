@@ -14,7 +14,7 @@ import { cn } from '@/lib/utils';
 export const SECTION_CLASS = 'mt-2.5';
 
 export const SECTION_HEADER_CLASS =
-  'text-[11px] font-semibold text-ink-3 uppercase tracking-[0.04em] mb-1.5';
+  'text-2xs font-semibold text-ink-3 uppercase tracking-wider mb-1.5';
 
 // Base layout shared by both row variants (live + recent). Row variants
 // override or extend via cn() at the call site so tailwind-merge can
