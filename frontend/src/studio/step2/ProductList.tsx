@@ -172,7 +172,7 @@ export function ProductList() {
                   {(p.source.kind === 'empty' ||
                     p.source.kind === 'localFile' ||
                     p.source.kind === 'uploaded') && (
-                    <label className="self-start inline-flex items-center gap-1.5 h-8 px-3 rounded-md text-[12px] font-medium border border-input bg-card text-foreground hover:bg-secondary cursor-pointer transition-colors">
+                    <label className="self-start inline-flex items-center gap-1.5 h-8 px-3 rounded-md text-xs font-medium border border-input bg-card text-foreground hover:bg-secondary cursor-pointer transition-colors">
                       <Icon name={url ? 'swap' : 'upload'} size={12} />
                       {url ? '사진 교체' : '사진 올리기'}
                       <input
@@ -228,7 +228,7 @@ export function ProductList() {
               title={
                 <>
                   자동으로 빼내기{' '}
-                  <span className="text-[10px] font-medium text-muted-foreground ml-1">
+                  <span className="text-2xs font-medium text-muted-foreground ml-1">
                     (기본)
                   </span>
                 </>

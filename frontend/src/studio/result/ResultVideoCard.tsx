@@ -8,6 +8,7 @@
  */
 import Icon from '../Icon.jsx';
 import { Spinner } from '@/components/spinner';
+import { VideoFrame } from '../shared/VideoFrame';
 
 export interface ResultVideoCardProps {
   status: 'completed' | 'error' | 'processing';
@@ -17,7 +18,7 @@ export interface ResultVideoCardProps {
 
 export function ResultVideoCard({ status, videoUrl, errorMessage }: ResultVideoCardProps) {
   return (
-    <div className="relative w-[220px] aspect-[9/16] rounded-xl overflow-hidden border border-border bg-[#0b0d12] self-start">
+    <VideoFrame>
       {status === 'completed' && (
         // No autoPlay — user clicks to play. preload="metadata" so the
         // player knows duration/dimensions without fetching bytes.
@@ -29,7 +30,7 @@ export function ResultVideoCard({ status, videoUrl, errorMessage }: ResultVideoC
         />
       )}
       {status === 'error' && (
-        <div className="absolute inset-0 grid place-items-center text-white text-center p-4">
+        <div className="absolute inset-0 grid place-items-center text-center p-4">
           <div>
             <Icon name="alert_circle" size={24} />
             <div className="text-xs mt-2 opacity-90">
@@ -39,12 +40,10 @@ export function ResultVideoCard({ status, videoUrl, errorMessage }: ResultVideoC
         </div>
       )}
       {status === 'processing' && (
-        // text-white = sits on the dark video letterbox; tints the
-        // spinner via currentColor.
-        <div className="absolute inset-0 grid place-items-center text-white">
+        <div className="absolute inset-0 grid place-items-center">
           <Spinner size="lg" />
         </div>
       )}
-    </div>
+    </VideoFrame>
   );
 }

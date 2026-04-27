@@ -265,7 +265,7 @@ function ServerPickerLink({ onPick }: { onPick: () => void }) {
     <button
       type="button"
       onClick={onPick}
-      className="self-start inline-flex items-center gap-1.5 h-8 px-3 rounded-md text-[12px] font-medium text-muted-foreground hover:bg-secondary hover:text-foreground transition-colors"
+      className="self-start inline-flex items-center gap-1.5 h-8 px-3 rounded-md text-xs font-medium text-muted-foreground hover:bg-secondary hover:text-foreground transition-colors"
     >
       <Icon name="file" size={12} /> 서버에 있는 파일에서 선택
     </button>

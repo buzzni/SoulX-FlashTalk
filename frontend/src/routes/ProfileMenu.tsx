@@ -42,15 +42,15 @@ export function ProfileMenu() {
         <button
           type="button"
           title="내 정보, 설정, 로그아웃"
-          className="group inline-flex items-center gap-2 h-9 pl-1 pr-3 rounded-full bg-card border border-border text-foreground text-[13px] transition-all shadow-[var(--shadow-soft)] hover:border-rule-strong cursor-pointer"
+          className="group inline-flex items-center gap-2 h-9 pl-1 pr-3 rounded-full bg-card border border-border text-foreground text-sm-tight transition-all shadow-[var(--shadow-soft)] hover:border-rule-strong cursor-pointer"
         >
           <span
             aria-hidden
-            className="grid place-items-center w-7 h-7 rounded-full bg-primary text-primary-foreground font-bold text-[12px]"
+            className="grid place-items-center w-7 h-7 rounded-full bg-primary text-primary-foreground font-bold text-xs"
           >
             {initial}
           </span>
-          <span className="font-semibold tracking-[-0.012em] max-w-[140px] truncate">
+          <span className="font-semibold tracking-tight max-w-[140px] truncate">
             {display}
           </span>
           <ChevronDown className="size-3.5 text-muted-foreground transition-transform group-data-[state=open]:rotate-180" />
@@ -60,13 +60,13 @@ export function ProfileMenu() {
         <div className="px-3 py-3 flex items-center gap-3">
           <span
             aria-hidden
-            className="grid place-items-center w-10 h-10 rounded-full bg-primary text-primary-foreground font-bold text-[15px]"
+            className="grid place-items-center w-10 h-10 rounded-full bg-primary text-primary-foreground font-bold text-sm"
           >
             {initial}
           </span>
           <div className="min-w-0 flex-1">
-            <div className="font-bold text-[14px] tracking-[-0.014em] truncate">{display}</div>
-            <div className="text-[11px] text-muted-foreground truncate">{user?.user_id || ''}</div>
+            <div className="font-bold text-sm tracking-tight truncate">{display}</div>
+            <div className="text-2xs text-muted-foreground truncate">{user?.user_id || ''}</div>
           </div>
         </div>
         <DropdownMenuSeparator />

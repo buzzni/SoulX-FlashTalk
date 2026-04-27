@@ -56,7 +56,7 @@ export function WizardTab({ value, icon, children, className }: WizardTabProps) 
         "data-[state=active]:shadow-[0_1px_2px_rgba(0,0,0,0.06),0_1px_0_rgba(0,0,0,0.04)]",
         "data-[state=active]:hover:shadow-[0_1px_2px_rgba(0,0,0,0.06),0_1px_0_rgba(0,0,0,0.04)]",
         'text-ink-2 data-[state=inactive]:hover:text-foreground',
-        'border-0 h-8 px-3.5 text-[13px] font-medium rounded-[6px] gap-1.5',
+        'border-0 h-8 px-3.5 text-sm-tight font-medium rounded-[6px] gap-1.5',
         className,
       )}
     >

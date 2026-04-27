@@ -31,14 +31,14 @@ export function StepErrorFallback({ error, resetErrorBoundary, step }: StepError
       className="mx-auto max-w-md mt-12 p-6 rounded-lg border border-rule-strong bg-card text-foreground"
     >
       <h2 className="text-base font-semibold">단계 {step}이(가) 잠깐 멈췄어요</h2>
-      <p className="mt-2 text-[13px] text-muted-foreground">
+      <p className="mt-2 text-sm-tight text-muted-foreground">
         화면을 그리는 중 오류가 발생했습니다. 입력해둔 값은 그대로 유지되어 있어요.
         재시도하면 보통 복구됩니다.
       </p>
       <button
         type="button"
         onClick={resetErrorBoundary}
-        className="mt-4 inline-flex items-center gap-2 h-9 px-3 rounded-md bg-primary text-primary-foreground text-[13px] font-semibold hover:bg-[var(--primary-hover)] cursor-pointer"
+        className="mt-4 inline-flex items-center gap-2 h-9 px-3 rounded-md bg-primary text-primary-foreground text-sm-tight font-semibold hover:bg-[var(--primary-hover)] cursor-pointer"
       >
         다시 시도
       </button>

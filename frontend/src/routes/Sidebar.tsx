@@ -48,7 +48,7 @@ export function Sidebar({ active }: SidebarProps) {
         type="button"
         onClick={() => startNewVideo(navigate)}
         title="새 영상 만들기 (3단계 위저드)"
-        className="flex items-center gap-2 w-full px-3 py-2.5 mb-2 bg-foreground text-background rounded-md font-semibold text-[13px] tracking-[-0.014em] transition-colors hover:bg-foreground/85 cursor-pointer"
+        className="flex items-center gap-2 w-full px-3 py-2.5 mb-2 bg-foreground text-background rounded-md font-semibold text-sm-tight tracking-tight transition-colors hover:bg-foreground/85 cursor-pointer"
       >
         <Plus className="size-4" />
         <span>새 영상 만들기</span>
@@ -59,13 +59,13 @@ export function Sidebar({ active }: SidebarProps) {
           type="button"
           onClick={() => resumeVideo(navigate)}
           title="진행 중인 작업 이어서 만들기"
-          className="flex items-center justify-between gap-2 w-full px-3 py-2 mb-2 bg-card border border-border rounded-md text-[12.5px] font-semibold text-foreground tracking-[-0.012em] transition-colors hover:bg-surface-2 cursor-pointer"
+          className="flex items-center justify-between gap-2 w-full px-3 py-2 mb-2 bg-card border border-border rounded-md text-xs font-semibold text-foreground tracking-tight transition-colors hover:bg-surface-2 cursor-pointer"
         >
           <span className="flex items-center gap-2 min-w-0">
             <Play className="size-3.5 text-primary shrink-0" />
             <span className="truncate">이어 만들기</span>
           </span>
-          <span className="text-[11px] text-muted-foreground tracking-[-0.005em] shrink-0">
+          <span className="text-2xs text-muted-foreground tracking-tight shrink-0">
             {formatDraftAge(lastSavedAt)}
           </span>
         </button>
@@ -126,7 +126,7 @@ function NavGroup({ label, children }: NavGroupProps) {
   return (
     <div className="mt-3">
       {label && (
-        <div className="text-[11px] font-semibold text-muted-foreground tracking-[-0.005em] px-3 py-1.5">
+        <div className="text-2xs font-semibold text-muted-foreground tracking-tight px-3 py-1.5">
           {label}
         </div>
       )}
@@ -155,7 +155,7 @@ function NavItem({ to, label, icon, active, quiet, count, dim }: NavItemProps) {
     <Link
       to={to}
       className={cn(
-        'flex items-center justify-between gap-2 px-3 py-2 rounded-md no-underline text-[13.5px] font-medium tracking-[-0.012em] transition-colors',
+        'flex items-center justify-between gap-2 px-3 py-2 rounded-md no-underline text-sm-tight font-medium tracking-tight transition-colors',
         cls,
         dim && 'opacity-60',
       )}
@@ -167,7 +167,7 @@ function NavItem({ to, label, icon, active, quiet, count, dim }: NavItemProps) {
         <span className="truncate">{label}</span>
       </span>
       {typeof count === 'number' && (
-        <span className="text-[11px] text-muted-foreground tabular-nums">{count}</span>
+        <span className="text-2xs text-muted-foreground tabular-nums">{count}</span>
       )}
     </Link>
   );

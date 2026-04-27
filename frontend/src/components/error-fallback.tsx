@@ -28,7 +28,7 @@ export function TopLevelErrorFallback({ error, resetErrorBoundary }: FallbackPro
 
   return (
     <div role="alert" className="p-8 max-w-[720px] mx-auto my-10 font-sans text-foreground">
-      <h1 className="text-xl m-0 font-bold tracking-[-0.014em]">잠깐, 문제가 발생했어요</h1>
+      <h1 className="text-xl m-0 font-bold tracking-tight">잠깐, 문제가 발생했어요</h1>
       <p className="text-muted-foreground mt-2">
         화면을 그리는 중에 오류가 났어요. 대부분 일시적인 문제라 재시도하면 복구됩니다.
         계속 같은 오류가 보이면 저장된 상태가 새 버전과 호환되지 않을 수 있으니 초기화 후
@@ -37,13 +37,13 @@ export function TopLevelErrorFallback({ error, resetErrorBoundary }: FallbackPro
       <div className="flex gap-2 mt-4">
         <button
           onClick={resetErrorBoundary}
-          className="px-3.5 py-2.5 bg-foreground text-background rounded-lg cursor-pointer text-[13px] font-semibold border-0 hover:bg-foreground/90"
+          className="px-3.5 py-2.5 bg-foreground text-background rounded-lg cursor-pointer text-sm-tight font-semibold border-0 hover:bg-foreground/90"
         >
           재시도
         </button>
         <button
           onClick={wipeAndReload}
-          className="px-3.5 py-2.5 bg-card text-foreground border border-border rounded-lg cursor-pointer text-[13px] font-medium hover:bg-muted"
+          className="px-3.5 py-2.5 bg-card text-foreground border border-border rounded-lg cursor-pointer text-sm-tight font-medium hover:bg-muted"
         >
           저장된 상태 지우고 새로고침
         </button>

@@ -68,8 +68,8 @@ export function OptionCard({
           )}
           <span
             className={cn(
-              'font-bold tracking-[-0.014em]',
-              dense ? 'text-[13px]' : 'text-[13.5px]',
+              'font-bold tracking-tight',
+              dense ? 'text-sm-tight' : 'text-sm-tight',
               active ? 'text-accent-text' : 'text-foreground',
             )}
           >
@@ -80,7 +80,7 @@ export function OptionCard({
       {dense && !icon && (
         <div
           className={cn(
-            'text-[13px] font-bold tracking-[-0.014em] mb-0.5',
+            'text-sm-tight font-bold tracking-tight mb-0.5',
             active ? 'text-accent-text' : 'text-foreground',
           )}
         >
@@ -91,7 +91,7 @@ export function OptionCard({
         <p
           className={cn(
             'm-0 leading-[1.5]',
-            dense ? 'text-[11.5px] mb-0' : 'text-[12px] mb-1.5',
+            dense ? 'text-2xs mb-0' : 'text-xs mb-1.5',
             'text-muted-foreground',
           )}
         >
@@ -99,7 +99,7 @@ export function OptionCard({
         </p>
       )}
       {meta && (
-        <div className="text-[11px] text-muted-foreground tabular-nums">
+        <div className="text-2xs text-muted-foreground tabular-nums">
           {meta}
         </div>
       )}

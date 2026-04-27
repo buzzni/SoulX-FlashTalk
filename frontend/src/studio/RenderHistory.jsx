@@ -58,7 +58,7 @@ export default function RenderHistory({ excludeTaskId, limit = 8 }) {
 
   return (
     <div className="surface-base p-5 mt-4">
-      <div className="text-[11px] uppercase tracking-widest font-semibold text-muted-foreground">기다리는 동안 — 이전에 만든 영상 ({visible.length})</div>
+      <div className="text-2xs uppercase tracking-widest font-semibold text-muted-foreground">기다리는 동안 — 이전에 만든 영상 ({visible.length})</div>
       <div className="flex flex-col gap-1.5 mt-3">
         {visible.map(v => {
           const isOpen = playing === v.task_id;
@@ -70,7 +70,7 @@ export default function RenderHistory({ excludeTaskId, limit = 8 }) {
               >
                 <div className="flex justify-between items-center mb-2">
                   <div className="min-w-0 flex-1">
-                    <div className="truncate text-[13px] font-medium">
+                    <div className="truncate text-sm-tight font-medium">
                       {formatTaskTitle(v.task_id, v.type || 'generate')}
                     </div>
                     {v.script_text && (
@@ -111,7 +111,7 @@ export default function RenderHistory({ excludeTaskId, limit = 8 }) {
                 <Icon name="play" size={12} />
               </div>
               <div className="flex-1 min-w-0">
-                <div className="truncate text-[13px] font-medium">
+                <div className="truncate text-sm-tight font-medium">
                   {formatTaskTitle(v.task_id, v.type || 'generate')}
                 </div>
                 {v.script_text && (

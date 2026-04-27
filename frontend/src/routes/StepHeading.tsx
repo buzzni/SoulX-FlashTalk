@@ -31,25 +31,25 @@ export function StepHeading({
       <div className="grid grid-cols-[auto_1fr_auto] items-center gap-4 md:gap-5">
         <div
           aria-hidden
-          className="grid place-items-center w-14 h-14 md:w-16 md:h-16 rounded-[12px] bg-foreground text-background font-bold tabular-nums text-[28px] tracking-[-0.04em] leading-none"
+          className="grid place-items-center w-14 h-14 md:w-16 md:h-16 rounded-[12px] bg-foreground text-background font-bold tabular-nums text-[28px] tracking-tighter leading-none"
         >
           {String(step).padStart(2, '0')}
         </div>
         <div className="min-w-0">
           {eyebrow && (
-            <div className="text-[11.5px] font-semibold text-muted-foreground tracking-[0.005em] mb-0.5">
+            <div className="text-2xs font-semibold text-muted-foreground tracking-tight mb-0.5">
               {eyebrow}
             </div>
           )}
-          <h1 className="m-0 text-foreground font-sans text-[22px] font-bold tracking-[-0.024em] leading-[1.25]">
+          <h1 className="m-0 text-foreground font-sans text-[22px] font-bold tracking-tighter leading-[1.25]">
             {title}
           </h1>
           {description && (
-            <p className="m-0 mt-1 text-[13.5px] text-muted-foreground">{description}</p>
+            <p className="m-0 mt-1 text-sm-tight text-muted-foreground">{description}</p>
           )}
         </div>
         <div className="hidden md:flex items-center gap-2">
-          <div className="text-[11px] text-muted-foreground tabular-nums whitespace-nowrap">
+          <div className="text-2xs text-muted-foreground tabular-nums whitespace-nowrap">
             {total}단계 중 {step}
           </div>
           {aside}

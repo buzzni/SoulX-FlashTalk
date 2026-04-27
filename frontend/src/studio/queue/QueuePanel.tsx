@@ -43,7 +43,7 @@ export function QueuePanel({
   return (
     <div>
       <div className="flex justify-between items-center mb-2">
-        <strong className="text-[13px]">작업 목록</strong>
+        <strong className="text-sm-tight">작업 목록</strong>
         <button
           type="button"
           onClick={onClose}
@@ -69,7 +69,7 @@ export function QueuePanel({
               showCancel={false}
               onOpen={onOpenLive}
               rightSlot={
-                <div className="text-right text-[10px] text-success">
+                <div className="text-right text-2xs text-success">
                   {formatTime(t.started_at)}
                 </div>
               }
@@ -92,7 +92,7 @@ export function QueuePanel({
               onOpen={onOpenLive}
               onCancel={onCancel}
               rightSlot={
-                <div className="text-right text-[10px] text-ink-3">
+                <div className="text-right text-2xs text-ink-3">
                   {formatTime(t.created_at)}
                 </div>
               }
@@ -102,7 +102,7 @@ export function QueuePanel({
       )}
 
       {cancelError && (
-        <div className="mt-2 px-2 py-1.5 bg-destructive-soft text-destructive rounded-sm text-[11px]">
+        <div className="mt-2 px-2 py-1.5 bg-destructive-soft text-destructive rounded-sm text-2xs">
           {cancelError}
         </div>
       )}

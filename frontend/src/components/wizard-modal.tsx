@@ -35,7 +35,7 @@ export function WizardModal({
             <DialogTitle>{title}</DialogTitle>
           </DialogHeader>
         )}
-        <div className="text-[13px] text-foreground leading-relaxed">{children}</div>
+        <div className="text-sm-tight text-foreground leading-relaxed">{children}</div>
         {footer && <DialogFooter>{footer}</DialogFooter>}
       </DialogContent>
     </Dialog>

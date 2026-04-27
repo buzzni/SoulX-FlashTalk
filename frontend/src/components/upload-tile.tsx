@@ -183,11 +183,11 @@ export function UploadTile({
       <Upload className={compact ? 'size-4' : 'size-5'} />
       <div className="label">{label}</div>
       <div className="sub">{sub}</div>
-      <div className="sub mt-1 text-[10px]">
+      <div className="sub mt-1 text-2xs">
         또는 이미지 복사 후 이 영역에{' '}
-        <kbd className="font-mono px-1 border border-border rounded text-[10px]">Ctrl+V</kbd>
+        <kbd className="font-mono px-1 border border-border rounded text-2xs">Ctrl+V</kbd>
         {' / '}
-        <kbd className="font-mono px-1 border border-border rounded text-[10px]">Cmd+V</kbd>
+        <kbd className="font-mono px-1 border border-border rounded text-2xs">Cmd+V</kbd>
       </div>
       <Button
         variant="outline"

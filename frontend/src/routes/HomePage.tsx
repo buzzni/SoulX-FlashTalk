@@ -104,7 +104,7 @@ export function HomePage() {
       <div className="px-6 md:px-12 pt-12 md:pt-16 pb-16 max-w-[960px] animate-rise">
         {/* Greeting */}
         <div className="mb-9">
-          <div className="text-[13px] text-muted-foreground mb-2 inline-flex items-center gap-2">
+          <div className="text-sm-tight text-muted-foreground mb-2 inline-flex items-center gap-2">
             <span className="signal-dot" aria-hidden />
             지금 {clock} · 모든 작업 저장됨
           </div>
@@ -113,7 +113,7 @@ export function HomePage() {
             <br />
             오늘은 어떤 영상 만들어볼까요?
           </h1>
-          <p className="m-0 mt-2 text-[15px] text-ink-2">
+          <p className="m-0 mt-2 text-sm text-ink-2">
             호스트와 제품을 정하면 3단계로 영상이 완성돼요.
           </p>
         </div>
@@ -127,11 +127,11 @@ export function HomePage() {
             onClick={() => startNewVideo(navigate)}
             className="group surface-card-dark text-left p-6 cursor-pointer transition-all hover:translate-y-[-1px] hover:shadow-[var(--shadow-2)]"
           >
-            <span className="inline-block px-2.5 py-1 rounded-full bg-white/15 text-[#b9d3ff] text-[11px] font-semibold mb-4">
+            <span className="inline-block px-2.5 py-1 rounded-full bg-white/15 text-[#b9d3ff] text-2xs font-semibold mb-4">
               3단계 위저드
             </span>
             <h3 className="headline-card m-0">새 영상 만들기</h3>
-            <p className="m-0 mt-1.5 mb-4 text-[13.5px] text-white/75 leading-[1.55]">
+            <p className="m-0 mt-1.5 mb-4 text-sm-tight text-white/75 leading-[1.55]">
               마음에 드는 호스트를 만들고 — 제품·배경을 합성하고 — 목소리·대본까지 한 자리에서.
             </p>
             <div className="flex items-center justify-end mt-auto">
@@ -145,11 +145,11 @@ export function HomePage() {
             to="/results"
             className="group surface-card text-left p-6 no-underline text-foreground cursor-pointer transition-all hover:translate-y-[-1px] hover:shadow-[var(--shadow-1)] hover:border-rule-strong flex flex-col"
           >
-            <span className="self-start px-2.5 py-1 rounded-full bg-secondary text-ink-2 text-[11px] font-semibold mb-4">
+            <span className="self-start px-2.5 py-1 rounded-full bg-secondary text-ink-2 text-2xs font-semibold mb-4">
               라이브러리
             </span>
             <h3 className="headline-card m-0">내 영상들</h3>
-            <p className="m-0 mt-1.5 mb-4 text-[13.5px] text-muted-foreground leading-[1.55]">
+            <p className="m-0 mt-1.5 mb-4 text-sm-tight text-muted-foreground leading-[1.55]">
               지금까지 만든 결과를 보고 플레이리스트로 정리하세요.
             </p>
             <div className="flex items-center justify-end mt-auto">
@@ -203,7 +203,7 @@ export function HomePage() {
               <h2 className="headline-section m-0">최근 작업</h2>
               <Link
                 to="/results"
-                className="text-primary text-[13px] font-semibold no-underline hover:underline"
+                className="text-primary text-sm-tight font-semibold no-underline hover:underline"
               >
                 전체 보기 →
               </Link>
@@ -226,7 +226,7 @@ export function HomePage() {
                 <button
                   type="button"
                   onClick={() => startNewVideo(navigate)}
-                  className="inline-flex items-center gap-1.5 px-4 py-2 bg-primary text-primary-foreground rounded-md text-[13px] font-semibold hover:bg-[var(--primary-hover)] transition-colors cursor-pointer"
+                  className="inline-flex items-center gap-1.5 px-4 py-2 bg-primary text-primary-foreground rounded-md text-sm-tight font-semibold hover:bg-[var(--primary-hover)] transition-colors cursor-pointer"
                 >
                   지금 만들기 <ArrowRight className="size-3.5" />
                 </button>
@@ -253,17 +253,17 @@ interface StatProps {
 function Stat({ label, value, unit, trend, trendOk, sparkData, sparkKind, icon }: StatProps) {
   return (
     <div className="surface-card p-4 px-5">
-      <div className="text-[12px] text-muted-foreground mb-1.5 inline-flex items-center gap-1.5">
+      <div className="text-xs text-muted-foreground mb-1.5 inline-flex items-center gap-1.5">
         {icon}
         {label}
       </div>
-      <div className="font-bold tracking-[-0.024em] tabular-nums leading-none">
+      <div className="font-bold tracking-tighter tabular-nums leading-none">
         <span className="text-[26px]">{value}</span>
-        {unit && <span className="text-[14px] text-ink-2 font-medium ml-1">{unit}</span>}
+        {unit && <span className="text-sm text-ink-2 font-medium ml-1">{unit}</span>}
       </div>
       <div className="mt-2 flex items-end justify-between gap-2">
         {trend && (
-          <div className={cn('text-[11px] font-semibold', trendOk ? 'text-success-on-soft' : 'text-muted-foreground')}>
+          <div className={cn('text-2xs font-semibold', trendOk ? 'text-success-on-soft' : 'text-muted-foreground')}>
             {trend}
           </div>
         )}
@@ -305,11 +305,11 @@ function RecentRow({ item }: { item: HistoryItem }) {
         </span>
       </div>
       <div className="flex flex-col gap-1 min-w-0">
-        <div className="font-semibold text-[14px] tracking-[-0.014em] truncate" title={title}>
+        <div className="font-semibold text-sm tracking-tight truncate" title={title}>
           {title}
         </div>
         <span className="pill-success self-start">완료</span>
-        <div className="text-[11.5px] text-muted-foreground tabular-nums">
+        <div className="text-2xs text-muted-foreground tabular-nums">
           {ts}{ts && dur !== '—' && ` · ${dur}`}
         </div>
       </div>

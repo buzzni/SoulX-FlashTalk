@@ -126,10 +126,10 @@ export function ResultsListPage() {
       <div className="px-6 md:px-12 pt-12 md:pt-16 pb-16 max-w-[1280px] animate-rise">
         {/* Page heading */}
         <div className="mb-6">
-          <div className="text-[13px] text-muted-foreground mb-1.5">라이브러리</div>
+          <div className="text-sm-tight text-muted-foreground mb-1.5">라이브러리</div>
           <h1 className="headline-section m-0">{filterTitle}</h1>
           {items !== null && (
-            <p className="m-0 mt-1 text-[13px] text-muted-foreground">
+            <p className="m-0 mt-1 text-sm-tight text-muted-foreground">
               {items.length}개의 영상
             </p>
           )}
@@ -150,13 +150,13 @@ export function ResultsListPage() {
         />
 
         {historyError && (
-          <div className="mt-4 px-4 py-3 text-[13px] bg-destructive-soft text-destructive border border-destructive/30 rounded-md">
+          <div className="mt-4 px-4 py-3 text-sm-tight bg-destructive-soft text-destructive border border-destructive/30 rounded-md">
             {historyError}
           </div>
         )}
 
         {!historyError && items === null && (
-          <div className="mt-8 flex items-center gap-2 text-[13px] text-muted-foreground">
+          <div className="mt-8 flex items-center gap-2 text-sm-tight text-muted-foreground">
             <Spinner size="sm" /> 불러오는 중
           </div>
         )}
@@ -180,7 +180,7 @@ export function ResultsListPage() {
                   <button
                     type="button"
                     onClick={() => startNewVideo(navigate)}
-                    className="text-primary text-[13px] font-semibold hover:underline cursor-pointer"
+                    className="text-primary text-sm-tight font-semibold hover:underline cursor-pointer"
                   >
                     첫 영상 만들러 가기 →
                   </button>
@@ -259,7 +259,7 @@ function PlaylistChips({
   return (
     <div className="flex flex-wrap items-center gap-2">
       {error && (
-        <div className="text-[12px] text-destructive">{error}</div>
+        <div className="text-xs text-destructive">{error}</div>
       )}
       <FilterChip
         label="전체"
@@ -289,7 +289,7 @@ function PlaylistChips({
         <button
           type="button"
           onClick={() => setCreating(true)}
-          className="inline-flex items-center gap-1 px-3 py-1.5 rounded-full border border-dashed border-rule-strong text-muted-foreground text-[12.5px] font-medium hover:border-primary hover:text-primary transition-colors cursor-pointer"
+          className="inline-flex items-center gap-1 px-3 py-1.5 rounded-full border border-dashed border-rule-strong text-muted-foreground text-xs font-medium hover:border-primary hover:text-primary transition-colors cursor-pointer"
         >
           <Plus className="size-3.5" />
           <span>새 플레이리스트</span>
@@ -303,7 +303,7 @@ function PlaylistChips({
             placeholder="이름 (예: 신상품)"
             autoFocus
             disabled={busy}
-            className="text-[12.5px] bg-transparent border-0 outline-none px-1 w-36 disabled:opacity-60"
+            className="text-xs bg-transparent border-0 outline-none px-1 w-36 disabled:opacity-60"
             onKeyDown={(e) => {
               if (e.key === 'Enter') {
                 e.preventDefault();
@@ -318,7 +318,7 @@ function PlaylistChips({
             type="button"
             onClick={submitCreate}
             disabled={busy || !newName.trim()}
-            className="px-2.5 py-0.5 text-[11px] font-semibold rounded-full bg-primary text-primary-foreground disabled:opacity-50 cursor-pointer"
+            className="px-2.5 py-0.5 text-2xs font-semibold rounded-full bg-primary text-primary-foreground disabled:opacity-50 cursor-pointer"
           >
             만들기
           </button>
@@ -326,14 +326,14 @@ function PlaylistChips({
             type="button"
             onClick={closeCreate}
             disabled={busy}
-            className="px-2 py-0.5 text-[11px] text-muted-foreground hover:text-foreground cursor-pointer"
+            className="px-2 py-0.5 text-2xs text-muted-foreground hover:text-foreground cursor-pointer"
           >
             취소
           </button>
         </div>
       )}
       {createError && (
-        <div className="w-full text-[11px] text-destructive mt-1">{createError}</div>
+        <div className="w-full text-2xs text-destructive mt-1">{createError}</div>
       )}
     </div>
   );
@@ -352,14 +352,14 @@ function FilterChip({ label, count, active, onClick }: FilterChipProps) {
       type="button"
       onClick={onClick}
       className={cn(
-        'inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[12.5px] font-medium transition-colors cursor-pointer',
+        'inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition-colors cursor-pointer',
         active
           ? 'bg-foreground text-background'
           : 'bg-card border border-border text-ink-2 hover:border-rule-strong hover:text-foreground',
       )}
     >
       <span>{label}</span>
-      <span className={cn('text-[11px] tabular-nums', active ? 'text-background/70' : 'text-muted-foreground')}>
+      <span className={cn('text-2xs tabular-nums', active ? 'text-background/70' : 'text-muted-foreground')}>
         {count}
       </span>
     </button>
@@ -427,7 +427,7 @@ function PlaylistChip({ playlist, active, onSelect, onChanged }: PlaylistChipPro
           onChange={(e) => setName(e.target.value)}
           autoFocus
           disabled={busy}
-          className="text-[12.5px] bg-transparent border-0 outline-none px-1 w-32"
+          className="text-xs bg-transparent border-0 outline-none px-1 w-32"
           onKeyDown={(e) => {
             if (e.key === 'Enter') { e.preventDefault(); submitRename(); }
             else if (e.key === 'Escape') { e.preventDefault(); setRenaming(false); setName(playlist.name); }
@@ -444,14 +444,14 @@ function PlaylistChip({ playlist, active, onSelect, onChanged }: PlaylistChipPro
         type="button"
         onClick={onSelect}
         className={cn(
-          'inline-flex items-center gap-1.5 pl-3 pr-2 py-1.5 rounded-l-full text-[12.5px] font-medium transition-colors cursor-pointer border',
+          'inline-flex items-center gap-1.5 pl-3 pr-2 py-1.5 rounded-l-full text-xs font-medium transition-colors cursor-pointer border',
           active
             ? 'bg-foreground text-background border-foreground'
             : 'bg-card border-border text-ink-2 hover:border-rule-strong hover:text-foreground',
         )}
       >
         <span>{playlist.name}</span>
-        <span className={cn('text-[11px] tabular-nums', active ? 'text-background/70' : 'text-muted-foreground')}>
+        <span className={cn('text-2xs tabular-nums', active ? 'text-background/70' : 'text-muted-foreground')}>
           {playlist.video_count}
         </span>
       </button>
@@ -553,10 +553,10 @@ function ResultCard({ item, playlists, onMoved }: ResultCardProps) {
           </span>
         </div>
         <div className="p-3.5">
-          <div className="font-semibold text-[14px] tracking-[-0.014em] line-clamp-1 mb-1" title={title}>
+          <div className="font-semibold text-sm tracking-tight line-clamp-1 mb-1" title={title}>
             {title}
           </div>
-          <div className="text-[11.5px] text-muted-foreground tabular-nums">
+          <div className="text-2xs text-muted-foreground tabular-nums">
             {ts}{ts && dur !== '—' && ' · '}{dur !== '—' ? dur : ''}
           </div>
         </div>
@@ -578,7 +578,7 @@ function ResultCard({ item, playlists, onMoved }: ResultCardProps) {
           </button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="min-w-[180px] max-h-[320px] overflow-y-auto">
-          <DropdownMenuLabel className="text-[11px] font-semibold text-muted-foreground">
+          <DropdownMenuLabel className="text-2xs font-semibold text-muted-foreground">
             플레이리스트로 이동
           </DropdownMenuLabel>
           <DropdownMenuItem onSelect={() => move(null, '미지정')}>미지정</DropdownMenuItem>

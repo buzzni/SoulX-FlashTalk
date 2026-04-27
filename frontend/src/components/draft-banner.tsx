@@ -55,20 +55,20 @@ export function DraftBanner() {
         <Play className="size-4" />
       </span>
       <div className="min-w-0 flex-1">
-        <div className="text-[13px] font-semibold text-foreground tracking-[-0.012em]">
+        <div className="text-sm-tight font-semibold text-foreground tracking-tight">
           진행 중인 작업이 있어요
         </div>
-        <div className="text-[12px] text-muted-foreground tracking-[-0.005em]">
+        <div className="text-xs text-muted-foreground tracking-tight">
           {formatDraftAge(lastSavedAt)}
         </div>
       </div>
       {confirming ? (
         <div className="flex items-center gap-2 shrink-0">
-          <span className="text-[12.5px] text-ink-2">정말 삭제할까요?</span>
+          <span className="text-xs text-ink-2">정말 삭제할까요?</span>
           <button
             type="button"
             onClick={() => setConfirming(false)}
-            className="h-8 px-3 rounded-md text-[12.5px] font-semibold text-ink-2 hover:bg-surface-2 transition-colors cursor-pointer"
+            className="h-8 px-3 rounded-md text-xs font-semibold text-ink-2 hover:bg-surface-2 transition-colors cursor-pointer"
           >
             취소
           </button>
@@ -78,7 +78,7 @@ export function DraftBanner() {
               discardDraft();
               setConfirming(false);
             }}
-            className="h-8 px-3 rounded-md text-[12.5px] font-semibold bg-destructive text-destructive-foreground hover:opacity-90 transition-opacity cursor-pointer"
+            className="h-8 px-3 rounded-md text-xs font-semibold bg-destructive text-destructive-foreground hover:opacity-90 transition-opacity cursor-pointer"
           >
             삭제
           </button>
@@ -88,7 +88,7 @@ export function DraftBanner() {
           <button
             type="button"
             onClick={() => resumeVideo(navigate)}
-            className="h-8 px-3.5 rounded-md text-[12.5px] font-semibold bg-primary text-primary-foreground hover:bg-[var(--primary-hover)] transition-colors cursor-pointer"
+            className="h-8 px-3.5 rounded-md text-xs font-semibold bg-primary text-primary-foreground hover:bg-[var(--primary-hover)] transition-colors cursor-pointer"
           >
             이어 만들기
           </button>

@@ -8,6 +8,7 @@
 
 import Icon from '../Icon.jsx';
 import { imageIdFromPath } from '../../api/mapping';
+import { Spinner } from '@/components/spinner';
 import { cn } from '@/lib/utils';
 import type { CompositionVariant } from '../../hooks/useCompositeGeneration';
 
@@ -62,7 +63,7 @@ function PlaceholderTile({ index }: { index: number }) {
   return (
     <div className="preset-tile p-0 cursor-default">
       <div className="swatch skeleton-shimmer relative grid place-items-center aspect-[9/16]">
-        <span className="spinner w-[18px] h-[18px]" />
+        <Spinner size="md" />
       </div>
       <div className="name text-tertiary">합성 {index + 1}</div>
     </div>
@@ -72,7 +73,7 @@ function PlaceholderTile({ index }: { index: number }) {
 function ErrorTile({ index }: { index: number }) {
   return (
     <div className="preset-tile p-0 cursor-default border-destructive">
-      <div className="swatch grid place-items-center text-destructive bg-destructive-soft text-center text-[10px] p-1.5 aspect-[9/16]">
+      <div className="swatch grid place-items-center text-destructive bg-destructive-soft text-center text-2xs p-1.5 aspect-[9/16]">
         <div>
           <Icon name="alert_circle" size={16} />
           <div className="mt-1">실패</div>
@@ -115,7 +116,7 @@ function PickableTile({
           </div>
         )}
         {isPrev && (
-          <div className="absolute top-1.5 left-1.5 px-1.5 py-0.5 rounded-[4px] bg-black/55 text-white text-[10px] tracking-[0.2px]">
+          <div className="absolute top-1.5 left-1.5 px-1.5 py-0.5 rounded-[4px] bg-black/55 text-white text-2xs tracking-[0.2px]">
             이전
           </div>
         )}

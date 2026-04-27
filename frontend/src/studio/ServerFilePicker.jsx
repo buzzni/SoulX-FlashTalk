@@ -79,9 +79,9 @@ export default function ServerFilePicker({ open, onClose, onSelect, kind = 'imag
               <RefreshCcw className="size-3.5" />
             </Button>
           </div>
-          <DialogDescription className="text-[12px]">
+          <DialogDescription className="text-xs">
             업로드가 막히는 환경에서는{' '}
-            <code className="font-mono bg-muted px-1.5 py-0.5 rounded text-[11px]">
+            <code className="font-mono bg-muted px-1.5 py-0.5 rounded text-2xs">
               scp foo.png 서버:프로젝트/uploads/
             </code>{' '}
             로 올린 뒤 여기서 고르세요.
@@ -97,7 +97,7 @@ export default function ServerFilePicker({ open, onClose, onSelect, kind = 'imag
             autoFocus
             className="flex-1 min-w-[200px] h-8"
           />
-          <label className="inline-flex items-center gap-1.5 text-[12px] text-muted-foreground cursor-pointer">
+          <label className="inline-flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer">
             <input
               type="checkbox"
               checked={recentOnly}
@@ -106,27 +106,27 @@ export default function ServerFilePicker({ open, onClose, onSelect, kind = 'imag
             />
             최근 1시간만
           </label>
-          <span className="text-[11px] text-muted-foreground">
+          <span className="text-2xs text-muted-foreground">
             {files ? `${filtered.length} / ${files.length} 개` : ''}
           </span>
         </div>
 
         <div className="overflow-auto flex-1 min-h-0 p-5">
           {loading && (
-            <div className="py-10 text-center text-muted-foreground text-[13px]">
+            <div className="py-10 text-center text-muted-foreground text-sm-tight">
               불러오는 중…
             </div>
           )}
 
           {error && (
-            <div className="px-3 py-2 rounded-md border bg-destructive-soft text-destructive border-destructive/30 text-[13px] flex items-center gap-2">
+            <div className="px-3 py-2 rounded-md border bg-destructive-soft text-destructive border-destructive/30 text-sm-tight flex items-center gap-2">
               <Icon name="alert_circle" size={13} />
               {error}
             </div>
           )}
 
           {!loading && !error && files && files.length === 0 && (
-            <div className="py-10 text-center text-muted-foreground text-[13px]">
+            <div className="py-10 text-center text-muted-foreground text-sm-tight">
               서버에 해당 유형의 파일이 없어요. 먼저{' '}
               <code className="font-mono bg-muted px-1.5 rounded">scp</code> 로
               업로드해주세요.
@@ -134,7 +134,7 @@ export default function ServerFilePicker({ open, onClose, onSelect, kind = 'imag
           )}
 
           {!loading && !error && files && files.length > 0 && filtered.length === 0 && (
-            <div className="py-10 text-center text-muted-foreground text-[13px]">
+            <div className="py-10 text-center text-muted-foreground text-sm-tight">
               검색 결과가 없어요. 검색어를 지우거나 "최근 1시간만" 체크를 해제해보세요.
             </div>
           )}
@@ -165,9 +165,9 @@ export default function ServerFilePicker({ open, onClose, onSelect, kind = 'imag
                       </div>
                     )}
                   </div>
-                  <div className="px-2.5 py-2 text-[11px]">
+                  <div className="px-2.5 py-2 text-2xs">
                     <div className="truncate font-medium">{f.filename}</div>
-                    <div className="font-mono text-[10px] text-muted-foreground mt-0.5 flex justify-between">
+                    <div className="font-mono text-2xs text-muted-foreground mt-0.5 flex justify-between">
                       <span>{formatSize(f.size)}</span>
                       <span>{formatTime(f.modified)}</span>
                     </div>

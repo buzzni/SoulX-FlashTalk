@@ -271,8 +271,8 @@ export default function RenderDashboard({
       <div className="relative z-[1] max-w-[960px] mx-auto">
         <div className="flex justify-between items-center mb-6">
           <div>
-            <div className="text-[11px] uppercase tracking-widest font-semibold text-muted-foreground">마지막 단계</div>
-            <h1 className="text-2xl font-semibold tracking-[-0.015em] mt-0.5 mb-0">
+            <div className="text-2xs uppercase tracking-widest font-semibold text-muted-foreground">마지막 단계</div>
+            <h1 className="text-2xl font-semibold tracking-tight mt-0.5 mb-0">
               {status === 'done'
                 ? '영상이 완성됐어요!'
                 : status === 'error'

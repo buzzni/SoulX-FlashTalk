@@ -54,7 +54,7 @@ export function LiveTaskRow({
             {formatTaskTitle(task.task_id, task.type)}
           </div>
           {task.label && (
-            <div className="text-[10px] text-ink-3 truncate">{task.label}</div>
+            <div className="text-2xs text-ink-3 truncate">{task.label}</div>
           )}
         </div>
         {rightSlot}

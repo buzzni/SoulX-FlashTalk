@@ -38,7 +38,7 @@ export function WizardSlider({
         className="flex-1"
         disabled={disabled}
       />
-      <span className="text-[12px] text-muted-foreground min-w-[40px] text-right tabular-nums">
+      <span className="text-xs text-muted-foreground min-w-[40px] text-right tabular-nums">
         {formatValue ? formatValue(value) : value}
       </span>
     </div>

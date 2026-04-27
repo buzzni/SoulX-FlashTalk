@@ -659,7 +659,7 @@ interface GenerateBarProps {
 function GenerateBar({ label, done, disabled, generating, onClick, cta }: GenerateBarProps) {
   return (
     <div className="flex justify-between items-center gap-3 pt-1">
-      <div className={`text-[12.5px] flex items-center gap-2 ${done ? '' : 'text-muted-foreground'}`}>
+      <div className={`text-xs flex items-center gap-2 ${done ? '' : 'text-muted-foreground'}`}>
         {done && (
           <Badge variant="success" icon="check_circle">
             {label}
@@ -671,7 +671,7 @@ function GenerateBar({ label, done, disabled, generating, onClick, cta }: Genera
         type="button"
         onClick={onClick}
         disabled={disabled}
-        className="inline-flex items-center gap-2 h-10 px-5 rounded-md bg-primary text-primary-foreground text-[13.5px] font-bold hover:bg-[var(--primary-hover)] disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer transition-colors"
+        className="inline-flex items-center gap-2 h-10 px-5 rounded-md bg-primary text-primary-foreground text-sm-tight font-bold hover:bg-[var(--primary-hover)] disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer transition-colors"
       >
         {generating ? (
           <>

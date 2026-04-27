@@ -24,11 +24,11 @@ export function RecentTaskRow({ task, onOpen }: RecentTaskRowProps) {
     <>
       <div className="min-w-0 overflow-hidden">
         <div className="font-medium truncate">{formatTaskTitle(task.task_id, task.type)}</div>
-        {task.label && <div className="text-[10px] text-ink-3 truncate">{task.label}</div>}
+        {task.label && <div className="text-2xs text-ink-3 truncate">{task.label}</div>}
       </div>
       <div
         className={cn(
-          'text-right text-[10px]',
+          'text-right text-2xs',
           task.status === 'error' ? 'text-destructive' : 'text-ink-3',
         )}
       >

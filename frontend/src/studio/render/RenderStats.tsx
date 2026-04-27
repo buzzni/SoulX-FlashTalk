@@ -7,6 +7,7 @@
  * getVideoMeta, format hardcoded for now — MP4 is all we output).
  */
 
+import { StatTile } from '../shared/StatTile';
 import { formatDateTime, formatElapsed, formatFileSize } from './stages';
 
 export interface RenderStatsProps {
@@ -24,24 +25,18 @@ export function RenderStats({
 }: RenderStatsProps) {
   return (
     <div className="grid grid-cols-3 gap-3">
-      <div className="p-3 bg-secondary rounded-md">
-        <div className="text-[11px] uppercase tracking-widest font-semibold text-muted-foreground">걸린 시간</div>
-        <div className="text-base font-semibold num mono">{formatElapsed(elapsedMs ?? 0)}</div>
-        {createdAt && (
-          <div className="text-xs text-tertiary mt-0.5">작업생성날짜 {formatDateTime(createdAt)}</div>
-        )}
-      </div>
-      <div className="p-3 bg-secondary rounded-md">
-        <div className="text-[11px] uppercase tracking-widest font-semibold text-muted-foreground">파일 용량</div>
-        <div className="text-base font-semibold">{formatFileSize(fileSizeBytes)}</div>
-        {resolutionLabel && (
-          <div className="text-xs text-tertiary mt-0.5">{resolutionLabel}</div>
-        )}
-      </div>
-      <div className="p-3 bg-secondary rounded-md">
-        <div className="text-[11px] uppercase tracking-widest font-semibold text-muted-foreground">파일 형식</div>
-        <div className="text-base font-semibold">MP4</div>
-      </div>
+      <StatTile
+        label="걸린 시간"
+        value={formatElapsed(elapsedMs ?? 0)}
+        sub={createdAt ? `작업생성날짜 ${formatDateTime(createdAt)}` : undefined}
+        mono
+      />
+      <StatTile
+        label="파일 용량"
+        value={formatFileSize(fileSizeBytes)}
+        sub={resolutionLabel ?? undefined}
+      />
+      <StatTile label="파일 형식" value="MP4" />
     </div>
   );
 }

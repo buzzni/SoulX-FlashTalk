@@ -18,7 +18,7 @@ export function Chip({ on, className, children, ...props }: ChipProps) {
       type="button"
       aria-pressed={!!on}
       className={cn(
-        'inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[12.5px] font-medium cursor-pointer transition-colors',
+        'inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium cursor-pointer transition-colors',
         'border focus-visible:outline-2 focus-visible:outline-primary focus-visible:outline-offset-2',
         on
           ? 'bg-primary text-primary-foreground border-primary shadow-[0_1px_0_rgba(0,93,255,0.18)]'

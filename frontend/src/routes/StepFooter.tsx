@@ -40,7 +40,7 @@ export function StepFooter({ step, valid, onPrev, onNext }: StepFooterProps) {
           type="button"
           onClick={onPrev}
           disabled={step === 1}
-          className="inline-flex items-center gap-1.5 h-10 px-4 rounded-md border border-input bg-card text-foreground text-[13px] font-semibold hover:border-rule-strong disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer transition-colors"
+          className="inline-flex items-center gap-1.5 h-10 px-4 rounded-md border border-input bg-card text-foreground text-sm-tight font-semibold hover:border-rule-strong disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer transition-colors"
         >
           <ArrowLeft className="size-4" /> 이전
         </button>
@@ -49,19 +49,19 @@ export function StepFooter({ step, valid, onPrev, onNext }: StepFooterProps) {
 
       <div className="flex-1 flex items-center justify-center min-w-0 px-4">
         {!canProceed && (
-          <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-amber-soft text-amber-on-soft text-[12.5px] font-medium">
+          <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-amber-soft text-amber-on-soft text-xs font-medium">
             <AlertCircle className="size-3.5 shrink-0" />
             <span className="truncate">{MISSING[step]}</span>
           </div>
         )}
         {canProceed && !isLast && (
-          <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-success-soft text-success-on-soft text-[12.5px] font-medium">
+          <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-success-soft text-success-on-soft text-xs font-medium">
             <Check className="size-3.5" />
             <span>좋아요! 다음 단계로 넘어가세요</span>
           </div>
         )}
         {canProceed && isLast && allValid && (
-          <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-success-soft text-success-on-soft text-[12.5px] font-medium">
+          <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-success-soft text-success-on-soft text-xs font-medium">
             <Check className="size-3.5" />
             <span>모든 준비 완료! 영상을 만들어볼까요?</span>
           </div>
@@ -72,7 +72,7 @@ export function StepFooter({ step, valid, onPrev, onNext }: StepFooterProps) {
         type="button"
         onClick={onNext}
         disabled={nextDisabled}
-        className={`inline-flex items-center gap-2 h-10 px-5 rounded-md text-[13.5px] font-bold transition-all cursor-pointer ${
+        className={`inline-flex items-center gap-2 h-10 px-5 rounded-md text-sm-tight font-bold transition-all cursor-pointer ${
           nextDisabled
             ? 'bg-secondary text-muted-foreground cursor-not-allowed'
             : 'bg-primary text-primary-foreground hover:bg-[var(--primary-hover)] shadow-[0_2px_8px_-2px_var(--primary-soft)]'

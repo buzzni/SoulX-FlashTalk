@@ -79,14 +79,14 @@ export function HostControls({
       {errorMsg && <WizardErrorBanner message={errorMsg} />}
 
       <div className="flex justify-between items-center gap-3 pt-1">
-        <div className="text-[12.5px] text-muted-foreground">
+        <div className="text-xs text-muted-foreground">
           버튼을 누르면 아래에 4개의 후보가 나타나요. 마음에 드는 걸 하나 고르세요.
         </div>
         <button
           type="button"
           onClick={onGenerate}
           disabled={generating || !canGenerate}
-          className="inline-flex items-center gap-2 h-10 px-5 rounded-md bg-primary text-primary-foreground text-[13.5px] font-bold hover:bg-[var(--primary-hover)] disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer transition-colors"
+          className="inline-flex items-center gap-2 h-10 px-5 rounded-md bg-primary text-primary-foreground text-sm-tight font-bold hover:bg-[var(--primary-hover)] disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer transition-colors"
         >
           {generating ? (
             <>

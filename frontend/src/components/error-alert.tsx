@@ -26,7 +26,7 @@ export function ErrorAlert({ error, onRetry, retryLabel = '다시 시도', hideR
   return (
     <div
       role="alert"
-      className="flex items-start gap-2 px-3 py-2 rounded-md bg-error-soft text-error-on-soft text-[12.5px]"
+      className="flex items-start gap-2 px-3 py-2 rounded-md bg-error-soft text-error-on-soft text-xs"
       data-testid="error-alert"
     >
       <AlertCircle className="size-4 shrink-0 mt-0.5" aria-hidden />
@@ -37,7 +37,7 @@ export function ErrorAlert({ error, onRetry, retryLabel = '다시 시도', hideR
         <button
           type="button"
           onClick={onRetry}
-          className="inline-flex items-center gap-1 px-2 py-1 rounded text-[12px] font-semibold border border-current/20 hover:bg-current/5 cursor-pointer"
+          className="inline-flex items-center gap-1 px-2 py-1 rounded text-xs font-semibold border border-current/20 hover:bg-current/5 cursor-pointer"
         >
           <RotateCcw className="size-3" aria-hidden />
           {retryLabel}

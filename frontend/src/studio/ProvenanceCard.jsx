@@ -106,7 +106,7 @@ export default function ProvenanceCard({ result, fallbackMeta = null }) {
 
   return (
     <div className="surface-base p-5">
-      <div className="text-[11px] uppercase tracking-widest font-semibold text-muted-foreground">이렇게 만들었어요</div>
+      <div className="text-2xs uppercase tracking-widest font-semibold text-muted-foreground">이렇게 만들었어요</div>
 
       {/* Thumbnails — host (Step 1) + composite (Step 2). What actually
           fed into FlashTalk. Host image comes from meta; composite from
@@ -197,14 +197,14 @@ export default function ProvenanceCard({ result, fallbackMeta = null }) {
       {sceneDirection && (
         <div className="mt-4 pt-3.5 border-t border-border">
           <div className="text-xs text-tertiary">합성 지시사항</div>
-          <div className="text-[13px] mt-1 whitespace-pre-wrap">{sceneDirection}</div>
+          <div className="text-sm-tight mt-1 whitespace-pre-wrap">{sceneDirection}</div>
         </div>
       )}
 
       {scriptText && (
         <div className="mt-4 pt-3.5 border-t border-border">
           <div className="text-xs text-tertiary">대본</div>
-          <div className="text-[13px] mt-1 whitespace-pre-wrap max-h-[120px] overflow-y-auto">
+          <div className="text-sm-tight mt-1 whitespace-pre-wrap max-h-[120px] overflow-y-auto">
             {scriptText.replace(/\[breath\]/g, ' · ')}
           </div>
         </div>

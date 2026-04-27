@@ -41,7 +41,7 @@ export function AutoSaveIndicator() {
 
   return (
     <div
-      className="inline-flex items-center gap-1 text-[11px] text-muted-foreground"
+      className="inline-flex items-center gap-1 text-2xs text-muted-foreground"
       data-testid="auto-save-indicator"
       aria-live="polite"
     >

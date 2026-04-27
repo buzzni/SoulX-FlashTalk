@@ -75,7 +75,7 @@ export function MyPage() {
   return (
     <AppLayout active="mypage">
       <div className="px-6 md:px-12 pt-12 md:pt-16 pb-16 max-w-[720px] animate-rise">
-        <div className="text-[13px] text-muted-foreground mb-2">내 정보</div>
+        <div className="text-sm-tight text-muted-foreground mb-2">내 정보</div>
         <h1 className="headline-section m-0 mb-8">계정 설정</h1>
 
         {/* Profile card */}
@@ -83,15 +83,15 @@ export function MyPage() {
           <div className="flex items-center gap-4">
             <span
               aria-hidden
-              className="grid place-items-center w-14 h-14 rounded-full bg-foreground text-background font-bold text-[20px]"
+              className="grid place-items-center w-14 h-14 rounded-full bg-foreground text-background font-bold text-xl"
             >
               {initial}
             </span>
             <div className="min-w-0 flex-1">
-              <div className="font-bold text-[18px] tracking-[-0.022em] truncate">
+              <div className="font-bold text-lg tracking-tighter truncate">
                 {display}
               </div>
-              <div className="text-[13px] text-muted-foreground mt-0.5">
+              <div className="text-sm-tight text-muted-foreground mt-0.5">
                 쇼호스트 작업실에 로그인되어 있어요.
               </div>
             </div>
@@ -114,7 +114,7 @@ export function MyPage() {
         </div>
 
         {/* Settings — theme + notifications */}
-        <h2 className="headline-row m-0 mb-3 text-[15px]">설정</h2>
+        <h2 className="headline-row m-0 mb-3 text-sm">설정</h2>
         <div className="surface-card mb-6 divide-y divide-border">
           {/* Theme */}
           <SettingRow
@@ -167,7 +167,7 @@ export function MyPage() {
           type="button"
           onClick={onLogout}
           disabled={busy}
-          className="inline-flex items-center gap-2 px-4 py-2.5 bg-card border border-border rounded-md text-[13px] font-semibold text-destructive hover:bg-destructive-soft hover:border-destructive/40 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer transition-colors"
+          className="inline-flex items-center gap-2 px-4 py-2.5 bg-card border border-border rounded-md text-sm-tight font-semibold text-destructive hover:bg-destructive-soft hover:border-destructive/40 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer transition-colors"
         >
           <LogOut className="size-4" />
           {busy ? '로그아웃 중…' : '로그아웃'}
@@ -189,15 +189,15 @@ interface RowProps {
 function Row({ label, value, suffix, mono, pill, last }: RowProps) {
   return (
     <div className={cn('grid grid-cols-[100px_1fr] md:grid-cols-[140px_1fr] items-center gap-4 px-4 py-3', !last && 'border-b border-border')}>
-      <span className="text-[12.5px] font-semibold text-muted-foreground">{label}</span>
-      <span className={cn('text-[14px] text-foreground', mono ? 'font-mono tabular-nums' : 'font-medium')}>
+      <span className="text-xs font-semibold text-muted-foreground">{label}</span>
+      <span className={cn('text-sm text-foreground', mono ? 'font-mono tabular-nums' : 'font-medium')}>
         {pill ? (
           <span className="pill-neutral">{value}</span>
         ) : (
           <>
             {value}
             {suffix && (
-              <span className="ml-1 text-[12px] text-muted-foreground font-sans font-normal">
+              <span className="ml-1 text-xs text-muted-foreground font-sans font-normal">
                 {suffix}
               </span>
             )}
@@ -222,8 +222,8 @@ function SettingRow({ icon, label, description, control }: SettingRowProps) {
         {icon}
       </span>
       <div className="min-w-0">
-        <div className="text-[14px] font-semibold tracking-[-0.014em]">{label}</div>
-        <div className="text-[12px] text-muted-foreground mt-0.5">{description}</div>
+        <div className="text-sm font-semibold tracking-tight">{label}</div>
+        <div className="text-xs text-muted-foreground mt-0.5">{description}</div>
       </div>
       <div>{control}</div>
     </div>
@@ -243,7 +243,7 @@ function ThemeButton({ active, onClick, icon, label }: ThemeButtonProps) {
       type="button"
       onClick={onClick}
       className={cn(
-        'inline-flex items-center gap-1.5 h-7 px-2.5 rounded-[4px] text-[12px] font-medium transition-all cursor-pointer',
+        'inline-flex items-center gap-1.5 h-7 px-2.5 rounded-[4px] text-xs font-medium transition-all cursor-pointer',
         active
           ? 'bg-card text-foreground shadow-[0_1px_2px_rgba(0,0,0,0.06)]'
           : 'text-muted-foreground hover:text-foreground',

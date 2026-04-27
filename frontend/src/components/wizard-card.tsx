@@ -44,17 +44,17 @@ export function WizardCard({
         <CardHeader className="px-0 gap-1">
           <div>
             {eyebrow && (
-              <div className="text-[11px] uppercase tracking-widest font-semibold text-muted-foreground">
+              <div className="text-2xs uppercase tracking-widest font-semibold text-muted-foreground">
                 {eyebrow}
               </div>
             )}
             {title && (
-              <CardTitle className="text-[15px] tracking-tight">
+              <CardTitle className="text-sm tracking-tight">
                 {title}
               </CardTitle>
             )}
             {subtitle && (
-              <CardDescription className="text-[12px]">
+              <CardDescription className="text-xs">
                 {subtitle}
               </CardDescription>
             )}

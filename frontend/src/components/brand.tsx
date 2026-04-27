@@ -44,7 +44,7 @@ export function Brand({ size = 'md', to, className = '', title }: BrandProps) {
         style={{ width: 1, height: s.ruleH, marginLeft: s.gap, marginRight: s.gap }}
       />
       <span
-        className="font-bold tracking-[-0.014em] leading-none text-foreground"
+        className="font-bold tracking-tight leading-none text-foreground"
         style={{ fontSize: s.fontSize }}
       >
         스튜디오

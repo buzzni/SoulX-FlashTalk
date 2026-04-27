@@ -49,7 +49,7 @@ export default function LoginPage() {
         <h1 id="login-heading" className="headline-section m-0 mb-2 text-center">
           다시 만나요.
         </h1>
-        <p className="m-0 mb-7 text-[14px] text-ink-2 text-center">
+        <p className="m-0 mb-7 text-sm text-ink-2 text-center">
           작업실에 들어오려면 로그인이 필요해요.
         </p>
 
@@ -67,7 +67,7 @@ export default function LoginPage() {
               value={userId}
               onChange={(e) => setUserId(e.target.value)}
               disabled={busy}
-              className="h-10 px-3 text-[14px] rounded-md border border-input bg-background disabled:opacity-60 transition-[border-color,box-shadow] focus:border-primary focus:outline-none focus:shadow-[0_0_0_3px_var(--primary-soft)]"
+              className="h-10 px-3 text-sm rounded-md border border-input bg-background disabled:opacity-60 transition-[border-color,box-shadow] focus:border-primary focus:outline-none focus:shadow-[0_0_0_3px_var(--primary-soft)]"
             />
           </Field>
 
@@ -79,14 +79,14 @@ export default function LoginPage() {
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               disabled={busy}
-              className="h-10 px-3 text-[14px] rounded-md border border-input bg-background disabled:opacity-60 transition-[border-color,box-shadow] focus:border-primary focus:outline-none focus:shadow-[0_0_0_3px_var(--primary-soft)]"
+              className="h-10 px-3 text-sm rounded-md border border-input bg-background disabled:opacity-60 transition-[border-color,box-shadow] focus:border-primary focus:outline-none focus:shadow-[0_0_0_3px_var(--primary-soft)]"
             />
           </Field>
 
           {error && (
             <div
               role="alert"
-              className="px-3 py-2 text-[12.5px] rounded-md border bg-destructive-soft text-destructive border-destructive/30"
+              className="px-3 py-2 text-xs rounded-md border bg-destructive-soft text-destructive border-destructive/30"
             >
               {error}
             </div>
@@ -95,13 +95,13 @@ export default function LoginPage() {
           <button
             type="submit"
             disabled={busy}
-            className="h-11 px-4 text-[14px] font-bold rounded-md bg-primary text-primary-foreground hover:bg-[var(--primary-hover)] disabled:opacity-60 disabled:cursor-not-allowed transition-colors mt-1"
+            className="h-11 px-4 text-sm font-bold rounded-md bg-primary text-primary-foreground hover:bg-[var(--primary-hover)] disabled:opacity-60 disabled:cursor-not-allowed transition-colors mt-1"
           >
             {busy ? '확인 중…' : '들어가기'}
           </button>
         </form>
 
-        <p className="mt-5 text-[12px] text-muted-foreground text-center">
+        <p className="mt-5 text-xs text-muted-foreground text-center">
           처음 오셨나요? 관리자에게 계정을 요청하세요.
         </p>
       </div>
@@ -120,7 +120,7 @@ function Field({
 }) {
   return (
     <label htmlFor={htmlFor} className="flex flex-col gap-1.5">
-      <span className="text-[12.5px] font-semibold text-foreground">{label}</span>
+      <span className="text-xs font-semibold text-foreground">{label}</span>
       {children}
     </label>
   );

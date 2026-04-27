@@ -5,6 +5,7 @@
  * `elapsedSec` is read from the backend manifest (`generation_time_sec`),
  * and the "completed at" timestamp is always available (no live tick).
  */
+import { StatTile } from '../shared/StatTile';
 import { formatElapsedSec, formatDateTime, formatFileSize } from '../shared/format';
 
 export interface ResultStatsProps {
@@ -22,24 +23,18 @@ export function ResultStats({
 }: ResultStatsProps) {
   return (
     <div className="grid grid-cols-3 gap-3">
-      <div className="p-3 bg-secondary rounded-md">
-        <div className="text-[11px] uppercase tracking-widest font-semibold text-muted-foreground">걸린 시간</div>
-        <div className="text-base font-semibold num mono">{formatElapsedSec(elapsedSec)}</div>
-        {completedAt && (
-          <div className="text-xs text-tertiary mt-0.5">완료 {formatDateTime(completedAt)}</div>
-        )}
-      </div>
-      <div className="p-3 bg-secondary rounded-md">
-        <div className="text-[11px] uppercase tracking-widest font-semibold text-muted-foreground">파일 용량</div>
-        <div className="text-base font-semibold">{formatFileSize(fileSizeBytes)}</div>
-        {resolutionLabel && (
-          <div className="text-xs text-tertiary mt-0.5">{resolutionLabel}</div>
-        )}
-      </div>
-      <div className="p-3 bg-secondary rounded-md">
-        <div className="text-[11px] uppercase tracking-widest font-semibold text-muted-foreground">파일 형식</div>
-        <div className="text-base font-semibold">MP4</div>
-      </div>
+      <StatTile
+        label="걸린 시간"
+        value={formatElapsedSec(elapsedSec)}
+        sub={completedAt ? `완료 ${formatDateTime(completedAt)}` : undefined}
+        mono
+      />
+      <StatTile
+        label="파일 용량"
+        value={formatFileSize(fileSizeBytes)}
+        sub={resolutionLabel ?? undefined}
+      />
+      <StatTile label="파일 형식" value="MP4" />
     </div>
   );
 }

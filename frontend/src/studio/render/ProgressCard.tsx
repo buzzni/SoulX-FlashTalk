@@ -64,7 +64,7 @@ export function ProgressCard({
 
       {/* Timestamps stack vertically — labels are long ("작업생성날짜") and
            inline they wrapped messily on the narrow card column. */}
-      <div className="flex flex-col gap-1 text-[11px] text-ink-3">
+      <div className="flex flex-col gap-1 text-2xs text-ink-3">
         <span className="mono num">
           {elapsedMs == null ? '경과 — (대기 중)' : `경과 ${formatElapsed(elapsedMs)}`}
         </span>
@@ -101,7 +101,7 @@ export function ProgressCard({
                   ) : isActive ? (
                     <Spinner size="xs" />
                   ) : (
-                    <span className="text-[10px] font-bold tabular-nums">{i + 1}</span>
+                    <span className="text-2xs font-bold tabular-nums">{i + 1}</span>
                   )}
                 </div>
                 {!isLast && (
@@ -110,11 +110,11 @@ export function ProgressCard({
               </div>
               {/* Right — label + status */}
               <div className="pb-3">
-                <div className={`text-[12.5px] font-semibold tracking-[-0.012em] ${LABEL_CLASS[state]}`}>
+                <div className={`text-xs font-semibold tracking-tight ${LABEL_CLASS[state]}`}>
                   {s.label}
                 </div>
                 {isActive && message && (
-                  <div className="text-[11px] text-muted-foreground mt-0.5">
+                  <div className="text-2xs text-muted-foreground mt-0.5">
                     {message}
                   </div>
                 )}

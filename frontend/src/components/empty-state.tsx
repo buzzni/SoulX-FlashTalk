@@ -77,11 +77,11 @@ export function EmptyState({
         <Icon className={compact ? 'size-5' : 'size-6'} />
       </div>
       <div className="flex flex-col gap-1 max-w-sm">
-        <p className={cn('m-0 font-semibold tracking-[-0.014em]', compact ? 'text-[14px]' : 'text-[15px]')}>
+        <p className={cn('m-0 font-semibold tracking-tight', compact ? 'text-sm' : 'text-sm')}>
           {title}
         </p>
         {description && (
-          <p className={cn('m-0 text-muted-foreground', compact ? 'text-[12px]' : 'text-[13px]')}>
+          <p className={cn('m-0 text-muted-foreground', compact ? 'text-xs' : 'text-sm-tight')}>
             {description}
           </p>
         )}

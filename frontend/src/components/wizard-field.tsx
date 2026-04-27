@@ -48,7 +48,7 @@ export function WizardField({ name, label, hint, children }: WizardFieldProps) {
       {message && (
         <div
           role="alert"
-          className="mt-1 text-[12px] text-error-on-soft"
+          className="mt-1 text-xs text-error-on-soft"
           data-testid={`field-error-${name}`}
         >
           {message}

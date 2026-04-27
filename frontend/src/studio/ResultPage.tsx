@@ -178,8 +178,8 @@ export default function ResultPage() {
           <div className="relative z-[1] max-w-[1100px] mx-auto">
             <div className="flex justify-between items-center mb-6">
               <div>
-                <div className="text-[13px] text-ink-3 font-medium">결과</div>
-                <h1 className="inline-flex items-center gap-2.5 text-[22px] font-bold tracking-[-0.024em] leading-[1.25] mt-1 mb-0">
+                <div className="text-sm-tight text-ink-3 font-medium">결과</div>
+                <h1 className="inline-flex items-center gap-2.5 text-[22px] font-bold tracking-tighter leading-[1.25] mt-1 mb-0">
                   {loading && <Spinner size="md" />}
                   {loading
                     ? '영상 정보 불러오는 중…'
@@ -287,7 +287,7 @@ export default function ResultPage() {
 function RelatedRail({ items }: { items: RecentItem[] }) {
   return (
     <aside className="surface-base p-3.5 sticky top-4">
-      <div className="text-[11.5px] font-bold text-ink-3 uppercase tracking-[0.06em] mb-2.5">
+      <div className="text-2xs font-bold text-ink-3 uppercase tracking-widest mb-2.5">
         다른 영상 둘러보기
       </div>
       <div className="flex flex-col gap-2">
@@ -307,10 +307,10 @@ function RelatedRail({ items }: { items: RecentItem[] }) {
               />
             </div>
             <div className="min-w-0 flex flex-col justify-center">
-              <div className="text-[12.5px] font-semibold tracking-[-0.012em] line-clamp-2 leading-tight">
+              <div className="text-xs font-semibold tracking-tight line-clamp-2 leading-tight">
                 {videoTitle(it)}
               </div>
-              <div className="text-[10.5px] text-muted-foreground tabular-nums mt-0.5">
+              <div className="text-2xs text-muted-foreground tabular-nums mt-0.5">
                 {formatRelativeDate(it.timestamp)}
                 {it.generation_time && it.generation_time < 600 && ` · ${formatDuration(it.generation_time)}`}
               </div>

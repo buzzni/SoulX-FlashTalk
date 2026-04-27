@@ -17,7 +17,7 @@ export function Field({ label, hint, className, children }: FieldProps) {
   return (
     <div className={cn('flex flex-col gap-1.5', className)}>
       {label && (
-        <label className="flex items-center justify-between text-[12px] font-medium text-foreground/80">
+        <label className="flex items-center justify-between text-xs font-medium text-foreground/80">
           <span>{label}</span>
           {hint && <span className="text-muted-foreground font-normal">{hint}</span>}
         </label>

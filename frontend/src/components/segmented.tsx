@@ -60,7 +60,7 @@ export function Segmented<V extends string | number>({
         <ToggleGroupItem
           key={String(o.value)}
           value={String(o.value)}
-          className="data-[state=on]:bg-card data-[state=on]:hover:bg-card data-[state=on]:text-foreground data-[state=on]:font-semibold data-[state=on]:shadow-[0_1px_2px_rgba(0,0,0,0.06),0_1px_0_rgba(0,0,0,0.04)] data-[state=on]:hover:shadow-[0_1px_2px_rgba(0,0,0,0.06),0_1px_0_rgba(0,0,0,0.04)] text-ink-2 data-[state=off]:hover:text-foreground data-[state=off]:hover:bg-transparent h-8 px-3.5 text-[13px] font-medium rounded-[6px] bg-transparent transition-all"
+          className="data-[state=on]:bg-card data-[state=on]:hover:bg-card data-[state=on]:text-foreground data-[state=on]:font-semibold data-[state=on]:shadow-[0_1px_2px_rgba(0,0,0,0.06),0_1px_0_rgba(0,0,0,0.04)] data-[state=on]:hover:shadow-[0_1px_2px_rgba(0,0,0,0.06),0_1px_0_rgba(0,0,0,0.04)] text-ink-2 data-[state=off]:hover:text-foreground data-[state=off]:hover:bg-transparent h-8 px-3.5 text-sm-tight font-medium rounded-[6px] bg-transparent transition-all"
         >
           {typeof o.icon === 'string' ? <Icon name={o.icon} size={13} /> : o.icon}
           {o.label}
