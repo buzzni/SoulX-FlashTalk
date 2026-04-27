@@ -89,17 +89,41 @@ function effectiveInterval(): number | null {
 
 function snapshotSignature(s: QueueSnapshot | null): string {
   if (!s) return 'null';
-  const lists: QueueEntry[][] = [s.running || [], s.pending || [], s.recent || []];
-  const parts: string[] = [`r${s.total_running ?? 0}`, `p${s.total_pending ?? 0}`];
-  for (const list of lists) {
-    parts.push(list.map((t) => `${t.task_id}:${t.status}:${t.progress ?? ''}`).join('|'));
-  }
-  return parts.join('#');
+  // QueuePanel reads label / created_at / started_at / completed_at on every
+  // row; if a row's status flips from running→completed we want a re-render
+  // even when the same task has the same progress value. JSON.stringify on a
+  // narrow projection avoids the delimiter-collision class of bugs that the
+  // earlier hand-rolled `task_id:status:progress` signature could hit.
+  const project = (list: QueueEntry[]): unknown[] =>
+    list.map((t) => [
+      t.task_id,
+      t.status,
+      t.progress ?? null,
+      t.label ?? null,
+      t.created_at ?? null,
+      t.started_at ?? null,
+      t.completed_at ?? null,
+      t.error ?? null,
+    ]);
+  return JSON.stringify({
+    r: s.total_running ?? 0,
+    p: s.total_pending ?? 0,
+    running: project(s.running || []),
+    pending: project(s.pending || []),
+    recent: project(s.recent || []),
+  });
 }
 
 /** Cancel any pending timer and any in-flight fetch. Used when there
  * are no subscribers OR the tab goes hidden — both states mean we
- * don't want a response landing into a stale store. */
+ * don't want a response landing into a stale store.
+ *
+ * Also clears `pendingImmediate` so a strict-mode mount→unmount→remount
+ * cycle (or a hidden→visible cycle while a poll was in flight) doesn't
+ * lock out the next promotion: the in-flight fetch is aborted, but the
+ * IIFE is still alive and its `finally` clears the flag. We pre-clear
+ * here so the next promotion can fire its own `pollNowAndArm` without
+ * waiting for the aborted promise to flush. */
 function suspendPolling(): void {
   if (pollTimer) {
     clearTimeout(pollTimer);
@@ -109,6 +133,7 @@ function suspendPolling(): void {
     currentController.abort();
     currentController = null;
   }
+  pendingImmediate = null;
 }
 
 async function pollOnce(): Promise<void> {
@@ -140,9 +165,14 @@ async function pollOnce(): Promise<void> {
   }
 }
 
-/** Arm the next loop tick at the current effective interval (no
- * immediate poll). Caller must clear any existing timer first. */
+/** Arm the next loop tick at the current effective interval. Always
+ * clears any existing timer first so two callers racing to schedule
+ * never leave a ghost setTimeout firing in the background. */
 function armNextTick(): void {
+  if (pollTimer) {
+    clearTimeout(pollTimer);
+    pollTimer = null;
+  }
   const interval = effectiveInterval();
   if (interval == null) return;
   pollTimer = setTimeout(loopTick, interval);
@@ -150,8 +180,11 @@ function armNextTick(): void {
 
 /** Fire `pollOnce()` immediately, then arm the next tick. Deduped
  * via `pendingImmediate` so concurrent promotions in the same render
- * pass don't multiply fetches. */
+ * pass don't multiply fetches. No-op if there are no subscribers (or
+ * the tab is hidden) — visibility resume must respect the "no subs,
+ * no traffic" invariant. */
 function pollNowAndArm(): void {
+  if (effectiveInterval() == null) return;
   if (pendingImmediate) return;
   pendingImmediate = (async () => {
     try {
@@ -159,7 +192,6 @@ function pollNowAndArm(): void {
     } finally {
       pendingImmediate = null;
     }
-    if (pollTimer) return;
     armNextTick();
   })();
 }
@@ -168,6 +200,9 @@ async function loopTick(): Promise<void> {
   pollTimer = null;
   if (effectiveInterval() == null) return;
   await pollOnce();
+  // Re-arming after the await: armNextTick clears any timer another
+  // caller (stopPolling, visibility resume) may have scheduled while
+  // we were fetching — single-timer invariant.
   armNextTick();
 }
 
@@ -278,11 +313,13 @@ export function useQueue(): UseQueueReturn {
  *   N (≥1) → Nth in pending queue (1-indexed)
  *   null   → not in queue (finished, never enqueued, snapshot not loaded)
  *
- * Active tier: callers gate step navigation on this — stale-by-30s
- * would let the user step past a still-running task.
+ * Active tier when a taskId is present (callers gate step navigation
+ * on this — stale-by-30s would let the user step past a still-running
+ * task). Null taskId opts out entirely — no point polling fast for a
+ * lookup that can't return anything.
  */
 export function useQueuePosition(taskId: string | null | undefined): number | null {
-  usePolling('active');
+  usePolling(taskId ? 'active' : null);
   return useQueueStoreRaw((s) => {
     const d = s.data;
     if (!taskId || !d) return null;
@@ -299,12 +336,13 @@ export function useQueuePosition(taskId: string | null | undefined): number | nu
  * and recent. Returns null if the snapshot hasn't landed or the task
  * isn't present.
  *
- * Active tier: drives `useRenderJob` which renders live progress on
- * the render page. Stale-by-30s would block the auto-redirect to
- * `/result/:taskId` on completion.
+ * Active tier when a taskId is present (drives `useRenderJob` which
+ * renders live progress on the render page; stale-by-30s would block
+ * the auto-redirect to `/result/:taskId` on completion). Null taskId
+ * opts out entirely.
  */
 export function useQueueEntry(taskId: string | null | undefined): QueueEntry | null {
-  usePolling('active');
+  usePolling(taskId ? 'active' : null);
   return useQueueStoreRaw((s) => {
     const d = s.data;
     if (!taskId || !d) return null;

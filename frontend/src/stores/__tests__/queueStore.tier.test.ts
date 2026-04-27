@@ -251,6 +251,85 @@ describe('queueStore — tier polling lifecycle', () => {
   });
 });
 
+describe('queueStore — adversarial-pass regressions', () => {
+  it('visibility=visible without subscribers does NOT poll', async () => {
+    // No usePolling mount; counts stay at zero. Hidden→visible
+    // transitions must respect the "no subs, no traffic" invariant —
+    // earlier `pollNowAndArm` fired regardless and could hit the
+    // backend after logout / on routes with no queue consumer.
+    act(() => {
+      __queueStoreInternals.setVisible(false);
+    });
+    act(() => {
+      __queueStoreInternals.setVisible(true);
+    });
+    await flushMicrotasks();
+    expect(fetchQueueMock).not.toHaveBeenCalled();
+    expect(__queueStoreInternals.counts()).toEqual({ active: 0, background: 0 });
+  });
+
+  it('suspendPolling clears pendingImmediate so the next promotion re-fires immediately', async () => {
+    // Strict-mode-like sequence: mount → unmount → mount. The first
+    // mount kicks off a pollOnce IIFE; unmount aborts the controller
+    // and (regression: previously) left pendingImmediate non-null,
+    // so the second mount's pollNowAndArm short-circuited and the
+    // user got stale data for one full interval.
+    let resolveFirst: ((s: QueueSnapshot) => void) | null = null;
+    fetchQueueMock.mockImplementationOnce(
+      () =>
+        new Promise<QueueSnapshot>((resolve) => {
+          resolveFirst = resolve;
+        }),
+    );
+    fetchQueueMock.mockResolvedValue(makeSnapshot());
+
+    const first = renderHook(() => usePolling('active'));
+    await flushMicrotasks();
+    expect(fetchQueueMock).toHaveBeenCalledTimes(1);
+
+    first.unmount();
+    await flushMicrotasks();
+    // First IIFE still pending — but suspendPolling cleared the gate.
+    renderHook(() => usePolling('active'));
+    await flushMicrotasks();
+    expect(fetchQueueMock).toHaveBeenCalledTimes(2);
+
+    // Drain the orphaned first promise so vitest doesn't warn.
+    if (resolveFirst) (resolveFirst as (s: QueueSnapshot) => void)(makeSnapshot());
+    await flushMicrotasks();
+  });
+
+  it('only one timer is armed across rapid tier-change churn (no ghost setTimeouts)', async () => {
+    // Earlier `armNextTick` set pollTimer without clearing the
+    // previous handle: a stopPolling-then-loopTick race could leak a
+    // ghost timer that fired alongside the canonical one. After the
+    // fix, single-timer invariant holds even after many transitions.
+    const bg = renderHook(() => usePolling('background'));
+    await flushMicrotasks();
+    fetchQueueMock.mockClear();
+
+    for (let i = 0; i < 5; i += 1) {
+      const active = renderHook(() => usePolling('active'));
+      await flushMicrotasks();
+      active.unmount();
+      await flushMicrotasks();
+    }
+
+    // Each promotion fires at most one immediate poll. With 5 cycles
+    // we expect <= 5 fetches, not 10+ from racing timers.
+    expect(fetchQueueMock.mock.calls.length).toBeLessThanOrEqual(5);
+
+    // Advance one background interval and verify exactly one tick fires.
+    fetchQueueMock.mockClear();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(BACKGROUND_INTERVAL_MS);
+    });
+    expect(fetchQueueMock).toHaveBeenCalledTimes(1);
+
+    bg.unmount();
+  });
+});
+
 describe('queueStore — manual refresh', () => {
   it('refreshQueue() runs pollOnce ad-hoc independent of timer schedule', async () => {
     renderHook(() => usePolling('background'));
