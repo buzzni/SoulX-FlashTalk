@@ -378,15 +378,20 @@ Tab1 SSE evt='cancelled' (`reason: replaced_by_other_tab`) 수신:
 
 ---
 
-## 8. Open questions (Phase 2 review에서 surface된 것)
+## 8. Product 결정 반영 (2026-04-28)
 
-- 색상: streaming 도착 candidate fade-in 시 ring/glow 효과 추가 여부 (현재 spec에는 없음, 디자인 검토 시 결정)
-- ETA 계산: 사용자별 history 기반인지 global 평균인지 — backend가 결정. UI는 "있으면 표시, 없으면 숨김" 정책
-- prev tile 강조: 현재 spec은 dashed border + 75% opacity + "이전" badge. 충분한가? 아니면 더 명시적 라벨?
-- Pill multi-job 시 panel 정렬: 시간순 vs kind순 — 시간순 권장 (가장 최근 작업이 위)
-- Panel 안 항목 max 표시: 5개? 그 이상은 history view (v2.1)으로?
+- **Cancelled history 표시:** v2.1 history view에 `ready` / `failed` / `cancelled` 3 탭. cancelled 타일은 ready 타일과 동일 layout이지만 opacity 60% + "취소됨" badge (좌상단, dark grey). 클릭 시 retrieve 가능 (사용자가 "다시 쓰기" 누르면 같은 input으로 새 Job).
+- **Mid-stream cancel toast 카피 (§3.2) 일관 유지:** "지금까지 만들어진 후보는 history에 보존되어 있어요"라고 명시.
+- **Step 3은 별도 PR:** 본 design spec은 Step 1/2 host/composite만 다룸. Step 3 (음성·영상)은 v2.1 PR2에서 동일 패턴으로.
 
-이 5개는 implement 시작 전 designer review에서 결정.
+### Designer review에서 추후 결정 필요
+
+- 색상: streaming 도착 candidate fade-in 시 ring/glow 효과 추가 여부
+- ETA 계산: 사용자별 history 기반인지 global 평균인지 — backend가 결정. UI는 "있으면 표시" 정책
+- prev tile 강조: dashed border + 75% opacity + badge 충분한가, 더 명시적 라벨 필요?
+- Pill multi-job 시 panel 정렬: 시간순 (가장 최근 위) 권장
+- Panel max 항목: 5개. 그 이상은 history view로 link
+- cancelled 타일 hover state: "다시 쓰기" inline 버튼 vs 클릭으로 modal 진입
 
 ---
 

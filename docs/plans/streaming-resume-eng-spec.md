@@ -671,17 +671,28 @@ GET    /api/jobs?kind=host&state=ready&limit=20&cursor=<job_id>
 
 ---
 
-## 12. 사용자가 명시 결정해야 할 항목 (open)
+## 12. 사용자가 명시 결정해야 할 항목 (resolved 2026-04-28)
 
-이 spec은 4 voices가 짚은 모든 high/critical 해소했지만 다음은 사용자 product 결정.
+| # | 결정 |
+|---|---|
+| 1 | **모든 state를 idle로 reset.** v8→v9 migration은 streaming/ready/failed 모두 `idle`로 단순 reset. ready 결과는 candidates collection에 보존되어 v2.1 history view에서 복구 가능. deploy 시점 일회성 이벤트로 수용. |
+| 2 | **Cancelled job은 history에 "취소됨" 탭으로 표시.** disk file 보존, DB row 보존. UI는 history view에 ready/failed/cancelled 3 탭. cancelled 타일은 dim + "cancelled" badge. mid-stream cancel toast 카피 ("history에 보존") 일관. |
+| 3 | **SSE per-user cap 10개** (default 유지). |
+| 4 | **Phase C soak 1주.** flag toggle 가능한 상태로 1주 모니터링 후 구 endpoint 제거. |
+| 5 | **Step 3은 별도 PR.** 본 PR은 Step 1/2 GenerationJob 인프라까지. Step 3 (TTS/render) lifecycle 적용은 Phase A·B 안정화 후 같은 GenerationJob 패턴 재사용해 별도 PR (PR2 추정 +1.5주). |
 
-1. v8 → v9 마이그레이션이 모든 state를 idle로 reset함. 사용자 in-flight 작업 손실 가능. 수용 가능?
-2. cancelled job의 partial files를 history에서 retrieve 가능 (ready/failed와 동일하게). 사용자 의도와 일치?
-3. SSE per-user cap 10개 — 일반 사용자는 한 번에 1-2개 쓸 텐데 10개는 적절한 margin?
-4. Phase C soak 1주 — 더 길게 / 짧게 / cohort-by-cohort?
-5. 본 PR scope에서 Step 3 적용을 분리하는 것 — Step 3도 같은 lifecycle 결함 있다면 한 번에 묶을 가치?
+### Q2 결정 추가 영향
 
-이 5개는 implement 시작 전 product owner 결정.
+cancelled job 보존 → 본 spec 항목 갱신:
+- §4.4 `cancel_if_active` 후 worker가 `unlink(saved_paths)` 했던 정책 → **변경: 파일 그대로 보존**. cancel 시 새 candidate 추가만 차단(§4.2), 이미 도착한 variants는 그대로 row 유지.
+- §6.4 Phase C 분기에 cancelled 마이그레이션 — 이전 stream endpoint에 cancelled 개념 없었으니 backfill 불필요.
+- §8 API `GET /api/jobs?kind=host` 의 `state` 필터에 `cancelled` 추가. UI history view (v2.1)는 ready/failed/cancelled 3 탭.
+- §10 Phase D 후속 work에 v2.1 history view 명시 (cancelled 탭 포함).
+- design-spec §3.2 cancel toast 카피 "history에 보존" 그대로 valid.
+
+### Q5 결정 추가 영향
+
+Step 3 별도 PR로 분리 → 본 spec 변경 없음 (Step 3은 본래 §11 future). 단지 PR2 시작 시 본 spec의 `JobRunner.stream_for_kind`에 `kind='audio_render'` 등 추가 dispatch 분기만 필요.
 
 ---
 
