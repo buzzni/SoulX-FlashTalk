@@ -26,7 +26,7 @@ import { makeRandomSeeds } from '../../api/mapping';
 import { selectHost, type HostGenerateInput } from '../../api/host';
 import type { UploadResult } from '../../api/upload';
 import { useWizardStore } from '../../stores/wizardStore';
-import type { Host, HostInput, ServerAsset, LocalAsset } from '@/wizard/schema';
+import type { Host, HostInput, ImageQuality, ServerAsset, LocalAsset } from '@/wizard/schema';
 import { isServerAsset } from '@/wizard/normalizers';
 import { HostTextForm } from './HostTextForm';
 import { HostReferenceUploader, type RefFile } from './HostReferenceUploader';
@@ -109,11 +109,11 @@ export default function Step1Host({ state, update }: Step1HostProps) {
 
     // Schema → backend HostGenerateInput. Inline mapper (will move to
     // wizard/api-mappers when more slices migrate).
-    const apiInput: HostGenerateInput & { imageSize?: '1K' | '2K' | '4K' } = (() => {
+    const apiInput: HostGenerateInput & { imageSize?: ImageQuality } = (() => {
       const base = {
         temperature: host.temperature,
-        imageSize: (state.imageQuality as '1K' | '2K' | '4K') || '1K',
-      } as HostGenerateInput & { imageSize: '1K' | '2K' | '4K' };
+        imageSize: (state.imageQuality as ImageQuality) || '1K',
+      } as HostGenerateInput & { imageSize: ImageQuality };
       if (host.input.kind === 'text') {
         return {
           ...base,
@@ -276,7 +276,7 @@ export default function Step1Host({ state, update }: Step1HostProps) {
 
           <HostControls
             temperature={host.temperature}
-            imageQuality={(state.imageQuality as '1K' | '2K' | '4K') || '1K'}
+            imageQuality={(state.imageQuality as ImageQuality) || '1K'}
             errorMsg={gen.error}
             generating={gen.isLoading}
             canGenerate={promptReady}

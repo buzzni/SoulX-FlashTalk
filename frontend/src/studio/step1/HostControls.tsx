@@ -13,14 +13,15 @@ import Icon from '../Icon.jsx';
 import { Field } from '@/components/field';
 import { Segmented } from '@/components/segmented';
 import { Sparkles } from 'lucide-react';
+import type { ImageQuality } from '@/wizard/schema';
 export interface HostControlsProps {
   temperature: number;
-  imageQuality: '1K' | '2K' | '4K';
+  imageQuality: ImageQuality;
   errorMsg: string | null;
   generating: boolean;
   canGenerate: boolean;
   onTemperatureChange: (v: number) => void;
-  onImageQualityChange: (v: '1K' | '2K' | '4K') => void;
+  onImageQualityChange: (v: ImageQuality) => void;
   onGenerate: () => void;
 }
 

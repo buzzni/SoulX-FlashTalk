@@ -35,6 +35,7 @@ import type {
   Composition,
   CompositionSettings,
   CompositionVariant as SchemaCompositionVariant,
+  ImageQuality,
 } from '@/wizard/schema';
 import { isBackgroundReady } from '@/wizard/schema';
 import { isLocalAsset, isServerAsset } from '@/wizard/normalizers';
@@ -156,7 +157,7 @@ export default function Step2Composite({ state, update }: Step2CompositeProps) {
           angle: composition.settings.angle,
           temperature: composition.settings.temperature,
         },
-        imageSize: (state.imageQuality as '1K' | '2K' | '4K') ?? '1K',
+        imageSize: (state.imageQuality as ImageQuality) ?? '1K',
       },
       seeds,
       { rembg: composition.settings.rembg },
