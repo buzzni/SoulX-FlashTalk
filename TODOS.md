@@ -59,3 +59,148 @@ Deferred work captured during plan reviews. Each entry includes context for futu
 
 **Depends on / blocked by**: Backend confirmation — does `/api/auth/refresh` exist or does login issue a `refresh_token`? Step 1 of execution is grep + read, not code.
 
+---
+
+## Step 1 RHF wire-up (consume Lane D helpers in HostTextForm + HostReferenceUploader)
+
+**What**: Replace the controlled-callback prop API on `HostTextForm` (`onPromptChange`, `onNegativePromptChange`, `onBuilderChange` — `frontend/src/studio/step1/HostTextForm.tsx:42-49`) and `HostReferenceUploader` with a `useForm({ resolver: zodResolver(HostInputSchema) })` instance owned by `Step1Host.tsx`. Concretely:
+1. In `Step1Host.tsx:58-97`, instantiate `useForm({ resolver: zodResolver(HostInputSchema), defaultValues: hostSliceToFormValues(host), mode: 'onBlur' })`.
+2. Wire `useFormZustandSync(form, host, hostSliceToFormValues)` (helper from `src/hooks/wizard/useFormZustandSync.ts`) for store→form direction; wire `useDebouncedFormSync(form, (v) => setHost(formValuesToHostSlice(v, host)), 300)` for the form→store debounced draft.
+3. Replace `HostTextForm`'s `onChange`-prop API with `form.register(...)` + `<WizardField>` wrappers (`src/components/wizard-field.tsx`). Submit handler fires `generate.mutate(toHostGenerateRequest(values))`.
+4. `Step1Host`'s submit-disabled state becomes `!form.formState.isValid || generate.isPending`.
+5. Image-mode uploader keeps the existing `useUploadReferenceImage` hook; RHF only owns input fields, not generation state (per D14).
+6. Add a Vitest spec exercising the resolver: `prompt < 15 chars` rejects, switching `kind: text → image` drops the prompt field cleanly, `useFormZustandSync` re-syncs after a `setHost` from outside (e.g. variant pick).
+
+**Why**: Lane D landed the helpers (`useFormZustandSync`, `useDebouncedFormSync`, `<WizardField>`) but Step 1's components still hand-roll the controlled-prop pattern. Until one step page consumes the helpers end-to-end, we don't actually know whether the API shape is right — Lane F (Steps 2/3) is going to discover this either way. Step 1 is the simplest case (single discriminator on `kind`, no `useFieldArray`) so the proof-of-concept is cheaper here than on Step 2.
+
+**Pros**:
+- Validates the Lane D helper API on the smallest tagged-union surface before Lane F locks in for Steps 2/3.
+- Eliminates the `onPromptChange` / `onBuilderChange` / `onNegativePromptChange` callback fan-out — one form, one source of truth.
+- Surfaces the `auto-save badge` in Step 1 with no extra wiring (RHF watch fires `setHost` which already stamps `lastSavedAt`).
+- Catches mode-switch regressions at the type layer (`zodResolver(HostInputSchema)` rejects mode-cross fields; the existing `mode-switching.spec.ts` becomes a real CI assertion).
+
+**Cons**:
+- Touch surface is moderate: `Step1Host.tsx` (377 lines), `HostTextForm.tsx` (119 lines), `HostReferenceUploader.tsx` (174 lines), plus a new `hostSliceToFormValues` / `formValuesToHostSlice` mapper pair.
+- Image-mode has File handles in `LocalAsset`; RHF default values can't carry a real `File` (it'd be in the form snapshot forever). Mapper has to special-case this — keep `LocalAsset` outside the form values, store it in zustand only, and only feed the `path`/`previewUrl` strings to RHF.
+- `useFormZustandSync` reset semantics need a real-world test: a variant pick mid-edit should NOT blow away an in-flight prompt typing. The unit test in `wizard-form-sync.test.tsx` covers reference-equality, but the slice-update boundary in production (e.g. SSE candidate event arriving) is the actual risk.
+
+**Context**: Deferred from PR #8 / Lane D as "RHF wire-up of Step 1 components is deferred to a follow-up commit on this branch." All helpers are in `main` already (`src/hooks/wizard/useFormZustandSync.ts`, `useDebouncedFormSync.ts`, `src/components/wizard-field.tsx`); this is pure consumption work.
+
+**Effort**: human ~1 day / CC ~45 min — including the mapper pair, the Step1Host rewrite, and the Vitest specs.
+
+**Priority**: P2 (consumes work already merged; without it, Lane D's helpers are orphaned scaffolding).
+
+**Depends on / blocked by**: Nothing — all dependencies (helpers, schemas, store actions) are on `main`.
+
+---
+
+## Steps 2 & 3 RHF migration + SSE bridge end-to-end
+
+**What**: Apply the same RHF treatment to `Step2Composite.tsx` (422 lines) and `Step3Audio.tsx` (590 lines), and wire the `useHostStream` / `useCompositeStream` TQ-bridged consumers (from `src/api/queries/use-host-stream.ts`) into the actual generation buttons.
+1. **Step 2 RHF**: `useForm({ resolver: zodResolver(Step2CompositeFormSchema) })` discriminated on `background.kind`. `useFieldArray` for products. Tabs control a hidden `kind` field via `useWatch({ name: 'background.kind' })`; conditional sub-form renders the matching variant.
+2. **Step 3 RHF**: same shape, `Step3AudioFormSchema` discriminated on `voice.source` (tts / clone / upload). `useFieldArray` for `voice.script.paragraphs[]`. Voice-clone failure auto-resets `voice.sample.state = 'idle'` via mutation `onError`.
+3. **SSE bridge consumption**: `Step1Host` and `Step2Composite` create a client `requestId = useMemo(() => crypto.randomUUID(), [/* per dispatch */])`, fire `useHostStream().mutate({ input, requestId })`, and read events via `useHostStreamEvents(requestId)`. Wire mid-stream fatal events to `<ErrorAlert>` (already in `src/components/error-alert.tsx`).
+4. **Existing `useHostGeneration` / `useCompositeGeneration`**: keep the in-memory state machine (variants array, prevSelected) since those hooks already manage it well; the bridge surface is for the *event log* (debug overlay, fatal-error inline alert, future telemetry).
+5. Each step gets a Vitest spec for the resolver + a Playwright run on `mode-switching.spec.ts` and `sse-fatal-error.spec.ts` (specs already exist, this just makes them pass against the real components).
+
+**Why**: Lane F shipped the SSE→TQ bridge as a parallel surface but no UI consumes it yet. Lane D shipped helpers but no Step page uses them. The follow-up PRs that *consume* this scaffolding are where the user-visible improvement lands — declarative validation messages, no toast-only mutation failures, mode-switch type safety.
+
+**Pros**:
+- Plan §7 done-criteria flips from "0 form-field useState in wizard/steps" claimed-but-not-asserted to actually green.
+- Inline `<ErrorAlert>` becomes load-bearing for every primary action (host gen, composite gen, voice gen, render dispatch). Today the toast-only failure regression is technically still possible because the alerts aren't wired.
+- The 4 Playwright specs (`refresh-during-typing`, `back-during-render`, `mode-switching`, `sse-fatal-error`) start passing against real components, not stubs.
+
+**Cons**:
+- Largest follow-up by churn — touches ~1000 lines across two step pages. Risk of merge-conflict if other Step 2/3 work lands in parallel.
+- Step 3's `useFieldArray` for `voice.script.paragraphs[]` is the trickiest part; paragraph reorder/insert/delete need to round-trip through the schema (`ScriptSchema`).
+- `useFormZustandSync` reset semantics on Step 2 will hit a real edge case: composite generation completing mid-edit fires `setComposition` which the form should pick up, but the user's in-flight `composition.settings.direction` typing should NOT be reset. The Lane D unit test catches reference-equality drops; a Vitest spec for the slice-partial-update path is required here.
+- Voice-clone auto-reset (`sample.state = 'idle'` on failure) is one of those "users hate manual recovery" wins, but it has to run via mutation `onError` not `onSettled` (don't reset on success).
+
+**Context**: Deferred from PR #8 / Lane F. All schemas, hooks, and helpers are merged. Plan §4 Lane D step 6 + Lane F + Lane G all have step-by-step instructions. Total work compresses well with CC because the helpers are already in place; the human estimate balloons due to the breadth of components touched.
+
+**Effort**: human ~3 days / CC ~2 hours. Recommend splitting into two PRs: Step 2 first (validates the pattern with `useFieldArray` for products), then Step 3 (more complex with voice-source discriminator).
+
+**Priority**: P2 (high user-visible impact; the headline acceptance criteria from the plan).
+
+**Depends on / blocked by**: Step 1 RHF wire-up (the prior TODO entry). That follow-up exercises the helper API end-to-end and surfaces any helper bugs cheap; without it, Step 2/3 are debugging two layers at once.
+
+---
+
+## Unify `WizardState` between `wizard/schema.ts` and `stores/wizardStore.ts`
+
+**What**: Replace the `interface WizardState` declaration at `frontend/src/stores/wizardStore.ts:51-69` with `export type { WizardState } from '../wizard/schema'`. Delete the `as unknown as WizardState` cast at `frontend/src/stores/wizardStore.ts:307` (last cast in production code; pure relief work for Lane H's done-criteria audit).
+
+**Why**: Lane B converted `wizard/schema.ts` to zod schemas with `type WizardState = z.infer<typeof WizardStateSchema>`. Lane B.5 reconciled the store's interface to match. They are now content-equivalent, just two declarations of the same shape. The double-declaration forces a `as unknown as WizardState` cast inside `migrateWizardEnvelope`'s safeParse return (the parsed.data is structurally identical but TS sees them as nominally different).
+
+**Pros**:
+- One canonical `WizardState` type. Lane H's 0 'as any' / 'as unknown as' audit becomes truly green in production code.
+- Simplifies onboarding — new contributor doesn't have to read both files to understand the state shape.
+- Eliminates a real maintenance hazard: today, adding a field to `wizardStore.ts:51` without also adding it to `WizardStateSchema` produces a runtime drift Lane C's safeParse would catch only at hydrate time.
+
+**Cons**:
+- Verify zustand's `set` typing accepts the zod-inferred type cleanly — discriminated unions inferred from `z.discriminatedUnion` should work but worth checking against zustand v5's setter signature.
+- Test fixture casts in `stores/__tests__/wizardStore.migrate.test.ts` use `as unknown as Record<string, unknown>` — those stay (testing shape mutations on a strict type requires the double-cast to pierce).
+
+**Context**: Lane H follow-up explicitly noted in the PR #8 commit message ("would require unifying schema.ts and wizardStore.ts WizardState declarations into a single canonical export"). All groundwork is done; this is a single-file change plus a typecheck pass.
+
+**Effort**: human ~30 min / CC ~10 min.
+
+**Priority**: P3 (pure cleanup; no user-visible impact; maintenance-quality of life).
+
+**Depends on / blocked by**: Nothing.
+
+---
+
+## Remove legacy `subscribeProgress` export from `api/progress.ts` + `studio/api.js`
+
+**What**: Delete the `subscribeProgress` function (`frontend/src/api/progress.ts:37-103`) and its re-export at `frontend/src/studio/api.js:61`. Keep the file because `ProgressEvent` and the polling constants (`PROGRESS_POLL_MS`, `PROGRESS_MAX_CONSECUTIVE_ERRORS`) might still be referenced; verify with `grep -rn "ProgressEvent\|PROGRESS_POLL_MS" src/` and inline whatever remains. Final state: `api/progress.ts` either has zero exports (delete the file entirely) or a thin schema-only module.
+
+**Why**: Lane E migrated the only production caller (`useRenderJob`) from `subscribeProgress` to `useTaskProgress`. The export still exists but no consumer references it. Stale exports drift over time — someone doing a "let me wire up progress" search lands on the old function instead of the TQ hook.
+
+**Pros**:
+- Closes a Lane H done-criteria item ("0 callers of `subscribeProgress`" → also drop the function definition itself).
+- Removes ~75 lines of polling-loop code that's no longer the canonical path.
+- Forces any future progress consumer to go through TanStack Query (which gives them retry, dedup, devtools for free).
+
+**Cons**:
+- Need to confirm no E2E spec or test fixture imports it. Grep first: `git grep -rn 'subscribeProgress'` (excluding `__tests__/api_abort.test.js` which tests the legacy function and should also be deleted in the same commit, per the "tests follow code" principle).
+- The `PROGRESS_POLL_MS = 1500` constant lives there; `useTaskProgress` hard-codes `1500` separately. After the delete, decide: import from a shared constants module, or accept the duplication.
+
+**Context**: Lane H follow-up explicitly noted: "subscribeProgress: still exported from api/progress.ts; 0 callers in the wizard render path (Lane E migrated the only consumer). Final removal awaits a follow-up commit." Pure cleanup, mechanical.
+
+**Effort**: human ~20 min / CC ~5 min.
+
+**Priority**: P3 (cleanup; landed alongside the WizardState unification would be a clean "Lane H finalization" PR).
+
+**Depends on / blocked by**: Nothing.
+
+---
+
+## Run the 4 critical-path Playwright specs in CI
+
+**What**: Add a Playwright job to `.github/workflows/test.yml` that runs `frontend/e2e/refresh-during-typing.spec.ts`, `back-during-render.spec.ts`, `mode-switching.spec.ts`, and `sse-fatal-error.spec.ts` against a built dev server.
+1. New job in CI: `playwright-e2e`. Build frontend (`npm run build`), serve via `npm run preview` (or a Playwright `webServer` config), run `npx playwright test e2e/`.
+2. Cache the Playwright browser binaries (`actions/cache` keyed on `playwright-core` version from `package-lock.json`) to keep the job under 3 minutes.
+3. The `mode-switching` and `sse-fatal-error` specs assume the Step 2/3 RHF migration is complete (the `<ErrorAlert>` is wired to the generation button). Until that lands, gate those two with `test.skip` and a TODO note pointing to the RHF migration TODO entry above.
+4. `refresh-during-typing` and `back-during-render` should pass against current `main` — they exercise persist hardening (Lane C) which is fully shipped.
+
+**Why**: Lane G shipped the spec files as documented contracts but they don't run anywhere. Plan §7 done-criteria says "4 critical-path Playwright E2E specs green in CI" — currently false. A regression in persist scrub or RHF reset semantics ships silently.
+
+**Pros**:
+- Makes the spec files load-bearing rather than aspirational.
+- Catches the regressions they were written to catch: persist `'streaming'` not scrubbed, RHF defaults overriding store-restored drafts, mode-switch tagged-union leakage, fatal SSE going to toast-only instead of `<ErrorAlert>`.
+- The 2 currently-passable specs (`refresh-during-typing`, `back-during-render`) start guarding `main` immediately; the other 2 join when Step 2/3 RHF lands.
+
+**Cons**:
+- Playwright on CI adds ~2-3 minutes per PR (cache hit) or ~5 minutes (cache miss). Tolerable but real.
+- Authentication: the specs `seedAuth(page)` by writing fake JWT into `localStorage` and mock `/api/auth/me`. That assumes the auth stack respects localStorage seeding pre-mount; verify with one trial run before finalizing.
+- The wizard requires a backend for some endpoints even with mocks (e.g. `/api/playlists` for Step 3). Either expand the mock surface in each spec or stand up a stub backend — current spec files mock per-test, which is the pragmatic path.
+
+**Context**: Lane G shipped the 4 spec files but the workflow didn't add a Playwright job. PR #8 test plan listed "Run the 4 new Playwright specs against staging" as deferred. Frontend job already runs `npm run test -- --run` (Vitest); this is a separate Playwright job.
+
+**Effort**: human ~half a day (workflow + cache config + first-run debugging) / CC ~30 min for the workflow + skip-flagging, plus per-spec debug as Step 2/3 RHF lands.
+
+**Priority**: P2 (closes a stated done-criteria item; small immediate win on the 2 already-passable specs).
+
+**Depends on / blocked by**: For full coverage, the Step 2/3 RHF follow-up. For the 2 immediately-runnable specs, nothing — could land standalone.
+
