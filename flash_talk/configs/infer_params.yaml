@@ -1,5 +1,5 @@
 frame_num: 33
-motion_frames_num: 9
+motion_frames_num: 5
 tgt_fps: 25
 sample_rate: 16000
 sample_steps: 4

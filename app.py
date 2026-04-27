@@ -754,7 +754,13 @@ async def generate_video_task(
                             for i in range(frames_np.shape[0]):
                                 writer.append_data(frames_np[i])
 
-                    cmd = ['ffmpeg', '-y', '-i', temp_path, '-i', audio_path, '-c:v', 'copy', '-c:a', 'aac', '-shortest', output_path]
+                    # Optional audio offset for lip-sync correction. Negative
+                    # value = audio starts earlier (use when lips trail voice).
+                    offset_ms = int(getattr(config, "LIPSYNC_AUDIO_OFFSET_MS", 0))
+                    cmd = ['ffmpeg', '-y', '-i', temp_path]
+                    if offset_ms != 0:
+                        cmd += ['-itsoffset', f'{offset_ms / 1000:.3f}']
+                    cmd += ['-i', audio_path, '-c:v', 'copy', '-c:a', 'aac', '-shortest', output_path]
                     subprocess.run(cmd, check=True, capture_output=True)
 
                     if os.path.exists(temp_path):

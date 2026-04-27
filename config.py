@@ -63,7 +63,13 @@ FLASHTALK_OPTIONS = {
 # preserves natural breath. Disable per-job by setting AUDIO_TRIM_ENABLED=0.
 AUDIO_TRIM_ENABLED = os.environ.get("AUDIO_TRIM_ENABLED", "1") == "1"
 AUDIO_TRIM_TOP_DB = float(os.environ.get("AUDIO_TRIM_TOP_DB", "40"))
-AUDIO_TRIM_PAD_MS = int(os.environ.get("AUDIO_TRIM_PAD_MS", "200"))
+AUDIO_TRIM_PAD_MS = int(os.environ.get("AUDIO_TRIM_PAD_MS", "0"))
+
+# Lip-sync audio offset for the final ffmpeg merge. Negative value =
+# pull audio earlier than video (use when lips trail the voice — set to
+# the observed lag in ms). Positive = push audio later. 0 = no shift.
+# Applied via `ffmpeg -itsoffset {sec} -i audio` in save_video.
+LIPSYNC_AUDIO_OFFSET_MS = int(os.environ.get("LIPSYNC_AUDIO_OFFSET_MS", "0"))
 
 # ========================================
 # MultiTalk Model Settings (multi-person)
