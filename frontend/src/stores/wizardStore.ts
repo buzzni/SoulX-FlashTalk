@@ -24,9 +24,11 @@ import type {
   Background,
   Composition,
   Host,
+  ImageQuality,
   Product,
   ResolutionKey,
   Voice,
+  WizardState,
 } from '../wizard/schema';
 import {
   INITIAL_BACKGROUND,
@@ -36,6 +38,7 @@ import {
   WizardStateSerializedSchema,
 } from '../wizard/schema';
 import {
+  migrateImageQuality,
   migrateLegacy as migrateLegacyToSchema,
   persistBackground,
   persistComposition,
@@ -44,9 +47,10 @@ import {
 } from '../wizard/normalizers';
 
 // ────────────────────────────────────────────────────────────────────
-// Wizard state shape — every slice is schema-typed. The store mirrors
-// `WizardStateSchema` from wizard/schema.ts; adding a field requires
-// updating both, plus normalizers (migrate + persist) and api-mappers.
+// Wizard state shape — single source of truth lives in wizard/schema.ts
+// (`WizardStateSchema`). The store re-imports the schema-derived
+// `WizardState` so adding a field can never produce a store/schema
+// drift — it's the same type by construction.
 //
 // Lane B.5 (D11): retired the dead top-level `script: string` (voice
 // already owns the script via `voice.script`), retired the
@@ -56,27 +60,7 @@ import {
 // rejecting every existing user blob.
 // ────────────────────────────────────────────────────────────────────
 
-export interface WizardState {
-  host: Host;
-  products: Product[];
-  background: Background;
-  composition: Composition;
-  voice: Voice;
-  /** Just the key — full meta (width/height/size/speed/label) is
-   * derived via `resolutionMeta` from wizard/schema. */
-  resolution: ResolutionKey;
-  imageQuality: string;
-  /** Optional playlist to bundle the resulting video into. Null = 미지정. */
-  playlistId: string | null;
-  /** Bumped on every `reset()`. Step pages use this as a React key so
-   * "처음부터 다시" forces a remount, clearing hook-local state (variants,
-   * prevSelected, etc.) without requiring a page refresh. */
-  wizardEpoch: number;
-  /** ms since epoch of the last successful slice write. Drives
-   * <AutoSaveIndicator />. Null until the first user edit (so the
-   * "방금 전 저장됨" badge doesn't flash on a fresh wizard). */
-  lastSavedAt: number | null;
-}
+export type { WizardState };
 
 // ────────────────────────────────────────────────────────────────────
 // Initial state — derived from the per-slice INITIAL_* constants in
@@ -110,7 +94,7 @@ export interface WizardActions {
   setComposition: (next: Composition | ((prev: Composition) => Composition)) => void;
   setVoice: (next: Voice | ((prev: Voice) => Voice)) => void;
   setResolution: (r: ResolutionKey) => void;
-  setImageQuality: (q: string) => void;
+  setImageQuality: (q: ImageQuality) => void;
   setPlaylistId: (id: string | null) => void;
   /** Stamp lastSavedAt = Date.now() — RHF/debounced sync hooks call
    * this directly when they want to surface the "방금 전 저장됨" badge
@@ -160,8 +144,7 @@ function migrateLegacyStateOnce(): void {
       composition: migrateLegacyToSchema({ composition: legacy.composition }).composition,
       voice: migrateLegacyToSchema({ voice: legacy.voice }).voice,
       resolution: migrateLegacyToSchema({ resolution: legacy.resolution }).resolution,
-      imageQuality:
-        (typeof legacy.imageQuality === 'string' ? legacy.imageQuality : INITIAL_WIZARD_STATE.imageQuality),
+      imageQuality: migrateImageQuality(legacy.imageQuality),
       playlistId: playlistRaw,
     };
 
@@ -300,11 +283,11 @@ export function migrateWizardEnvelope(
     }
     return INITIAL_WIZARD_STATE;
   }
-  // The serialized schema and the runtime schema agree on every field
-  // that survives JSON round-trip; LocalAsset slots that the runtime
-  // shape allows (File handles, blob URLs) are filtered to null/empty
-  // by the persisted schema. The runtime cast is therefore safe.
-  return parsed.data as unknown as WizardState;
+  // The serialized schema is structurally narrower than the runtime
+  // schema (LocalAsset slots that the runtime allows are filtered to
+  // null/empty by partializeForPersist). Narrow → wide is assignment-
+  // compatible, so a single `as WizardState` is enough.
+  return parsed.data as WizardState;
 }
 
 // ────────────────────────────────────────────────────────────────────
