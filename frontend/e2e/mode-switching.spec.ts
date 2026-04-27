@@ -44,14 +44,22 @@ test.describe('mode-switching', () => {
 
   test('Step 1 text → image swap leaves no stale prompt in the schema', async ({ page }) => {
     await page.goto('/step/1');
-    // Type a text prompt.
+    // Type a text prompt. Wait > 300ms for the form→store debounce
+    // flush so the persisted text-mode shape is committed before the
+    // mode swap lands.
     const textArea = page.locator('textarea').first();
     await textArea.fill('30대 여성, 베이지 니트, 따뜻한 분위기');
-    // Switch to image mode (the segmented control labels are stable).
-    await page.getByRole('tab', { name: /사진|reference|image/i }).first().click();
+    await page.waitForTimeout(400);
+
+    // Segmented uses Radix ToggleGroup with type="single" → items
+    // render as role="radio" (NOT role="tab"). The label is the
+    // stable handle.
+    await page.getByRole('radio', { name: '사진으로 만들기' }).click();
 
     // Persisted state should be HostInput.kind === 'image'. The
-    // tagged-union swap drops the text-mode `prompt` entirely.
+    // tagged-union swap drops the text-mode `prompt` entirely. Allow
+    // the next debounce flush to commit the swap to localStorage.
+    await page.waitForTimeout(400);
     const stored = await page.evaluate(() => {
       const raw = localStorage.getItem('showhost.wizard.v1');
       if (!raw) return null;
@@ -60,5 +68,28 @@ test.describe('mode-switching', () => {
     });
     expect(stored?.kind).toBe('image');
     expect((stored as { prompt?: string }).prompt).toBeUndefined();
+  });
+
+  test('Step 1 image → text swap leaves no stale faceRef in the schema', async ({ page }) => {
+    await page.goto('/step/1');
+    // Land in image mode first.
+    await page.getByRole('radio', { name: '사진으로 만들기' }).click();
+    await page.waitForTimeout(400);
+
+    // Swap back to text mode.
+    await page.getByRole('radio', { name: '설명으로 만들기' }).click();
+    await page.waitForTimeout(400);
+
+    const stored = await page.evaluate(() => {
+      const raw = localStorage.getItem('showhost.wizard.v1');
+      if (!raw) return null;
+      const env = JSON.parse(raw) as {
+        state: { host: { input: { kind: string; faceRef?: unknown; prompt?: string } } };
+      };
+      return env.state.host.input;
+    });
+    expect(stored?.kind).toBe('text');
+    expect((stored as { faceRef?: unknown }).faceRef).toBeUndefined();
+    expect(typeof (stored as { prompt?: string }).prompt).toBe('string');
   });
 });

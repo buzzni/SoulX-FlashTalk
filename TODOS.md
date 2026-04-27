@@ -61,39 +61,6 @@ Deferred work captured during plan reviews. Each entry includes context for futu
 
 ---
 
-## Step 1 RHF wire-up (consume Lane D helpers in HostTextForm + HostReferenceUploader)
-
-**What**: Replace the controlled-callback prop API on `HostTextForm` (`onPromptChange`, `onNegativePromptChange`, `onBuilderChange` — `frontend/src/studio/step1/HostTextForm.tsx:42-49`) and `HostReferenceUploader` with a `useForm({ resolver: zodResolver(HostInputSchema) })` instance owned by `Step1Host.tsx`. Concretely:
-1. In `Step1Host.tsx:58-97`, instantiate `useForm({ resolver: zodResolver(HostInputSchema), defaultValues: hostSliceToFormValues(host), mode: 'onBlur' })`.
-2. Wire `useFormZustandSync(form, host, hostSliceToFormValues)` (helper from `src/hooks/wizard/useFormZustandSync.ts`) for store→form direction; wire `useDebouncedFormSync(form, (v) => setHost(formValuesToHostSlice(v, host)), 300)` for the form→store debounced draft.
-3. Replace `HostTextForm`'s `onChange`-prop API with `form.register(...)` + `<WizardField>` wrappers (`src/components/wizard-field.tsx`). Submit handler fires `generate.mutate(toHostGenerateRequest(values))`.
-4. `Step1Host`'s submit-disabled state becomes `!form.formState.isValid || generate.isPending`.
-5. Image-mode uploader keeps the existing `useUploadReferenceImage` hook; RHF only owns input fields, not generation state (per D14).
-6. Add a Vitest spec exercising the resolver: `prompt < 15 chars` rejects, switching `kind: text → image` drops the prompt field cleanly, `useFormZustandSync` re-syncs after a `setHost` from outside (e.g. variant pick).
-
-**Why**: Lane D landed the helpers (`useFormZustandSync`, `useDebouncedFormSync`, `<WizardField>`) but Step 1's components still hand-roll the controlled-prop pattern. Until one step page consumes the helpers end-to-end, we don't actually know whether the API shape is right — Lane F (Steps 2/3) is going to discover this either way. Step 1 is the simplest case (single discriminator on `kind`, no `useFieldArray`) so the proof-of-concept is cheaper here than on Step 2.
-
-**Pros**:
-- Validates the Lane D helper API on the smallest tagged-union surface before Lane F locks in for Steps 2/3.
-- Eliminates the `onPromptChange` / `onBuilderChange` / `onNegativePromptChange` callback fan-out — one form, one source of truth.
-- Surfaces the `auto-save badge` in Step 1 with no extra wiring (RHF watch fires `setHost` which already stamps `lastSavedAt`).
-- Catches mode-switch regressions at the type layer (`zodResolver(HostInputSchema)` rejects mode-cross fields; the existing `mode-switching.spec.ts` becomes a real CI assertion).
-
-**Cons**:
-- Touch surface is moderate: `Step1Host.tsx` (377 lines), `HostTextForm.tsx` (119 lines), `HostReferenceUploader.tsx` (174 lines), plus a new `hostSliceToFormValues` / `formValuesToHostSlice` mapper pair.
-- Image-mode has File handles in `LocalAsset`; RHF default values can't carry a real `File` (it'd be in the form snapshot forever). Mapper has to special-case this — keep `LocalAsset` outside the form values, store it in zustand only, and only feed the `path`/`previewUrl` strings to RHF.
-- `useFormZustandSync` reset semantics need a real-world test: a variant pick mid-edit should NOT blow away an in-flight prompt typing. The unit test in `wizard-form-sync.test.tsx` covers reference-equality, but the slice-update boundary in production (e.g. SSE candidate event arriving) is the actual risk.
-
-**Context**: Deferred from PR #8 / Lane D as "RHF wire-up of Step 1 components is deferred to a follow-up commit on this branch." All helpers are in `main` already (`src/hooks/wizard/useFormZustandSync.ts`, `useDebouncedFormSync.ts`, `src/components/wizard-field.tsx`); this is pure consumption work.
-
-**Effort**: human ~1 day / CC ~45 min — including the mapper pair, the Step1Host rewrite, and the Vitest specs.
-
-**Priority**: P2 (consumes work already merged; without it, Lane D's helpers are orphaned scaffolding).
-
-**Depends on / blocked by**: Nothing — all dependencies (helpers, schemas, store actions) are on `main`.
-
----
-
 ## Steps 2 & 3 RHF migration + SSE bridge end-to-end
 
 **What**: Apply the same RHF treatment to `Step2Composite.tsx` (422 lines) and `Step3Audio.tsx` (590 lines), and wire the `useHostStream` / `useCompositeStream` TQ-bridged consumers (from `src/api/queries/use-host-stream.ts`) into the actual generation buttons.
@@ -203,3 +170,11 @@ Deferred work captured during plan reviews. Each entry includes context for futu
 
 **Depends on / blocked by**: Step 1 RHF wire-up + Step 2/3 RHF migration (both TODO entries above). All 4 specs need RHF for their assertions to pass; landing this entry standalone would just add a permanently-red CI job.
 
+
+## Completed
+
+### Step 1 RHF wire-up (consume Lane D helpers in HostTextForm + HostReferenceUploader)
+
+**Completed:** feat/step1-rhf (2026-04-27)
+
+`Step1Host.tsx` now owns a `useForm({ resolver: zodResolver(HostFormValuesSchema), defaultValues: hostSliceToFormValues(host), mode: 'onBlur' })` instance. `HostTextForm`, `HostReferenceUploader`, and `HostControls` consume `useFormContext` and lost their value/onChange prop API. `useFormZustandSync` keeps the form mirroring the slice (hard reset, not `keepDirtyValues:true` — that broke tagged-union mode swaps and was reverted). `useDebouncedFormSync` got change-detection via a serialized `lastEmittedRef` to suppress no-op flushes from `form.reset` round-trips. `submit` runs through `form.handleSubmit` and reuses `toHostGenerateRequest` from `wizard/api-mappers.ts` instead of an inline IIFE. The `mode-switching.spec.ts` selector was fixed (`role="tab"` → `role="radio"`) and a reverse `image → text` spec was added; both pass. `frontend/src/wizard/form-mappers.ts` is the new bidirectional mapper file with 4 unit tests. `useFormZustandSync` got 2 new regression tests (no-op suppression + tagged-union swap) so the keepDirtyValues bug can't sneak back. Final test counts: 212 → 214 vitest pass, mode-switching e2e pass (both directions), browser visual confirmed.
