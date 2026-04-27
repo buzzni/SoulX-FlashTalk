@@ -4,31 +4,35 @@
  * First product → single UploadTile (simpler first-run UX). After
  * that, a row per product with drag-to-reorder, upload / url
  * source switch, and remove button. The numbering (1번, 2번 …)
- * matches the chip labels the direction-textarea highlight
- * expects.
+ * matches the chip labels the direction-textarea highlight expects.
  *
- * Drag-reorder state is local (dragIdx) — parent only sees the
- * final reordered array via `onProductsChange`.
+ * Reads/writes through `useFormContext` + `useFieldArray` — the
+ * parent Step2Composite owns the form via `<FormProvider>`. Drag
+ * reorder uses `move(from, to)`; per-row source-kind swaps replace
+ * the whole product object via `update(i, next)` because the source
+ * union changes shape.
  *
  * Phase 2c: schema-typed. Each row carries a `source: ProductSource`
- * tagged union (empty / localFile / uploaded / url). Helpers below
- * derive what to show (preview URL, server path, etc.) from the
- * discriminator instead of reading flat optional fields.
+ * tagged union (empty / localFile / uploaded / url).
  */
 
 import { useState } from 'react';
+import { useFieldArray, useFormContext, useWatch } from 'react-hook-form';
 import Icon from '../Icon.jsx';
 import { Field } from '@/components/field';
 import { Segmented } from '@/components/segmented';
 import { UploadTile } from '@/components/upload-tile';
+import { localAssetFromUploadFile } from '@/components/upload-tile-bridge';
 import { OptionCard } from '@/components/option-card';
-import type { Product } from '@/wizard/schema';
-import { isLocalAsset, isServerAsset } from '@/wizard/normalizers';
+import { isProductReady, type Product } from '@/wizard/schema';
+import type { Step2FormValues } from '@/wizard/form-mappers';
 
 export type { Product } from '@/wizard/schema';
 
-/** Derive the displayable preview URL from a ProductSource. */
-function previewUrl(p: Product): string | null {
+/** Displayable preview URL for a Product, derived from its source
+ * discriminator. Exported so CompositionControls's product-ref chip
+ * thumbnails can share the projection. */
+export function productPreviewUrl(p: Product): string | null {
   switch (p.source.kind) {
     case 'empty':
       return null;
@@ -41,94 +45,76 @@ function previewUrl(p: Product): string | null {
   }
 }
 
-function isReadyForGenerate(p: Product): boolean {
-  return p.source.kind !== 'empty';
-}
+export function ProductList() {
+  const { control, setValue } = useFormContext<Step2FormValues>();
+  // `append` lives in the parent (Card header has its own "제품 추가"
+  // button that calls form.setValue directly) — we only need fields,
+  // update, remove, move here.
+  const { fields, update, remove, move } = useFieldArray<Step2FormValues, 'products', 'id'>({
+    control,
+    name: 'products',
+    keyName: 'id',
+  });
+  // useFieldArray's `fields` snapshots row order via the internal `id`
+  // key, but each row's `source` discriminator changes don't bubble
+  // through `fields` — read live values via `useWatch` so the source
+  // toggle re-renders immediately on swap.
+  const watched = useWatch({ control, name: 'products' });
+  const products = (watched ?? []) as Product[];
+  const rembgKeep = !useWatch({ control, name: 'settings.rembg' });
 
-export interface ProductListProps {
-  products: Product[];
-  rembgKeep: boolean;
-  onProductsChange: (next: Product[] | ((prev: Product[]) => Product[])) => void;
-  onRembgChange: (remove: boolean) => void;
-  onPickServerFile: () => void;
-}
-
-export function ProductList({
-  products,
-  rembgKeep,
-  onProductsChange,
-  onRembgChange,
-  onPickServerFile,
-}: ProductListProps) {
   const [dragIdx, setDragIdx] = useState<number | null>(null);
 
-  const updateProduct = (id: string, patch: Partial<Product>) => {
-    onProductsChange((ps) => ps.map((p) => (p.id === id ? { ...p, ...patch } : p)));
+  const setSource = (idx: number, kind: 'upload' | 'url') => {
+    const cur = products[idx];
+    if (!cur) return;
+    if (kind === 'upload') {
+      update(idx, { ...cur, source: { kind: 'empty' } });
+    } else {
+      update(idx, { ...cur, source: { kind: 'url', url: '', urlInput: '' } });
+    }
   };
-  const setSource = (id: string, kind: 'upload' | 'url') => {
-    onProductsChange((ps) =>
-      ps.map((p) => {
-        if (p.id !== id) return p;
-        if (kind === 'upload') {
-          return { ...p, source: { kind: 'empty' } };
-        }
-        return { ...p, source: { kind: 'url', url: '', urlInput: '' } };
-      }),
-    );
-  };
-  const removeProduct = (id: string) =>
-    onProductsChange((ps) => ps.filter((p) => p.id !== id));
 
   const onDragStart = (idx: number) => setDragIdx(idx);
   const onDragOver = (e: React.DragEvent, idx: number) => {
     e.preventDefault();
     if (dragIdx === null || dragIdx === idx) return;
-    onProductsChange((ps) => {
-      const next = [...ps];
-      const [m] = next.splice(dragIdx, 1);
-      if (m) next.splice(idx, 0, m);
-      setDragIdx(idx);
-      return next;
-    });
+    move(dragIdx, idx);
+    setDragIdx(idx);
   };
   const onDragEnd = () => setDragIdx(null);
 
-  const allEmpty = products.length === 0 || products.every((p) => !isReadyForGenerate(p));
+  const allEmpty = products.length === 0 || products.every((p) => !isProductReady(p));
 
   return (
     <>
       {allEmpty ? (
         <UploadTile
           onFile={(f) => {
-            if (!f) return;
-            const file = f._file;
-            if (!(file instanceof File)) return;
-            onProductsChange([
-              {
-                id: Date.now().toString(36),
-                name: f.name,
-                source: {
-                  kind: 'localFile',
-                  asset: {
-                    file,
-                    previewUrl: f.url ?? '',
-                    name: f.name ?? file.name,
-                  },
-                },
-              },
-            ]);
+            const asset = localAssetFromUploadFile(f);
+            if (!asset) return;
+            // Replace the entire products array — this is the empty
+            // first-product flow and any leftover empty rows are
+            // placeholders the user hasn't engaged with.
+            setValue(
+              'products',
+              [{ id: Date.now().toString(36), name: asset.name, source: { kind: 'localFile', asset } }],
+              { shouldDirty: true, shouldValidate: true },
+            );
           }}
           label="제품 사진 올리기"
           sub="배경이 없는 PNG가 제일 깔끔해요"
         />
       ) : (
         <div className="product-list">
-          {products.map((p, idx) => {
-            const url = previewUrl(p);
+          {fields.map((field, idx) => {
+            const p = products[idx];
+            if (!p) return null;
+            const url = productPreviewUrl(p);
             const sourceKind: 'upload' | 'url' = p.source.kind === 'url' ? 'url' : 'upload';
             return (
               <div
-                key={p.id}
+                key={field.id}
                 className={`product-row ${dragIdx === idx ? 'dragging' : ''}`}
                 draggable
                 onDragStart={() => onDragStart(idx)}
@@ -159,7 +145,7 @@ export function ProductList({
                   </div>
                   <Segmented
                     value={sourceKind}
-                    onChange={(v: 'upload' | 'url') => setSource(p.id, v)}
+                    onChange={(v: 'upload' | 'url') => setSource(idx, v)}
                     options={[
                       { value: 'upload', label: '사진 올리기', icon: 'upload' },
                       { value: 'url', label: '쇼핑몰 주소', icon: 'link' },
@@ -176,7 +162,8 @@ export function ProductList({
                         value={p.source.urlInput}
                         onChange={(e) => {
                           const next = e.target.value;
-                          updateProduct(p.id, {
+                          update(idx, {
+                            ...p,
                             source: { kind: 'url', url: next, urlInput: next },
                           });
                         }}
@@ -196,11 +183,10 @@ export function ProductList({
                         onChange={(e) => {
                           const file = e.target.files?.[0];
                           if (!file) return;
-                          // data URL (blob: fails on LAN-IP origins) +
-                          // raw File handle for the eager upload call.
                           const reader = new FileReader();
                           reader.onload = (ev) =>
-                            updateProduct(p.id, {
+                            update(idx, {
+                              ...p,
                               name: file.name,
                               source: {
                                 kind: 'localFile',
@@ -220,7 +206,7 @@ export function ProductList({
                 <button
                   type="button"
                   className="inline-flex items-center justify-center size-8 rounded-md text-muted-foreground hover:bg-secondary hover:text-destructive transition-colors"
-                  onClick={() => removeProduct(p.id)}
+                  onClick={() => remove(idx)}
                   title="제품 삭제"
                 >
                   <Icon name="trash" size={13} />
@@ -249,23 +235,19 @@ export function ProductList({
                 </>
               }
               desc="화장품·패션·기기 등 깔끔한 컷에 — 배경 다 지우고 새 배경에 얹음"
-              onClick={() => onRembgChange(true)}
+              onClick={() => setValue('settings.rembg', true, { shouldDirty: true })}
             />
             <OptionCard
               dense
               active={rembgKeep}
               title="사진 그대로 쓰기"
               desc="음식 플레이팅·가구 인테리어처럼 배경이 분위기에 도움 되는 사진에"
-              onClick={() => onRembgChange(false)}
+              onClick={() => setValue('settings.rembg', false, { shouldDirty: true })}
             />
           </div>
         </Field>
       )}
 
-      {/* "서버 파일 선택" + "제품 추가" buttons live in the parent
-       * Card's header `action` slot so they're visible even when
-       * the empty-state UploadTile is showing. No duplicate buttons
-       * here. */}
     </>
   );
 }

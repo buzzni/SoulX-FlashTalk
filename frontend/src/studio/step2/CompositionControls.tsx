@@ -2,47 +2,42 @@
  * CompositionControls — direction / shot / angle / temperature /
  * generate button row for Step 2.
  *
- * The direction textarea highlights `1번` / `2번` references
- * inline (mirror-div overlay) — same mechanic as the original
- * Step2Composite. Chip buttons below the textarea insert the
- * N번 token at the caret position.
+ * Reads/writes through `useFormContext` — the parent Step2Composite
+ * owns the form via `<FormProvider>`. The direction textarea uses an
+ * uncontrolled `register` pattern, but the live value is also
+ * `useWatch`'d so the inline `1번` highlight overlay stays in sync
+ * on every keystroke. The N번 chip insert mutates direction at the
+ * caret via `setValue`.
  */
 
 import { useRef } from 'react';
+import { Controller, useFormContext, useWatch } from 'react-hook-form';
 import { Sparkles as SparklesIcon } from 'lucide-react';
 import Icon from '../Icon.jsx';
-import { WizardButton as Button } from '@/components/wizard-button';
 import { Chip } from '@/components/chip';
 import { Field } from '@/components/field';
 import { Segmented } from '@/components/segmented';
-import type { Product } from './ProductList';
-import type { CompositionSettings } from '@/wizard/schema';
+import type { CompositionAngle, CompositionShot, Product } from '@/wizard/schema';
+import type { Step2FormValues } from '@/wizard/form-mappers';
+import { productPreviewUrl } from './ProductList';
 
 export interface CompositionControlsProps {
-  settings: CompositionSettings;
-  products: Product[];
   generating: boolean;
   errorMsg: string | null;
   canGenerate: boolean;
   missingReason: string | null;
-  onSettingsChange: (patch: Partial<CompositionSettings>) => void;
   onGenerate: () => void;
 }
 
-// Schema's CompositionShot is close|medium|far. Labels use Korean
-// film-industry standards (클로즈업/미디엄샷/풀샷); tooltips describe
-// the framing range so users don't have to know the jargon. The UI
-// previously had 4 buttons with 상반신 and 미디엄 both wired to
-// 'medium' — same value, identical behavior. Collapsed.
-const SHOT_OPTS = [
-  { v: 'close' as const, label: '클로즈업', desc: '얼굴 중심 (Close-Up)' },
-  { v: 'medium' as const, label: '미디엄샷', desc: '머리~허리 (Medium Shot)' },
-  { v: 'far' as const, label: '풀샷', desc: '전신 (Full Shot)' },
+const SHOT_OPTS: { v: CompositionShot; label: string; desc: string }[] = [
+  { v: 'close', label: '클로즈업', desc: '얼굴 중심 (Close-Up)' },
+  { v: 'medium', label: '미디엄샷', desc: '머리~허리 (Medium Shot)' },
+  { v: 'far', label: '풀샷', desc: '전신 (Full Shot)' },
 ];
-const ANGLE_OPTS = [
-  { v: 'eye' as const, label: '정면', desc: '아이레벨 — 같은 눈높이' },
-  { v: 'low' as const, label: '살짝 아래에서', desc: '로우앵글 — 인물이 더 커 보임' },
-  { v: 'high' as const, label: '살짝 위에서', desc: '하이앵글 — 인물이 더 작아 보임' },
+const ANGLE_OPTS: { v: CompositionAngle; label: string; desc: string }[] = [
+  { v: 'eye', label: '정면', desc: '아이레벨 — 같은 눈높이' },
+  { v: 'low', label: '살짝 아래에서', desc: '로우앵글 — 인물이 더 커 보임' },
+  { v: 'high', label: '살짝 위에서', desc: '하이앵글 — 인물이 더 작아 보임' },
 ];
 
 const DIRECTION_EXAMPLES = [
@@ -55,32 +50,36 @@ const DIRECTION_EXAMPLES = [
 ];
 
 export function CompositionControls({
-  settings,
-  products,
   generating,
   errorMsg,
   canGenerate,
   missingReason,
-  onSettingsChange,
   onGenerate,
 }: CompositionControlsProps) {
+  const { control, register, setValue } = useFormContext<Step2FormValues>();
   const directionRef = useRef<HTMLTextAreaElement | null>(null);
+
+  // Watch what the highlight overlay needs. Direction triggers the
+  // mirror-div re-render on every keystroke; products is only used
+  // for the N번 chip thumbnails and validity color (so the highlight
+  // dims a 3번 reference when only 2 products exist).
+  const direction = useWatch({ control, name: 'settings.direction' }) ?? '';
+  const products = (useWatch({ control, name: 'products' }) ?? []) as Product[];
 
   const insertProductRef = (idx: number) => {
     const ref = `${idx + 1}번`;
     const ta = directionRef.current;
-    const cur = settings.direction || '';
+    const cur = direction;
     if (!ta) {
-      onSettingsChange({
-        direction: cur + (cur && !cur.endsWith(' ') ? ' ' : '') + ref + ' ',
-      });
+      const next = cur + (cur && !cur.endsWith(' ') ? ' ' : '') + ref + ' ';
+      setValue('settings.direction', next, { shouldDirty: true });
       return;
     }
     const s = ta.selectionStart ?? cur.length;
     const e = ta.selectionEnd ?? cur.length;
     const insert = ref + ' ';
     const next = cur.slice(0, s) + insert + cur.slice(e);
-    onSettingsChange({ direction: next });
+    setValue('settings.direction', next, { shouldDirty: true });
     requestAnimationFrame(() => {
       if (!directionRef.current) return;
       const pos = s + insert.length;
@@ -89,15 +88,16 @@ export function CompositionControls({
     });
   };
 
+  const directionRegister = register('settings.direction');
+
   return (
     <>
       <Field label="구도 지시" hint="한 문장으로 적어도 되고, 여러 제품을 따로 적어도 돼요">
         <div className="hl-textarea">
           <div className="hl-textarea__mirror" aria-hidden>
             {(() => {
-              const text = settings.direction || '';
-              if (!text) return ' ';
-              const parts = text.split(/(\d+번)/);
+              if (!direction) return ' ';
+              const parts = direction.split(/(\d+번)/);
               return parts.map((chunk, i) => {
                 const match = chunk.match(/^(\d+)번$/);
                 if (match) {
@@ -116,12 +116,14 @@ export function CompositionControls({
             <span>{'​'}</span>
           </div>
           <textarea
-            ref={directionRef}
+            {...directionRegister}
+            ref={(el) => {
+              directionRegister.ref(el);
+              directionRef.current = el;
+            }}
             className="textarea hl-textarea__input"
             rows={3}
             placeholder="예) 소파에 앉아 1번은 손에 들고, 2번은 옆 테이블 위에 놓기"
-            value={settings.direction || ''}
-            onChange={(e) => onSettingsChange({ direction: e.target.value })}
             onScroll={(e) => {
               const mirror = (e.target as HTMLTextAreaElement)
                 .previousSibling as HTMLElement | null;
@@ -154,15 +156,7 @@ export function CompositionControls({
             >
               <span className="product-ref-thumb">
                 {(() => {
-                  // Derive preview URL from the source discriminator.
-                  const url =
-                    p.source.kind === 'localFile'
-                      ? p.source.asset.previewUrl
-                      : p.source.kind === 'uploaded'
-                        ? p.source.asset.url
-                        : p.source.kind === 'url'
-                          ? p.source.url
-                          : null;
+                  const url = productPreviewUrl(p);
                   return url ? (
                     <img src={url} alt="" />
                   ) : (
@@ -183,7 +177,10 @@ export function CompositionControls({
       </div>
       <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
         {DIRECTION_EXAMPLES.map((ex) => (
-          <Chip key={ex} onClick={() => onSettingsChange({ direction: ex })}>
+          <Chip
+            key={ex}
+            onClick={() => setValue('settings.direction', ex, { shouldDirty: true })}
+          >
             {ex}
           </Chip>
         ))}
@@ -192,34 +189,46 @@ export function CompositionControls({
       <hr className="hr" />
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
-        <Field label="샷 크기">
-          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-            {SHOT_OPTS.map((o) => (
-              <Chip
-                key={o.v}
-                on={settings.shot === o.v}
-                onClick={() => onSettingsChange({ shot: o.v })}
-                title={o.desc}
-              >
-                {o.label}
-              </Chip>
-            ))}
-          </div>
-        </Field>
-        <Field label="카메라 앵글">
-          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-            {ANGLE_OPTS.map((o) => (
-              <Chip
-                key={o.v}
-                on={settings.angle === o.v}
-                onClick={() => onSettingsChange({ angle: o.v })}
-                title={o.desc}
-              >
-                {o.label}
-              </Chip>
-            ))}
-          </div>
-        </Field>
+        <Controller
+          control={control}
+          name="settings.shot"
+          render={({ field }) => (
+            <Field label="샷 크기">
+              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                {SHOT_OPTS.map((o) => (
+                  <Chip
+                    key={o.v}
+                    on={field.value === o.v}
+                    onClick={() => field.onChange(o.v)}
+                    title={o.desc}
+                  >
+                    {o.label}
+                  </Chip>
+                ))}
+              </div>
+            </Field>
+          )}
+        />
+        <Controller
+          control={control}
+          name="settings.angle"
+          render={({ field }) => (
+            <Field label="카메라 앵글">
+              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                {ANGLE_OPTS.map((o) => (
+                  <Chip
+                    key={o.v}
+                    on={field.value === o.v}
+                    onClick={() => field.onChange(o.v)}
+                    title={o.desc}
+                  >
+                    {o.label}
+                  </Chip>
+                ))}
+              </div>
+            </Field>
+          )}
+        />
       </div>
 
       <hr className="hr" />
@@ -228,14 +237,20 @@ export function CompositionControls({
         label="변동성"
         hint="같은 입력으로도 결과를 얼마나 다양하게 뽑을지 — 안정적이면 4장이 비슷, 창의적이면 제각각"
       >
-        <Segmented
-          value={settings.temperature ?? 0.7}
-          onChange={(v: number) => onSettingsChange({ temperature: v })}
-          options={[
-            { value: 0.4, label: '안정적' },
-            { value: 0.7, label: '보통' },
-            { value: 1.0, label: '창의적' },
-          ]}
+        <Controller
+          control={control}
+          name="settings.temperature"
+          render={({ field }) => (
+            <Segmented
+              value={(field.value as number | undefined) ?? 0.7}
+              onChange={field.onChange}
+              options={[
+                { value: 0.4, label: '안정적' },
+                { value: 0.7, label: '보통' },
+                { value: 1.0, label: '창의적' },
+              ]}
+            />
+          )}
         />
       </Field>
 

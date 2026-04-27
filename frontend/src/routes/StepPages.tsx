@@ -40,16 +40,13 @@ export function Step1Page() {
 
 export function Step2Page() {
   const state = useWizardStore();
-  const updateState = useWizardStore((s) => s.updateState);
   const epoch = useWizardStore((s) => s.wizardEpoch);
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const update = (u: any) => updateState(u);
   return (
     <ErrorBoundary
       FallbackComponent={(props) => <StepErrorFallback {...props} step={2} />}
       resetKeys={[epoch]}
     >
-      <Step2Composite key={epoch} state={state} update={update} />
+      <Step2Composite key={epoch} state={state} />
     </ErrorBoundary>
   );
 }
