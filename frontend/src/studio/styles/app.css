@@ -280,9 +280,12 @@
   margin: 0;
 }
 .composite-canvas__img {
+  /* Generated images are 9:16 vertical. Cap absolute width so the hero
+   * stays a poster, not a billboard, on wide canvases. max-width 260
+   * = 460 * 9/16, matching the previous max-height visual budget. */
   width: 100%;
+  max-width: 260px;
   aspect-ratio: 9 / 16;
-  max-height: 460px;
   object-fit: cover;
   display: block;
   background: var(--bg-elev);
