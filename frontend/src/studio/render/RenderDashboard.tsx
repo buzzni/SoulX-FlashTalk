@@ -22,7 +22,14 @@ import { WizardButton as Button } from '@/components/wizard-button';
 import { generateVideo } from '../../api/video';
 import { getVideoMeta } from '../../api/file';
 import { humanizeError } from '../../api/http';
-import { clearDraftIfDispatched, markDispatched } from '../../lib/wizardNav';
+import {
+  clearDispatchSnapshot,
+  clearDraftIfDispatched,
+  getDispatchSnapshot,
+  markDispatched,
+} from '../../lib/wizardNav';
+import { computeDispatchSignature } from '../../lib/dispatchSignature';
+import { isTaskLive } from '../../api/queue';
 import { useRenderJob } from '../../hooks/useRenderJob';
 import { useQueuePosition } from '../../stores/queueStore';
 import { RESOLUTION_META } from '../../wizard/schema';
@@ -90,6 +97,30 @@ export default function RenderDashboard({
 
     (async () => {
       try {
+        // ── Idempotency gate. dispatchedRef only protects this single
+        //    component instance — refresh, fast double-click, or
+        //    back-and-click all rebuild the instance with current=false
+        //    and would re-POST without this. sessionStorage carries the
+        //    last dispatched task across mounts; if its signature
+        //    matches the current wizard intent and the task is still
+        //    live at the backend, attach to it instead of duplicating.
+        const currentSig = computeDispatchSignature(state);
+        const snap = getDispatchSnapshot();
+        if (snap && snap.signature === currentSig) {
+          const live = await isTaskLive(snap.taskId, {
+            signal: controller.signal,
+          }).catch(() => false);
+          if (!alive) return;
+          if (live) {
+            navigate(`/render/${snap.taskId}`, { replace: true });
+            return;
+          }
+          // Prior task no longer in-flight (completed / errored /
+          // cancelled / 404'd). Drop the stale snapshot so a fresh
+          // dispatch path runs and writes its own.
+          clearDispatchSnapshot();
+        }
+
         // Audio path lives on `voice.generation.audio.path` (tts /
         // clone) or `voice.audio.path` (upload mode, once the file
         // has uploaded — LocalAsset means still uploading and surfaces
@@ -126,8 +157,10 @@ export default function RenderDashboard({
         // completion event can auto-reset the wizard. Reset can't
         // happen here yet — RenderDashboard still depends on the
         // wizard state (resolution etc.) for display fallbacks until
-        // the queue snapshot lands.
-        markDispatched(id);
+        // the queue snapshot lands. The signature lets the next mount
+        // (refresh / back-and-click) recognize this same intent and
+        // attach instead of re-POSTing.
+        markDispatched(id, { signature: currentSig });
         // Promote the URL from /render → /render/:taskId so refresh
         // survives and the task is permalink-able. `replace: true` so
         // the back button skips the transient dispatch URL. No

@@ -44,12 +44,60 @@ export function discardDraft(): void {
 // ────────────────────────────────────────────────────────────────────
 
 const DISPATCHED_KEY = storageKey('justDispatched');
+// Stores {taskId, signature, at} so /render-dispatch can detect a
+// duplicate POST (same wizard intent + still-live task) on refresh /
+// fast double-click / back-and-click. The legacy DISPATCHED_KEY remains
+// in lockstep so clearDraftIfDispatched stays a one-liner.
+const DISPATCH_SNAPSHOT_KEY = storageKey('dispatchSnapshot');
 
-export function markDispatched(taskId: string): void {
+export interface DispatchSnapshot {
+  taskId: string;
+  signature: string;
+  at: number;
+}
+
+export function markDispatched(
+  taskId: string,
+  options?: { signature?: string },
+): void {
   try {
     sessionStorage.setItem(DISPATCHED_KEY, taskId);
+    if (options?.signature) {
+      const snap: DispatchSnapshot = {
+        taskId,
+        signature: options.signature,
+        at: Date.now(),
+      };
+      sessionStorage.setItem(DISPATCH_SNAPSHOT_KEY, JSON.stringify(snap));
+    }
   } catch {
     /* sessionStorage unavailable — auto-reset just won't trigger */
+  }
+}
+
+export function getDispatchSnapshot(): DispatchSnapshot | null {
+  try {
+    const raw = sessionStorage.getItem(DISPATCH_SNAPSHOT_KEY);
+    if (!raw) return null;
+    const parsed: unknown = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object') return null;
+    const obj = parsed as Record<string, unknown>;
+    if (typeof obj.taskId !== 'string' || typeof obj.signature !== 'string') return null;
+    return {
+      taskId: obj.taskId,
+      signature: obj.signature,
+      at: typeof obj.at === 'number' ? obj.at : 0,
+    };
+  } catch {
+    return null;
+  }
+}
+
+export function clearDispatchSnapshot(): void {
+  try {
+    sessionStorage.removeItem(DISPATCH_SNAPSHOT_KEY);
+  } catch {
+    /* sessionStorage unavailable */
   }
 }
 
@@ -62,6 +110,7 @@ export function clearDraftIfDispatched(completedTaskId: string): void {
     if (sessionStorage.getItem(DISPATCHED_KEY) === completedTaskId) {
       useWizardStore.getState().reset();
       sessionStorage.removeItem(DISPATCHED_KEY);
+      sessionStorage.removeItem(DISPATCH_SNAPSHOT_KEY);
     }
   } catch {
     /* sessionStorage unavailable */

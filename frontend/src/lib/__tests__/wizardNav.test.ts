@@ -7,8 +7,10 @@
 
 import { describe, it, expect, beforeEach } from 'vitest';
 import {
+  clearDispatchSnapshot,
   clearDraftIfDispatched,
   formatDraftAge,
+  getDispatchSnapshot,
   markDispatched,
 } from '../wizardNav';
 import { useWizardStore, INITIAL_WIZARD_STATE } from '../../stores/wizardStore';
@@ -78,5 +80,52 @@ describe('markDispatched / clearDraftIfDispatched', () => {
     const stamp = useWizardStore.getState().lastSavedAt;
     clearDraftIfDispatched('task-A');
     expect(useWizardStore.getState().lastSavedAt).toBe(stamp);
+  });
+});
+
+describe('dispatch snapshot — refresh idempotency', () => {
+  beforeEach(() => {
+    sessionStorage.clear();
+  });
+
+  it('returns null before any dispatch', () => {
+    expect(getDispatchSnapshot()).toBeNull();
+  });
+
+  it('roundtrips taskId + signature on the second mount', () => {
+    // First mount writes the snapshot; refresh / new mount reads it.
+    markDispatched('task-A', { signature: 'sig-1' });
+    const snap = getDispatchSnapshot();
+    expect(snap).not.toBeNull();
+    expect(snap?.taskId).toBe('task-A');
+    expect(snap?.signature).toBe('sig-1');
+    expect(typeof snap?.at).toBe('number');
+  });
+
+  it('omits snapshot when no signature given (legacy callers stay legacy)', () => {
+    markDispatched('task-A');
+    expect(getDispatchSnapshot()).toBeNull();
+  });
+
+  it('clearDispatchSnapshot drops the snapshot but leaves justDispatched alone', () => {
+    markDispatched('task-A', { signature: 'sig-1' });
+    clearDispatchSnapshot();
+    expect(getDispatchSnapshot()).toBeNull();
+    // legacy auto-reset still works on the remaining justDispatched key
+    expect(sessionStorage.getItem('showhost.justDispatched.v1')).toBe('task-A');
+  });
+
+  it('clearDraftIfDispatched wipes both keys when ids match', () => {
+    markDispatched('task-A', { signature: 'sig-1' });
+    clearDraftIfDispatched('task-A');
+    expect(getDispatchSnapshot()).toBeNull();
+    expect(sessionStorage.getItem('showhost.justDispatched.v1')).toBeNull();
+  });
+
+  it('returns null on malformed JSON in storage (forward-compat with v0 strings)', () => {
+    // v0 sessions wrote a raw task_id string under the new key by mistake;
+    // we must not crash, just treat it as absent.
+    sessionStorage.setItem('showhost.dispatchSnapshot.v1', 'not-json');
+    expect(getDispatchSnapshot()).toBeNull();
   });
 });

@@ -370,6 +370,10 @@ async def _run_torchrun_inference(
     env["AUDIO_TRIM_PAD_MS"] = str(config.AUDIO_TRIM_PAD_MS)
     # Fast-fail on NCCL hang so watchdog kicks in instead of silent stall.
     env.setdefault("NCCL_ASYNC_ERROR_HANDLING", "1")
+    # torchrun spawns workers from scripts/ and only puts that dir on sys.path,
+    # so flash_talk/* imports fail without explicit PYTHONPATH.
+    existing_pp = env.get("PYTHONPATH", "")
+    env["PYTHONPATH"] = config.PROJECT_ROOT + (":" + existing_pp if existing_pp else "")
 
     cmd = [
         "torchrun",
@@ -454,12 +458,20 @@ async def _run_torchrun_inference(
         _active_processes.pop(task_id, None)
 
     if timed_out:
+        logger.warning(f"Task {task_id}: torchrun timed out after {timeout_s}s")
         set_task_error(task_id, f"생성 타임아웃 ({timeout_s}s 초과)")
         return False
 
     if proc.returncode == 0 and success_payload:
         return True
 
+    # Failure path — dump last 30 child lines so backend.log carries enough
+    # context for postmortem (otherwise only a Korean user-message survives).
+    tail = "\n".join(list(log_buffer)[-30:])
+    logger.warning(
+        f"Task {task_id}: torchrun failed (exit={proc.returncode}); "
+        f"last child stdout:\n{tail}"
+    )
     if error_payload:
         kind = error_payload.get("kind", "other")
         if kind == "oom":
@@ -468,7 +480,6 @@ async def _run_torchrun_inference(
             short = (error_payload.get("msg") or "")[:200]
             set_task_error(task_id, f"생성 실패: {short}")
     else:
-        tail = "\n".join(list(log_buffer)[-30:])
         if "out of memory" in tail.lower():
             set_task_error(task_id, "GPU 메모리 부족 — 잠시 후 다시 시도하거나 해상도를 낮춰주세요.")
         else:

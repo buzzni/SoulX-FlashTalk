@@ -8,6 +8,7 @@
 import { z } from 'zod';
 import { fetchJSON } from './http';
 import { schemas } from './schemas-generated';
+import { ApiError } from './http';
 import type { QueueSnapshot } from '../types/app';
 
 export interface CallOptions {
@@ -44,4 +45,34 @@ export function cancelQueuedTask(
     signal,
     schema: CancelTaskResponseSchema,
   });
+}
+
+const TaskStateLite = z
+  .object({
+    task_id: z.string(),
+    stage: z.union([z.string(), z.null()]).optional(),
+  })
+  .passthrough();
+
+const TERMINAL_STAGES = new Set(['complete', 'completed', 'error', 'failed', 'cancelled', 'canceled']);
+
+/** True iff the task is queued or in-flight at backend right now.
+ * Returns false on 404 (task expired from task_states), on terminal
+ * stages, and on network errors (caller decides whether to refire). */
+export async function isTaskLive(
+  taskId: string,
+  { signal }: CallOptions = {},
+): Promise<boolean> {
+  try {
+    const res = await fetchJSON(`/api/tasks/${encodeURIComponent(taskId)}/state`, {
+      label: 'task state',
+      signal,
+      schema: TaskStateLite,
+    });
+    const stage = (res.stage ?? '').toLowerCase();
+    return !TERMINAL_STAGES.has(stage);
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 404) return false;
+    throw err;
+  }
 }

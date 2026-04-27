@@ -24,6 +24,13 @@ import traceback
 from collections import deque
 from datetime import datetime
 
+# torchrun puts only this script's directory on sys.path, so the
+# repo-root flash_talk/ package isn't importable without help.
+_HERE = os.path.dirname(os.path.abspath(__file__))
+_PROJECT_ROOT = os.path.dirname(_HERE)
+if _PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, _PROJECT_ROOT)
+
 import numpy as np
 import torch
 import torch.distributed as dist
