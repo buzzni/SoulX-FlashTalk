@@ -271,7 +271,12 @@
   }
 
   body {
-    @apply bg-background text-foreground antialiased;
+    /* Default to 14px (text-sm) instead of the 16px browser/Tailwind
+     * baseline. This design's body copy lands at 13–14px and explicit
+     * `text-*` utilities still override; any element that omits a size
+     * (notably GNB wrappers and library primitives like DropdownMenu)
+     * inherits 14px instead of feeling oversized at 16px. */
+    @apply bg-background text-foreground text-sm antialiased;
     font-feature-settings: "ss01", "ss02", "tnum";
     letter-spacing: -0.012em;
     line-height: 1.55;
