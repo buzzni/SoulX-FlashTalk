@@ -13,7 +13,7 @@
 
 import { API_BASE, getAuthHeaders, parseResponse } from './http';
 import { paragraphsToScript, stringifyResolution } from './mapping';
-import type { Background, Composition, Host, ResolutionKey, Voice } from '../wizard/schema';
+import type { Background, Composition, Host, ImageQuality, ResolutionKey, Voice } from '../wizard/schema';
 import { RESOLUTION_META } from '../wizard/schema';
 import { isServerAsset } from '../wizard/normalizers';
 
@@ -25,7 +25,7 @@ export interface GenerateVideoInput {
     background?: Background | null;
     voice?: Voice | null;
     resolution: ResolutionKey | null;
-    imageQuality?: string;
+    imageQuality?: ImageQuality;
     /** Wizard store stores camelCase; api-mappers maps to wire `playlist_id`. */
     playlistId?: string | null;
   };
