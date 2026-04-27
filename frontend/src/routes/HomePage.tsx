@@ -22,6 +22,8 @@ import {
   formatRelativeDateTime,
   videoTitle,
 } from '../lib/format';
+import { startNewVideo } from '../lib/wizardNav';
+import { DraftBanner } from '../components/draft-banner';
 
 interface HistoryItem {
   task_id: string;
@@ -115,11 +117,13 @@ export function HomePage() {
           </p>
         </div>
 
+        <DraftBanner />
+
         {/* Quickstart cards */}
         <div className="grid grid-cols-1 md:grid-cols-[1.3fr_1fr] gap-3.5 mb-8">
           <button
             type="button"
-            onClick={() => navigate('/step/1')}
+            onClick={() => startNewVideo(navigate)}
             className="group surface-card-dark text-left p-6 cursor-pointer transition-all hover:translate-y-[-1px] hover:shadow-[var(--shadow-2)]"
           >
             <span className="inline-block px-2.5 py-1 rounded-full bg-white/15 text-[#b9d3ff] text-[11px] font-semibold mb-4">
@@ -220,7 +224,7 @@ export function HomePage() {
               action={
                 <button
                   type="button"
-                  onClick={() => navigate('/step/1')}
+                  onClick={() => startNewVideo(navigate)}
                   className="inline-flex items-center gap-1.5 px-4 py-2 bg-primary text-primary-foreground rounded-md text-[13px] font-semibold hover:bg-[var(--primary-hover)] transition-colors cursor-pointer"
                 >
                   지금 만들기 <ArrowRight className="size-3.5" />

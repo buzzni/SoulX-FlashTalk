@@ -12,6 +12,7 @@ import {
   Home,
   FolderOpen,
   Plus,
+  Play,
   HelpCircle,
   Settings,
   Moon,
@@ -20,6 +21,13 @@ import {
 import { getTheme, subscribeTheme, toggleTheme } from '../lib/theme';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { Brand } from '../components/brand';
+import { useLastSavedAt } from '../stores/wizardStore';
+import {
+  formatDraftAge,
+  resumeVideo,
+  startNewVideo,
+  useDraftAgeTick,
+} from '../lib/wizardNav';
 
 interface SidebarProps {
   active: 'home' | 'results' | 'mypage';
@@ -28,6 +36,8 @@ interface SidebarProps {
 export function Sidebar({ active }: SidebarProps) {
   const navigate = useNavigate();
   const theme = useSyncExternalStore(subscribeTheme, getTheme, getTheme);
+  const lastSavedAt = useLastSavedAt();
+  useDraftAgeTick(lastSavedAt != null);
 
   return (
     <aside className="hidden md:flex flex-col bg-sidebar-background border-r border-sidebar-border px-3.5 py-4">
@@ -40,13 +50,30 @@ export function Sidebar({ active }: SidebarProps) {
 
       <button
         type="button"
-        onClick={() => navigate('/step/1')}
+        onClick={() => startNewVideo(navigate)}
         title="새 영상 만들기 (3단계 위저드)"
         className="flex items-center gap-2 w-full px-3 py-2.5 mb-2 bg-foreground text-background rounded-md font-semibold text-[13px] tracking-[-0.014em] transition-colors hover:bg-foreground/85 cursor-pointer"
       >
         <Plus className="size-4" />
         <span>새 영상 만들기</span>
       </button>
+
+      {lastSavedAt != null && (
+        <button
+          type="button"
+          onClick={() => resumeVideo(navigate)}
+          title="진행 중인 작업 이어서 만들기"
+          className="flex items-center justify-between gap-2 w-full px-3 py-2 mb-2 bg-card border border-border rounded-md text-[12.5px] font-semibold text-foreground tracking-[-0.012em] transition-colors hover:bg-surface-2 cursor-pointer"
+        >
+          <span className="flex items-center gap-2 min-w-0">
+            <Play className="size-3.5 text-primary shrink-0" />
+            <span className="truncate">이어 만들기</span>
+          </span>
+          <span className="text-[11px] text-muted-foreground tracking-[-0.005em] shrink-0">
+            {formatDraftAge(lastSavedAt)}
+          </span>
+        </button>
+      )}
 
       <NavGroup label="작업">
         <NavItem
