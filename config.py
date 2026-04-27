@@ -35,16 +35,15 @@ FLASHTALK_CKPT_DIR = os.path.join(PROJECT_ROOT, "models", "SoulX-FlashTalk-14B")
 FLASHTALK_WAV2VEC_DIR = os.path.join(PROJECT_ROOT, "models", "chinese-wav2vec2-base")
 
 FLASHTALK_OPTIONS = {
-    # Prompt conditions the T5 text encoder → diffusion model. Emphasizes
-    # crisp Korean articulation and well-defined mouth/teeth detail.
-    # Trade-off: this can raise eval/step3/RUBRIC.md mouth_over_articulation
-    # score (lower = better). Re-evaluate against rubric after first runs.
+    # Prompt conditions the T5 text encoder → diffusion model. Emphasize
+    # restraint on both lip and body motion: the unguarded "characters are
+    # moving" hint tended to produce jerky hand swings and exaggerated mouth
+    # openings.
     "default_prompt": (
-        "A person speaking clearly to camera with crisp, articulate Korean "
-        "pronunciation. Mouth opens and closes accurately, well-defined lips, "
-        "sharp clean teeth, precise jaw motion synchronized to speech. Subtle "
-        "natural head movement, stable shoulders, static background, minimal "
-        "hand gestures."
+        "A person is talking with subtle, natural hand gestures and minimal, "
+        "stable body movement. The lips move softly and naturally in sync "
+        "with speech, not exaggerated. Only the foreground character moves; "
+        "the background remains static."
     ),
     "audio_encode_mode": "stream",  # "stream" or "once"
     "base_seed": 9999,

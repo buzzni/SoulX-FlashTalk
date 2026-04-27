@@ -34,9 +34,13 @@ def _dedup_neg_prompt(parts):
 
 
 _BASE_NEG = 'bright tones, overexposed, static, blurred details, subtitles, style, works, paintings, images, static, overall gray, worst quality, low quality, JPEG compression residue, ugly, incomplete, extra fingers, poorly drawn hands, poorly drawn faces, deformed, disfigured, misshapen limbs, fused fingers, still picture, messy background, three legs, many people in the background, walking backwards'
-_LIPSYNC_NEG = 'blurry mouth, smudged lips, distorted teeth, crooked teeth, misaligned jaw, asynchronous lip-sync, mumbling, closed mouth while speaking, double teeth, missing teeth'
 
-multitalk_14B.sample_neg_prompt = _dedup_neg_prompt([_BASE_NEG, _LIPSYNC_NEG])
+# Note: lip-sync-specific negatives ("crooked teeth", "closed mouth while
+# speaking", "asynchronous lip-sync") were tested and reverted — pushing
+# the model toward articulation via prompts/negatives at low resolution
+# made the sync feel unnaturally emphatic without fixing the root cause
+# (audio encoder Korean phoneme coverage). Helper kept for future use.
+multitalk_14B.sample_neg_prompt = _dedup_neg_prompt([_BASE_NEG])
 
 multitalk_14B.t5_checkpoint = 'models_t5_umt5-xxl-enc-bf16.pth'
 multitalk_14B.t5_tokenizer = 'google/umt5-xxl'
