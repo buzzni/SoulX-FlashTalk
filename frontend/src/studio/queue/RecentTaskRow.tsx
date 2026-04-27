@@ -9,7 +9,7 @@
 import type { QueueEntry } from '../../types/app';
 import { formatTaskTitle } from '../taskFormat.js';
 import { statusLabel } from './queueFormat';
-import { ROW_BASE_CLASS, ROW_BUTTON_CLASS } from './styles';
+import { ROW_BASE_CLASS, RECENT_BUTTON_CLASS } from './styles';
 import { cn } from '@/lib/utils';
 
 export interface RecentTaskRowProps {
@@ -42,7 +42,7 @@ export function RecentTaskRow({ task, onOpen }: RecentTaskRowProps) {
       <button
         type="button"
         onClick={() => onOpen(task.task_id, task.status)}
-        className={ROW_BUTTON_CLASS}
+        className={RECENT_BUTTON_CLASS}
         title="결과 영상 보기"
       >
         {body}

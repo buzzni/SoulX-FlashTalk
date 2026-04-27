@@ -32,11 +32,19 @@ export const LIVE_WRAPPER_NO_CANCEL_CLASS = 'mb-1 min-w-0';
 export const ROW_AS_BUTTON_CLASS =
   'w-full cursor-pointer text-inherit font-sans text-left mb-0';
 
-// Pre-merged variant used by both LiveTaskRow + RecentTaskRow when the
-// row body is rendered as a <button>. Computed once at module load so the
-// tailwind-merge pass doesn't re-run on every queue poll re-render
-// (panel can have 6-12 rows updating per tick).
+// Pre-merged variants (computed once at module load — tailwind-merge
+// doesn't re-run on every queue poll re-render; panel can have 6-12
+// rows updating per tick).
+//
+// LIVE button: wrapped by LIVE_WRAPPER_*_CLASS which owns the row
+// spacing (mb-1). The button drops its own mb so the wrapper margin
+// isn't doubled up.
+//
+// RECENT button: no wrapper — the button IS the row. Row spacing
+// has to live on the button itself, so we re-add mb-1 over the
+// shared ROW_AS_BUTTON_CLASS (which ends in mb-0 for the LIVE case).
 export const ROW_BUTTON_CLASS = cn(ROW_BASE_CLASS, ROW_AS_BUTTON_CLASS);
+export const RECENT_BUTTON_CLASS = cn(ROW_BASE_CLASS, ROW_AS_BUTTON_CLASS, 'mb-1');
 
 // Cancel mini-button next to a live row.
 export const CANCEL_BTN_BASE_CLASS =
