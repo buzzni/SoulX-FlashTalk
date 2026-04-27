@@ -24,6 +24,10 @@ import { fetchJSON, humanizeError } from '../api/http';
 import { retryFailedTask } from '../api/queue';
 import { useWizardStore } from '../stores/wizardStore';
 import { RESOLUTION_META, type ResolutionKey } from '../wizard/schema';
+import {
+  computeValidity,
+  deepestReachableStep,
+} from '../routes/wizardValidation';
 import { ConfirmModal } from '../components/confirm-modal';
 import { schemas } from '../api/schemas-generated';
 import { formatTaskTitle } from './taskFormat.js';
@@ -119,9 +123,26 @@ export default function ResultPage() {
     if (!result) return;
     const params = (result.params ?? {}) as Record<string, unknown>;
     const meta = ((result as Record<string, unknown>).meta ?? {}) as Record<string, unknown>;
-    const metaVoice = (meta.voice && typeof meta.voice === 'object'
-      ? (meta.voice as Record<string, unknown>)
-      : {}) as Record<string, unknown>;
+    const obj = (k: string): Record<string, unknown> => {
+      const v = meta[k];
+      return v && typeof v === 'object' ? (v as Record<string, unknown>) : {};
+    };
+    const metaHost = obj('host');
+    const metaComposition = obj('composition');
+    const metaBackground = obj('background');
+    const metaVoice = obj('voice');
+    const num = (v: unknown, d: number) => (typeof v === 'number' ? v : d);
+    const str = (v: unknown) => (typeof v === 'string' ? v : null);
+    const strOr = (v: unknown, d: string) => (typeof v === 'string' ? v : d);
+
+    // Derive an imageId from a path tail (e.g. host_7158068b_s77.png →
+    // host_7158068b_s77). meta carries selectedPath/selectedUrl but
+    // never the original imageId — wizard tolerates a synthesized one.
+    const imageIdFromPath = (p: string | null): string => {
+      if (!p) return '';
+      const base = p.split('/').pop() ?? p;
+      return base.replace(/\.\w+$/, '');
+    };
 
     // backend's params.script_text is sometimes empty — meta.voice.script
     // (joined with ' [breath] ' for tts/clone, '\n\n' for upload) is the
@@ -134,6 +155,115 @@ export default function ResultPage() {
 
     const store = useWizardStore.getState();
     store.reset();
+
+    // ── Host hydrate (image + prompt + builder) ──────────────────────
+    // meta.host snapshot looks like:
+    //   { mode, selectedSeed, selectedPath, imageUrl, prompt,
+    //     negativePrompt, faceRefPath?, outfitRefPath?, outfitText?,
+    //     faceStrength?, outfitStrength?, temperature }
+    // We reconstruct Host.input + a synthetic 'ready' generation slice
+    // pinned to the saved variant so step1's gallery shows it selected.
+    const hostMode = strOr(metaHost.mode, 'text');
+    const hostSelectedPath = str(metaHost.selectedPath);
+    const hostSelectedUrl = str(metaHost.imageUrl);
+    const hostSelectedSeed = num(metaHost.selectedSeed, 0);
+    if (hostSelectedPath || hostSelectedUrl) {
+      const variant = {
+        seed: hostSelectedSeed,
+        imageId: imageIdFromPath(hostSelectedPath ?? hostSelectedUrl),
+        url: hostSelectedUrl ?? '',
+        path: hostSelectedPath ?? '',
+      };
+      store.setHost(() => ({
+        input:
+          hostMode === 'image'
+            ? {
+                kind: 'image',
+                faceRef: null,
+                outfitRef: null,
+                outfitText: strOr(metaHost.outfitText, ''),
+                extraPrompt: '',
+                faceStrength: num(metaHost.faceStrength, 0.7),
+                outfitStrength: num(metaHost.outfitStrength, 0.7),
+              }
+            : {
+                kind: 'text',
+                prompt: strOr(metaHost.prompt, ''),
+                builder: {},
+                negativePrompt: strOr(metaHost.negativePrompt, ''),
+                extraPrompt: '',
+              },
+        temperature: num(metaHost.temperature, 0.7),
+        generation: {
+          state: 'ready',
+          batchId: null,
+          variants: [variant],
+          selected: variant,
+          prevSelected: null,
+        },
+      }));
+    }
+
+    // ── Background hydrate ───────────────────────────────────────────
+    const bgSource = strOr(metaBackground.source, '');
+    if (bgSource === 'preset') {
+      store.setBackground(() => ({
+        kind: 'preset',
+        presetId: str(metaBackground.presetId),
+      }));
+    } else if (bgSource === 'prompt') {
+      store.setBackground(() => ({
+        kind: 'prompt',
+        prompt: strOr(metaBackground.prompt, ''),
+      }));
+    } else if (bgSource === 'url' && typeof metaBackground.imageUrl === 'string') {
+      store.setBackground(() => ({
+        kind: 'url',
+        url: metaBackground.imageUrl as string,
+      }));
+    }
+    // upload mode skipped — needs a re-uploaded asset to be schema-valid.
+
+    // ── Composition hydrate (image + settings) ───────────────────────
+    const compPath = str(metaComposition.selectedPath);
+    const compUrl = str(metaComposition.selectedUrl);
+    const compSeed = num(metaComposition.selectedSeed, 0);
+    if (compPath || compUrl) {
+      const compVariant = {
+        seed: compSeed,
+        imageId: imageIdFromPath(compPath ?? compUrl),
+        url: compUrl ?? '',
+        path: compPath ?? '',
+      };
+      const shotRaw = strOr(metaComposition.shot, 'medium');
+      const angleRaw = strOr(metaComposition.angle, 'eye');
+      const shot = (['closeup', 'bust', 'medium', 'full'] as const).includes(
+        shotRaw as 'closeup' | 'bust' | 'medium' | 'full',
+      )
+        ? (shotRaw as 'closeup' | 'bust' | 'medium' | 'full')
+        : 'medium';
+      const angle = (['eye', 'high', 'low'] as const).includes(
+        angleRaw as 'eye' | 'high' | 'low',
+      )
+        ? (angleRaw as 'eye' | 'high' | 'low')
+        : 'eye';
+      store.setComposition(() => ({
+        settings: {
+          direction: strOr(metaComposition.direction, ''),
+          shot,
+          angle,
+          temperature: num(metaComposition.temperature, 0.7),
+          rembg: true,
+        },
+        generation: {
+          state: 'ready',
+          batchId: null,
+          variants: [compVariant],
+          selected: compVariant,
+          prevSelected: null,
+        },
+      }));
+    }
 
     // Re-split the script back into paragraphs. Tries the tts/clone
     // separator (`[breath]`) first, falls back to upload-mode (`\n\n`),
@@ -159,8 +289,6 @@ export default function ResultPage() {
     // selection + advanced sliders + script all carry over so the user
     // doesn't have to re-pick at step 3. clone/upload have lifecycle we
     // can't fake (sample upload, audio file path) — script alone for those.
-    const num = (v: unknown, d: number) => (typeof v === 'number' ? v : d);
-    const str = (v: unknown) => (typeof v === 'string' ? v : null);
     if (metaVoice.source === 'tts' && typeof metaVoice.voiceId === 'string') {
       store.setVoice(() => ({
         source: 'tts',
@@ -196,7 +324,12 @@ export default function ResultPage() {
       if (matched) store.setResolution(matched);
     }
 
-    navigate('/step/1');
+    // Land on the deepest step that's already valid after hydration —
+    // host+composition restore in one shot, so the user usually drops
+    // straight into step 3 (review + 영상 만들기 시작) without having
+    // to re-confirm anything in step 1 / 2.
+    const valid = computeValidity(useWizardStore.getState());
+    navigate(`/step/${deepestReachableStep(valid)}`);
   };
 
   // Fetch a few recent results to show as "다른 영상 둘러보기" sidebar.
