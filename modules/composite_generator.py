@@ -663,7 +663,7 @@ async def stream_composite_candidates(
     """Async generator twin of generate_composite_candidates.
 
     Yields:
-      {"type": "init",      "direction_ko", "direction_en"}
+      {"type": "init",      "direction_ko", "direction_en", "seeds", "total"}
       {"type": "candidate", "seed", "path", "url", "done", "total"}
       {"type": "error",     "seed", "error", "done", "total"}
       {"type": "done",      "success_count", "total", "partial", "min_success_met",
@@ -682,6 +682,23 @@ async def stream_composite_candidates(
     os.makedirs(out_dir, exist_ok=True)
     tmp_dir = os.path.join(out_dir, "_tmp")
 
+    # Prompt v2: no translation — Korean direction is passed verbatim.
+    direction_en = direction_ko
+    seeds = _resolve_seeds(seeds, n)
+
+    # Mirror host_generator: emit init BEFORE the heavy product preprocessing
+    # so the UI can paint its 4 placeholder spinners as soon as the call is
+    # accepted. Without seeds in the payload the client can't size the slot
+    # grid on the first attempt (Step2Composite passes seeds=undefined on
+    # attempt 0), leaving the user staring at a blank canvas during rembg.
+    yield {
+        "type": "init",
+        "direction_ko": direction_ko,
+        "direction_en": direction_en,
+        "seeds": seeds,
+        "total": n,
+    }
+
     loop = asyncio.get_running_loop()
     processed_products: List[str] = []
     if product_image_paths:
@@ -693,10 +710,6 @@ async def stream_composite_candidates(
             ],
         )
 
-    # Prompt v2: no translation — Korean direction is passed verbatim.
-    direction_en = direction_ko
-    yield {"type": "init", "direction_ko": direction_ko, "direction_en": direction_en}
-
     scene_prompt = _build_scene_prompt(
         direction=direction_ko,
         shot=shot,
@@ -706,7 +719,6 @@ async def stream_composite_candidates(
         background_preset_label=background_preset_label,
     )
 
-    seeds = _resolve_seeds(seeds, n)
     from modules.image_compositor import scaled_timeout
     per_call_timeout = scaled_timeout(timeout_per_call, image_size)
 
