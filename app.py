@@ -552,7 +552,7 @@ async def generate_video_task(
                 "task_id": task_id,
                 "type": "generate",
                 "status": "completed",
-                "completed_at": datetime.now(),
+                "completed_at": datetime.now().isoformat(),
                 "generation_time_sec": round(generation_time, 2),
                 "video_url": f"/api/videos/{task_id}",
                 "video_storage_key": video_storage_key,
@@ -1755,7 +1755,7 @@ async def generate_conversation_task(
                 "task_id": task_id,
                 "type": "conversation",
                 "status": "completed",
-                "completed_at": datetime.now(),
+                "completed_at": datetime.now().isoformat(),
                 "generation_time_sec": round(generation_time, 2),
                 "video_url": f"/api/videos/{task_id}",
                 "video_storage_key": video_storage_key,
@@ -2001,6 +2001,12 @@ async def get_result(task_id: str, request: Request):
         # Strip user_id from the returned payload — the SPA doesn't need it
         # and we don't want to expose it indirectly.
         doc.pop("user_id", None)
+        # Legacy rows wrote `completed_at` as a BSON datetime; ResultManifest
+        # types it as Optional[str]. Coerce so pydantic validation passes.
+        for k in ("created_at", "started_at", "completed_at"):
+            v = doc.get(k)
+            if hasattr(v, "isoformat"):
+                doc[k] = v.isoformat()
         return doc
 
     # Fallback — in-flight tasks not yet persisted to studio_results.
