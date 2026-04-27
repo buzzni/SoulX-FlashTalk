@@ -160,7 +160,7 @@ export default function ResultPage() {
     <div className="studio-root" data-density="comfortable">
       <div className="app-shell" data-screen-label="06 Result">
         <header className="topbar">
-          <div style={{ display: 'flex', alignItems: 'center', gap: 20 }}>
+          <div className="flex items-center gap-5">
             <Brand size="md" to="/" title="홈으로" />
           </div>
           <div className="topbar-right">
@@ -173,32 +173,13 @@ export default function ResultPage() {
           </div>
         </header>
 
-        <div
-          style={{
-            flex: 1,
-            overflowY: 'auto',
-            padding: '28px 32px 80px',
-            background: 'var(--bg)',
-            position: 'relative',
-          }}
-        >
+        <div className="relative flex-1 overflow-y-auto px-8 pt-7 pb-20 bg-background">
           {isDone && <Confetti />}
-          <div style={{ maxWidth: 1100, margin: '0 auto', position: 'relative', zIndex: 1 }}>
-            <div className="flex justify-between items-center" style={{ marginBottom: 24 }}>
+          <div className="relative z-[1] max-w-[1100px] mx-auto">
+            <div className="flex justify-between items-center mb-6">
               <div>
-                <div style={{ fontSize: 13, color: 'var(--text-tertiary)', fontWeight: 500 }}>결과</div>
-                <h1
-                  style={{
-                    fontSize: 22,
-                    fontWeight: 700,
-                    letterSpacing: '-0.024em',
-                    lineHeight: 1.25,
-                    margin: '4px 0 0',
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: 10,
-                  }}
-                >
+                <div className="text-[13px] text-ink-3 font-medium">결과</div>
+                <h1 className="inline-flex items-center gap-2.5 text-[22px] font-bold tracking-[-0.024em] leading-[1.25] mt-1 mb-0">
                   {loading && <Spinner size="md" />}
                   {loading
                     ? '영상 정보 불러오는 중…'
@@ -211,7 +192,7 @@ export default function ResultPage() {
                           : '처리 중이에요'}
                 </h1>
               </div>
-              <div style={{ display: 'flex', gap: 8 }}>
+              <div className="flex gap-2">
                 <Button icon="plus" variant="secondary" onClick={() => navigate('/')}>
                   새로 만들기
                 </Button>
@@ -219,9 +200,9 @@ export default function ResultPage() {
             </div>
 
             {error && !result && (
-              <div className="surface-base p-5" style={{ padding: 20, borderColor: 'var(--danger)' }}>
-                <div style={{ color: 'var(--danger)', fontSize: 14 }}>{error}</div>
-                <div style={{ marginTop: 10 }}>
+              <div className="surface-base p-5 border-destructive">
+                <div className="text-destructive text-sm">{error}</div>
+                <div className="mt-2.5">
                   <Button icon="arrow_left" onClick={() => navigate('/')}>
                     처음으로 돌아가기
                   </Button>
@@ -230,25 +211,18 @@ export default function ResultPage() {
             )}
 
             {!error && result && taskId && (
-              <div className="surface-base p-5" style={{ padding: 24 }}>
-                <div
-                  style={{
-                    display: 'grid',
-                    gridTemplateColumns: '220px 1fr',
-                    gap: 28,
-                    alignItems: 'start',
-                  }}
-                >
+              <div className="surface-base p-6">
+                <div className="grid grid-cols-[220px_1fr] gap-7 items-start">
                   <ResultVideoCard
                     status={videoCardStatus}
                     videoUrl={videoUrl}
                     errorMessage={result.error ?? null}
                   />
 
-                  <div className="flex-col gap-3" style={{ minWidth: 0 }}>
+                  <div className="flex-col gap-3 min-w-0">
                     <div className="flex justify-between items-center">
                       <div>
-                        <div style={{ fontSize: 16, fontWeight: 600 }}>
+                        <div className="text-base font-semibold">
                           {formatTaskTitle(taskId, result.type || 'generate')}
                         </div>
                         <div className="text-xs text-tertiary">
@@ -293,15 +267,7 @@ export default function ResultPage() {
 
             {/* 2-column body: main details on left, related sidebar on right */}
             {!error && result && taskId && recent && recent.length > 0 && (
-              <div
-                style={{
-                  display: 'grid',
-                  gridTemplateColumns: 'minmax(0, 1fr) 280px',
-                  gap: 20,
-                  marginTop: 16,
-                  alignItems: 'start',
-                }}
-              >
+              <div className="grid grid-cols-[minmax(0,1fr)_280px] gap-5 mt-4 items-start">
                 <div>
                   {result && <ProvenanceCard result={result} />}
                 </div>
@@ -320,14 +286,11 @@ export default function ResultPage() {
 
 function RelatedRail({ items }: { items: RecentItem[] }) {
   return (
-    <aside
-      className="surface-base"
-      style={{ padding: 14, position: 'sticky', top: 16 }}
-    >
-      <div style={{ fontSize: 11.5, fontWeight: 700, color: 'var(--text-tertiary)', textTransform: 'uppercase', letterSpacing: 0.06, marginBottom: 10 }}>
+    <aside className="surface-base p-3.5 sticky top-4">
+      <div className="text-[11.5px] font-bold text-ink-3 uppercase tracking-[0.06em] mb-2.5">
         다른 영상 둘러보기
       </div>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+      <div className="flex flex-col gap-2">
         {items.map((it) => (
           <Link
             key={it.task_id}

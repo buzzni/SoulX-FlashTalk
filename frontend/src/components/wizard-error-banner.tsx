@@ -12,6 +12,7 @@
  */
 
 import Icon from '../studio/Icon.jsx';
+import { cn } from '@/lib/utils';
 
 export interface WizardErrorBannerProps {
   message: string;
@@ -23,17 +24,12 @@ export interface WizardErrorBannerProps {
 export function WizardErrorBanner({ message, hint, className }: WizardErrorBannerProps) {
   return (
     <div
-      className={className}
-      style={{
-        padding: '10px 12px',
-        background: 'var(--danger-soft)',
-        border: '1px solid var(--danger)',
-        borderRadius: 'var(--r-sm)',
-        color: 'var(--danger)',
-        fontSize: 12,
-      }}
+      className={cn(
+        'px-3 py-2.5 bg-destructive-soft border border-destructive text-destructive rounded-sm text-xs',
+        className,
+      )}
     >
-      <Icon name="alert_circle" size={13} style={{ marginRight: 6 }} />
+      <Icon name="alert_circle" size={13} className="mr-1.5" />
       {message}
       {hint && <> · {hint}</>}
     </div>

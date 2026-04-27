@@ -11,6 +11,7 @@ import { Check } from 'lucide-react';
 import { WizardButton as Button } from '@/components/wizard-button';
 import { ProfileMenu } from './ProfileMenu';
 import { Brand } from '../components/brand';
+import { cn } from '@/lib/utils';
 import type { WizardValidity } from './wizardValidation';
 
 export const STEPS = [
@@ -30,10 +31,10 @@ export interface TopBarProps {
 export function TopBar({ step, valid, onStepClick, onReset, queueSlot }: TopBarProps) {
   return (
     <header className="topbar">
-      <div style={{ display: 'flex', alignItems: 'center', gap: 20 }}>
+      <div className="flex items-center gap-5">
         <Brand size="md" to="/" title="홈으로" />
         {step !== null && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginLeft: 8 }}>
+          <div className="flex items-center gap-1 ml-2">
             {STEPS.map((s, i) => {
               const active = step === s.key;
               const done = valid?.[s.key] && step > s.key;
@@ -41,7 +42,7 @@ export function TopBar({ step, valid, onStepClick, onReset, queueSlot }: TopBarP
                 <Fragment key={s.key}>
                   <button
                     type="button"
-                    className={`step-pill ${active ? 'active' : ''} ${done ? 'done' : ''}`}
+                    className={cn('step-pill', active && 'active', done && 'done')}
                     onClick={() => onStepClick?.(s.key)}
                     title={s.full}
                     aria-current={active ? 'step' : undefined}

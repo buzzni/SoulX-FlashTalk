@@ -1,4 +1,5 @@
 import * as React from 'react';
+import { cn } from '@/lib/utils';
 
 /**
  * Sparkline — tiny inline trend chart (used in stats cards on home).
@@ -34,7 +35,7 @@ export function Sparkline({
   highlightLast = false,
 }: SparklineProps) {
   if (!data.length) {
-    return <span className={className} style={{ display: 'inline-block', width, height }} />;
+    return <span className={cn('inline-block', className)} style={{ width, height }} />;
   }
   const min = Math.min(...data, 0);
   const max = Math.max(...data, 1);
@@ -45,7 +46,7 @@ export function Sparkline({
   if (kind === 'bars') {
     const barW = Math.max(1, width / data.length - 1);
     return (
-      <svg width={width} height={height} className={className} style={{ display: 'inline-block' }} aria-hidden>
+      <svg width={width} height={height} className={cn('inline-block', className)} aria-hidden>
         {data.map((v, i) => {
           const h = Math.max(1, ((v - min) / range) * height);
           return (

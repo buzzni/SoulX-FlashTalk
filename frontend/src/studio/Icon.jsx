@@ -1,5 +1,5 @@
 // Icons — inline SVG components, minimal strokes. Ported from prototype Icon.jsx.
-const Icon = ({ name, size = 16, style = {} }) => {
+const Icon = ({ name, size = 16, style = {}, className = '' }) => {
   const paths = {
     sparkles: <><path d="M10 2l1.5 4.5L16 8l-4.5 1.5L10 14l-1.5-4.5L4 8l4.5-1.5z"/><path d="M4 14l.8 1.7L6.5 16.5l-1.7.8L4 19l-.8-1.7L1.5 16.5l1.7-.8z"/></>,
     image: <><rect x="2.5" y="2.5" width="15" height="15" rx="2"/><circle cx="7" cy="7" r="1.5"/><path d="M2.5 14l4-4 4 4 3-3 4 4"/></>,
@@ -39,7 +39,7 @@ const Icon = ({ name, size = 16, style = {} }) => {
     folder: <path d="M3 6a2 2 0 012-2h3l2 2h7a2 2 0 012 2v7a2 2 0 01-2 2H5a2 2 0 01-2-2z"/>,
   };
   return (
-    <svg width={size} height={size} viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" style={style}>
+    <svg width={size} height={size} viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" style={style} className={className}>
       {paths[name]}
     </svg>
   );

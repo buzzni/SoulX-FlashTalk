@@ -1,7 +1,0 @@
-/* Tailwind v4 entry. Kept deliberately minimal for Phase 0a — tooling only,
- * no migration yet. The `@theme` bridge to existing design tokens (--bg,
- * --accent, --r-sm, etc. defined in tokens.css) lands in Phase 4 when inline
- * styles actually start being converted to utilities. Until then Tailwind is
- * available but unused — existing CSS classes + inline styles stay in
- * charge. */
-@import "tailwindcss";

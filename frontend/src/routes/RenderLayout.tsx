@@ -66,7 +66,7 @@ export default function RenderLayout({ attachToTaskId = null }: RenderLayoutProp
             </>
           }
         >
-          <p style={{ margin: 0, lineHeight: 1.6 }}>
+          <p className="m-0 leading-[1.6]">
             지금까지 입력한 쇼호스트, 제품, 배경, 음성 설정이 모두 사라져요.
             <br />
             진행 중인 영상 작업이 있다면 그건 영향을 받지 않아요.

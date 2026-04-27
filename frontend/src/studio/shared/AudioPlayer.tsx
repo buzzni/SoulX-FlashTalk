@@ -145,7 +145,7 @@ export function AudioPlayer({ src }: AudioPlayerProps) {
         onTimeUpdate={(e) => setCurrent((e.target as HTMLAudioElement).currentTime)}
         onLoadedMetadata={(e) => setDuration((e.target as HTMLAudioElement).duration)}
         onDurationChange={(e) => setDuration((e.target as HTMLAudioElement).duration)}
-        style={{ display: 'none' }}
+        className="hidden"
       />
     </div>
   );

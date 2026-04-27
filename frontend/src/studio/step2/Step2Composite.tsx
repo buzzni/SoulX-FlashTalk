@@ -276,7 +276,7 @@ export default function Step2Composite({ state }: Step2CompositeProps) {
             title="소개할 상품"
             subtitle="여러 개 추가할 수 있어요. 구도 지시에서 ①②③ 번호로 지칭해요"
             action={
-              <div style={{ display: 'flex', gap: 6 }}>
+              <div className="flex gap-1.5">
                 <Button icon="file" size="sm" onClick={() => setPickerFor('products')}>
                   서버 파일 선택
                 </Button>

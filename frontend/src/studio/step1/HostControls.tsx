@@ -10,9 +10,10 @@
  */
 
 import { Controller, useFormContext } from 'react-hook-form';
-import Icon from '../Icon.jsx';
 import { Field } from '@/components/field';
 import { Segmented } from '@/components/segmented';
+import { Spinner } from '@/components/spinner';
+import { WizardErrorBanner } from '@/components/wizard-error-banner';
 import { Sparkles } from 'lucide-react';
 import type { ImageQuality } from '@/wizard/schema';
 import type { HostFormValues } from '@/wizard/form-mappers';
@@ -75,21 +76,7 @@ export function HostControls({
         />
       </Field>
 
-      {errorMsg && (
-        <div
-          style={{
-            padding: '10px 12px',
-            background: 'var(--danger-soft)',
-            border: '1px solid var(--danger)',
-            borderRadius: 'var(--r-sm)',
-            color: 'var(--danger)',
-            fontSize: 12,
-          }}
-        >
-          <Icon name="alert_circle" size={13} style={{ marginRight: 6 }} />
-          {errorMsg}
-        </div>
-      )}
+      {errorMsg && <WizardErrorBanner message={errorMsg} />}
 
       <div className="flex justify-between items-center gap-3 pt-1">
         <div className="text-[12.5px] text-muted-foreground">
@@ -103,7 +90,7 @@ export function HostControls({
         >
           {generating ? (
             <>
-              <span className="spinner" /> 만드는 중
+              <Spinner size="sm" /> 만드는 중
             </>
           ) : (
             <>

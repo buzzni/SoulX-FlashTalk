@@ -25,14 +25,7 @@ export function ResultActions({
   onGoHome,
 }: ResultActionsProps) {
   return (
-    <div
-      style={{
-        display: 'grid',
-        gridTemplateColumns: '1fr 1fr',
-        gap: 8,
-        marginTop: 'auto',
-      }}
-    >
+    <div className="grid grid-cols-2 gap-2 mt-auto">
       {isDone ? (
         <>
           <a

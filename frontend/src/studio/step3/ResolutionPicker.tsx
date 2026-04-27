@@ -8,6 +8,7 @@
  */
 import type { ResolutionKey } from '@/wizard/schema';
 import { RESOLUTION_META } from '@/wizard/schema';
+import { cn } from '@/lib/utils';
 
 const RES_OPTION_KEYS: ResolutionKey[] = ['448p', '480p', '720p', '1080p'];
 
@@ -24,12 +25,10 @@ export function ResolutionPicker({ selectedKey, onSelect }: ResolutionPickerProp
         return (
         <button
           key={r.key}
-          className={`res-tile ${selectedKey === r.key ? 'on' : ''}`}
+          className={cn('res-tile', selectedKey === r.key && 'on')}
           onClick={() => onSelect(r.key)}
         >
-          <div className="res-label" style={{ marginBottom: 2 }}>
-            {r.label}
-          </div>
+          <div className="res-label mb-0.5">{r.label}</div>
           <div className="res-dim">
             {key} · {r.width}×{r.height}
           </div>

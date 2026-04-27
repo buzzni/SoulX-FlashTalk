@@ -13,6 +13,7 @@ import { fetchJSON } from '../api/http';
 import { schemas } from '../api/schemas-generated';
 import { getUser, logout, subscribe } from '../stores/authStore';
 import { getTheme, subscribeTheme, setTheme } from '../lib/theme';
+import { cn } from '@/lib/utils';
 
 const NOTIFY_KEY = 'showhost.notify.v1';
 
@@ -145,11 +146,16 @@ export function MyPage() {
                 type="button"
                 onClick={onToggleNotify}
                 aria-pressed={notify}
-                className={`relative w-11 h-6 rounded-full transition-colors cursor-pointer ${notify ? 'bg-primary' : 'bg-rule-strong'}`}
+                className={cn(
+                  'relative w-11 h-6 rounded-full transition-colors cursor-pointer',
+                  notify ? 'bg-primary' : 'bg-rule-strong',
+                )}
               >
                 <span
-                  className="absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform"
-                  style={{ transform: notify ? 'translateX(20px)' : 'translateX(0)' }}
+                  className={cn(
+                    'absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform',
+                    notify ? 'translate-x-5' : 'translate-x-0',
+                  )}
                 />
               </button>
             }
@@ -182,11 +188,9 @@ interface RowProps {
 
 function Row({ label, value, suffix, mono, pill, last }: RowProps) {
   return (
-    <div className={`grid grid-cols-[100px_1fr] md:grid-cols-[140px_1fr] items-center gap-4 px-4 py-3 ${last ? '' : 'border-b border-border'}`}>
+    <div className={cn('grid grid-cols-[100px_1fr] md:grid-cols-[140px_1fr] items-center gap-4 px-4 py-3', !last && 'border-b border-border')}>
       <span className="text-[12.5px] font-semibold text-muted-foreground">{label}</span>
-      <span
-        className={`text-[14px] text-foreground ${mono ? 'font-mono tabular-nums' : 'font-medium'}`}
-      >
+      <span className={cn('text-[14px] text-foreground', mono ? 'font-mono tabular-nums' : 'font-medium')}>
         {pill ? (
           <span className="pill-neutral">{value}</span>
         ) : (
@@ -238,11 +242,12 @@ function ThemeButton({ active, onClick, icon, label }: ThemeButtonProps) {
     <button
       type="button"
       onClick={onClick}
-      className={`inline-flex items-center gap-1.5 h-7 px-2.5 rounded-[4px] text-[12px] font-medium transition-all cursor-pointer ${
+      className={cn(
+        'inline-flex items-center gap-1.5 h-7 px-2.5 rounded-[4px] text-[12px] font-medium transition-all cursor-pointer',
         active
           ? 'bg-card text-foreground shadow-[0_1px_2px_rgba(0,0,0,0.06)]'
-          : 'text-muted-foreground hover:text-foreground'
-      }`}
+          : 'text-muted-foreground hover:text-foreground',
+      )}
     >
       {icon} {label}
     </button>

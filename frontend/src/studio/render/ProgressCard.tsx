@@ -14,6 +14,19 @@ import { Check } from 'lucide-react';
 import { Spinner } from '@/components/spinner';
 import { STAGES, formatDateTime, formatElapsed } from './stages';
 
+type StageState = 'done' | 'active' | 'idle';
+
+const DOT_CLASS: Record<StageState, string> = {
+  done: 'bg-success text-white',
+  active: 'bg-primary text-white',
+  idle: 'bg-card border border-border text-muted-foreground',
+};
+const LABEL_CLASS: Record<StageState, string> = {
+  done: 'text-success-on-soft',
+  active: 'text-foreground',
+  idle: 'text-muted-foreground',
+};
+
 export interface ProgressCardProps {
   currentStageIdx: number;
   /** 0-100 range (percent). */
@@ -38,7 +51,7 @@ export function ProgressCard({
   return (
     <>
       <div>
-        <div className="flex justify-between" style={{ marginBottom: 6, fontSize: 12 }}>
+        <div className="flex justify-between mb-1.5 text-xs">
           <span className="text-secondary">
             {message || STAGES[currentStageIdx]?.label}
           </span>
@@ -51,15 +64,7 @@ export function ProgressCard({
 
       {/* Timestamps stack vertically — labels are long ("작업생성날짜") and
            inline they wrapped messily on the narrow card column. */}
-      <div
-        style={{
-          display: 'flex',
-          flexDirection: 'column',
-          gap: 4,
-          fontSize: 11,
-          color: 'var(--text-tertiary)',
-        }}
-      >
+      <div className="flex flex-col gap-1 text-[11px] text-ink-3">
         <span className="mono num">
           {elapsedMs == null ? '경과 — (대기 중)' : `경과 ${formatElapsed(elapsedMs)}`}
         </span>
@@ -81,53 +86,34 @@ export function ProgressCard({
       {/* Stage timeline — connector dots + lines, with active stage shimmer */}
       <div className="flex flex-col gap-0">
         {STAGES.map((s, i) => {
-          const done = i < currentStageIdx;
-          const active = i === currentStageIdx;
+          const state: StageState =
+            i < currentStageIdx ? 'done' : i === currentStageIdx ? 'active' : 'idle';
+          const isDone = state === 'done';
+          const isActive = state === 'active';
           const isLast = i === STAGES.length - 1;
           return (
             <div key={s.key} className="grid grid-cols-[28px_1fr] gap-3 items-stretch">
               {/* Left rail — dot + connector line */}
               <div className="flex flex-col items-center">
-                <div
-                  className={`grid place-items-center size-6 rounded-full transition-colors ${
-                    done
-                      ? 'bg-success text-white'
-                      : active
-                        ? 'bg-primary text-white'
-                        : 'bg-card border border-border text-muted-foreground'
-                  }`}
-                >
-                  {done ? (
+                <div className={`grid place-items-center size-6 rounded-full transition-colors ${DOT_CLASS[state]}`}>
+                  {isDone ? (
                     <Check className="size-3.5" />
-                  ) : active ? (
+                  ) : isActive ? (
                     <Spinner size="xs" />
                   ) : (
                     <span className="text-[10px] font-bold tabular-nums">{i + 1}</span>
                   )}
                 </div>
                 {!isLast && (
-                  <div
-                    className={`flex-1 w-0.5 my-1 transition-colors ${
-                      done ? 'bg-success' : 'bg-border'
-                    }`}
-                    style={{ minHeight: 18 }}
-                  />
+                  <div className={`flex-1 w-0.5 my-1 min-h-[18px] transition-colors ${isDone ? 'bg-success' : 'bg-border'}`} />
                 )}
               </div>
               {/* Right — label + status */}
-              <div className={`pb-3 ${active ? '' : ''}`}>
-                <div
-                  className={`text-[12.5px] font-semibold tracking-[-0.012em] ${
-                    done
-                      ? 'text-success-on-soft'
-                      : active
-                        ? 'text-foreground'
-                        : 'text-muted-foreground'
-                  }`}
-                >
+              <div className="pb-3">
+                <div className={`text-[12.5px] font-semibold tracking-[-0.012em] ${LABEL_CLASS[state]}`}>
                   {s.label}
                 </div>
-                {active && message && (
+                {isActive && message && (
                   <div className="text-[11px] text-muted-foreground mt-0.5">
                     {message}
                   </div>

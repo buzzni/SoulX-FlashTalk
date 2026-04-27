@@ -13,10 +13,11 @@
 import { useRef } from 'react';
 import { Controller, useFormContext, useWatch } from 'react-hook-form';
 import { Sparkles as SparklesIcon } from 'lucide-react';
-import Icon from '../Icon.jsx';
 import { Chip } from '@/components/chip';
 import { Field } from '@/components/field';
 import { Segmented } from '@/components/segmented';
+import { Spinner } from '@/components/spinner';
+import { WizardErrorBanner } from '@/components/wizard-error-banner';
 import type { CompositionAngle, CompositionShot, Product } from '@/wizard/schema';
 import type { Step2FormValues } from '@/wizard/form-mappers';
 import { productPreviewUrl } from './ProductList';
@@ -135,18 +136,8 @@ export function CompositionControls({
       </Field>
 
       {products.length > 0 && (
-        <div
-          style={{
-            marginTop: 10,
-            display: 'flex',
-            alignItems: 'center',
-            gap: 6,
-            flexWrap: 'wrap',
-          }}
-        >
-          <span className="text-xs text-tertiary" style={{ marginRight: 2 }}>
-            번호 넣기
-          </span>
+        <div className="flex items-center flex-wrap gap-1.5 mt-2.5">
+          <span className="text-xs text-tertiary mr-0.5">번호 넣기</span>
           {products.map((p, i) => (
             <button
               key={p.id}
@@ -173,10 +164,8 @@ export function CompositionControls({
         </div>
       )}
 
-      <div className="text-xs text-tertiary" style={{ marginTop: 14, marginBottom: 6 }}>
-        예시 · 클릭하면 통째로 입력돼요
-      </div>
-      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+      <div className="text-xs text-tertiary mt-3.5 mb-1.5">예시 · 클릭하면 통째로 입력돼요</div>
+      <div className="flex flex-wrap gap-1.5">
         {DIRECTION_EXAMPLES.map((ex) => (
           <Chip
             key={ex}
@@ -189,13 +178,13 @@ export function CompositionControls({
 
       <hr className="hr" />
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+      <div className="grid grid-cols-2 gap-3.5">
         <Controller
           control={control}
           name="settings.shot"
           render={({ field }) => (
             <Field label="샷 크기">
-              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+              <div className="flex flex-wrap gap-1.5">
                 {SHOT_OPTS.map((o) => (
                   <Chip
                     key={o.v}
@@ -215,7 +204,7 @@ export function CompositionControls({
           name="settings.angle"
           render={({ field }) => (
             <Field label="카메라 앵글">
-              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+              <div className="flex flex-wrap gap-1.5">
                 {ANGLE_OPTS.map((o) => (
                   <Chip
                     key={o.v}
@@ -255,22 +244,7 @@ export function CompositionControls({
         />
       </Field>
 
-      {errorMsg && (
-        <div
-          style={{
-            padding: '10px 12px',
-            marginBottom: 10,
-            background: 'var(--danger-soft)',
-            border: '1px solid var(--danger)',
-            borderRadius: 'var(--r-sm)',
-            color: 'var(--danger)',
-            fontSize: 12,
-          }}
-        >
-          <Icon name="alert_circle" size={13} style={{ marginRight: 6 }} />
-          {errorMsg}
-        </div>
-      )}
+      {errorMsg && <WizardErrorBanner message={errorMsg} className="mb-2.5" />}
 
       <div className="flex justify-between items-center gap-3 pt-1">
         <div className="text-[12.5px] text-muted-foreground">
@@ -284,7 +258,7 @@ export function CompositionControls({
         >
           {generating ? (
             <>
-              <span className="spinner" /> 합성 중
+              <Spinner size="sm" /> 합성 중
             </>
           ) : (
             <>
@@ -295,9 +269,7 @@ export function CompositionControls({
         </button>
       </div>
       {!canGenerate && missingReason && (
-        <div className="text-xs text-tertiary" style={{ marginTop: 6 }}>
-          {missingReason}
-        </div>
+        <div className="text-xs text-tertiary mt-1.5">{missingReason}</div>
       )}
     </>
   );

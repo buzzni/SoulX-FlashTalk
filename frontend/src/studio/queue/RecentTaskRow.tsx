@@ -9,7 +9,8 @@
 import type { QueueEntry } from '../../types/app';
 import { formatTaskTitle } from '../taskFormat.js';
 import { statusLabel } from './queueFormat';
-import { itemStyle } from './styles';
+import { ROW_BASE_CLASS, ROW_BUTTON_CLASS } from './styles';
+import { cn } from '@/lib/utils';
 
 export interface RecentTaskRowProps {
   task: QueueEntry;
@@ -21,25 +22,15 @@ export function RecentTaskRow({ task, onOpen }: RecentTaskRowProps) {
 
   const body = (
     <>
-      <div style={{ minWidth: 0, overflow: 'hidden' }}>
-        <div style={{ fontWeight: 500 }} className="truncate">
-          {formatTaskTitle(task.task_id, task.type)}
-        </div>
-        {task.label && (
-          <div
-            style={{ fontSize: 10, color: 'var(--text-tertiary)' }}
-            className="truncate"
-          >
-            {task.label}
-          </div>
-        )}
+      <div className="min-w-0 overflow-hidden">
+        <div className="font-medium truncate">{formatTaskTitle(task.task_id, task.type)}</div>
+        {task.label && <div className="text-[10px] text-ink-3 truncate">{task.label}</div>}
       </div>
       <div
-        style={{
-          textAlign: 'right',
-          fontSize: 10,
-          color: task.status === 'error' ? 'var(--danger)' : 'var(--text-tertiary)',
-        }}
+        className={cn(
+          'text-right text-[10px]',
+          task.status === 'error' ? 'text-destructive' : 'text-ink-3',
+        )}
       >
         {statusLabel(task.status)}
       </div>
@@ -51,15 +42,7 @@ export function RecentTaskRow({ task, onOpen }: RecentTaskRowProps) {
       <button
         type="button"
         onClick={() => onOpen(task.task_id, task.status)}
-        style={{
-          ...itemStyle,
-          width: '100%',
-          cursor: 'pointer',
-          color: 'inherit',
-          fontFamily: 'inherit',
-          fontSize: 12,
-          textAlign: 'left',
-        }}
+        className={ROW_BUTTON_CLASS}
         title="결과 영상 보기"
       >
         {body}
@@ -67,5 +50,5 @@ export function RecentTaskRow({ task, onOpen }: RecentTaskRowProps) {
     );
   }
 
-  return <div style={itemStyle}>{body}</div>;
+  return <div className={ROW_BASE_CLASS}>{body}</div>;
 }

@@ -32,14 +32,7 @@ export function RenderActions({
 }: RenderActionsProps) {
   if (status === 'done' && playableVideoUrl) {
     return (
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: '1fr 1fr',
-          gap: 8,
-          marginTop: 'auto',
-        }}
-      >
+      <div className="grid grid-cols-2 gap-2 mt-auto">
         <a
           href={downloadUrl ?? playableVideoUrl}
           download
@@ -60,14 +53,7 @@ export function RenderActions({
     );
   }
   return (
-    <div
-      style={{
-        display: 'grid',
-        gridTemplateColumns: '1fr 1fr',
-        gap: 8,
-        marginTop: 'auto',
-      }}
-    >
+    <div className="grid grid-cols-2 gap-2 mt-auto">
       <Button variant="primary" icon="download" disabled>
         내 컴퓨터에 저장
       </Button>

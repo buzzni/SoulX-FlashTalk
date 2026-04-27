@@ -10,10 +10,13 @@ import type { ReactNode } from 'react';
 import type { QueueEntry } from '../../types/app';
 import Icon from '../Icon.jsx';
 import { formatTaskTitle } from '../taskFormat.js';
+import { Spinner } from '@/components/spinner';
+import { cn } from '@/lib/utils';
 import {
-  liveRowWrapperStyle,
-  liveItemButtonStyle,
-  cancelBtnStyle,
+  LIVE_WRAPPER_WITH_CANCEL_CLASS,
+  LIVE_WRAPPER_NO_CANCEL_CLASS,
+  ROW_BUTTON_CLASS,
+  CANCEL_BTN_BASE_CLASS,
 } from './styles';
 
 export interface LiveTaskRowProps {
@@ -37,32 +40,21 @@ export function LiveTaskRow({
   onOpen,
   onCancel,
 }: LiveTaskRowProps) {
-  // When there's no cancel button, drop the grid's second column so the
-  // main button fills the row.
-  const wrapperStyle = showCancel
-    ? liveRowWrapperStyle
-    : { marginBottom: 4, minWidth: 0 };
-
   return (
-    <div style={wrapperStyle}>
+    <div className={showCancel ? LIVE_WRAPPER_WITH_CANCEL_CLASS : LIVE_WRAPPER_NO_CANCEL_CLASS}>
       <button
         type="button"
         onClick={() => onOpen(task.task_id)}
-        style={{ ...liveItemButtonStyle, width: '100%' }}
+        className={ROW_BUTTON_CLASS}
         title="클릭하면 진행 화면으로 이동해요"
       >
-        <div style={{ minWidth: 0, overflow: 'hidden' }}>
-          <div style={{ fontWeight: 500 }} className="truncate">
+        <div className="min-w-0 overflow-hidden">
+          <div className="font-medium truncate">
             {prefix}
             {formatTaskTitle(task.task_id, task.type)}
           </div>
           {task.label && (
-            <div
-              style={{ fontSize: 10, color: 'var(--text-tertiary)' }}
-              className="truncate"
-            >
-              {task.label}
-            </div>
+            <div className="text-[10px] text-ink-3 truncate">{task.label}</div>
           )}
         </div>
         {rightSlot}
@@ -77,10 +69,13 @@ export function LiveTaskRow({
           disabled={cancelling}
           aria-label="작업 취소"
           title={cancelTitle}
-          style={cancelBtnStyle(!cancelling)}
+          className={cn(
+            CANCEL_BTN_BASE_CLASS,
+            cancelling ? 'cursor-not-allowed text-ink-3' : 'cursor-pointer text-ink-2',
+          )}
         >
           {cancelling ? (
-            <span className="spinner" style={{ width: 11, height: 11 }} />
+            <Spinner size="xs" />
           ) : (
             <Icon name="close" size={11} />
           )}

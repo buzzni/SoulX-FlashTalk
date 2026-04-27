@@ -113,30 +113,30 @@ export default function ProvenanceCard({ result, fallbackMeta = null }) {
           the backend payload (params.host_image). Fixed 120px width so
           they read as thumbnails, not centerpieces. */}
       {(h.imageUrl || compositeUrl) && (
-        <div style={{ display: 'flex', gap: 12, marginTop: 12, marginBottom: 4 }}>
+        <div className="flex gap-3 mt-3 mb-1">
           {h.imageUrl && (
-            <figure style={{ margin: 0, width: 120, flex: '0 0 auto' }}>
-              <div style={{ aspectRatio: '9/16', borderRadius: 8, overflow: 'hidden', background: '#0b0d12', border: '1px solid var(--border)' }}>
-                <img src={h.imageUrl} alt="쇼호스트" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+            <figure className="m-0 w-[120px] flex-none">
+              <div className="aspect-[9/16] rounded-lg overflow-hidden bg-[#0b0d12] border border-border">
+                <img src={h.imageUrl} alt="쇼호스트" className="w-full h-full object-cover" />
               </div>
-              <figcaption className="text-xs text-tertiary" style={{ marginTop: 6 }}>1단계 · 쇼호스트</figcaption>
+              <figcaption className="text-xs text-tertiary mt-1.5">1단계 · 쇼호스트</figcaption>
             </figure>
           )}
           {compositeUrl && (
-            <figure style={{ margin: 0, width: 120, flex: '0 0 auto' }}>
-              <div style={{ aspectRatio: '9/16', borderRadius: 8, overflow: 'hidden', background: '#0b0d12', border: '1px solid var(--border)' }}>
-                <img src={compositeUrl} alt="합성" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+            <figure className="m-0 w-[120px] flex-none">
+              <div className="aspect-[9/16] rounded-lg overflow-hidden bg-[#0b0d12] border border-border">
+                <img src={compositeUrl} alt="합성" className="w-full h-full object-cover" />
               </div>
-              <figcaption className="text-xs text-tertiary" style={{ marginTop: 6 }}>2단계 · 합성 스틸</figcaption>
+              <figcaption className="text-xs text-tertiary mt-1.5">2단계 · 합성 스틸</figcaption>
             </figure>
           )}
         </div>
       )}
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 20, marginTop: 16 }}>
+      <div className="grid grid-cols-4 gap-5 mt-4">
         <div>
           <div className="text-xs text-tertiary">쇼호스트</div>
-          <div style={{ fontWeight: 500, marginTop: 2 }}>
+          <div className="font-medium mt-0.5">
             {h.mode === 'text' ? '설명으로 만들기' : h.mode === 'image' ? '사진으로 만들기' : '—'}
           </div>
           {h.prompt && (
@@ -145,14 +145,14 @@ export default function ProvenanceCard({ result, fallbackMeta = null }) {
         </div>
         <div>
           <div className="text-xs text-tertiary">소개할 제품</div>
-          <div style={{ fontWeight: 500, marginTop: 2 }} className="num">{products.length}개</div>
+          <div className="font-medium mt-0.5 num">{products.length}개</div>
           <div className="text-xs text-tertiary truncate">
             {products.map(p => p.name).filter(Boolean).join(', ') || '—'}
           </div>
         </div>
         <div>
           <div className="text-xs text-tertiary">배경</div>
-          <div style={{ fontWeight: 500, marginTop: 2 }}>{bgLabel}</div>
+          <div className="font-medium mt-0.5">{bgLabel}</div>
           <div className="text-xs text-tertiary truncate">
             {bg.source === 'prompt' ? (bg.prompt || '—')
               : bg.source === 'preset' ? (bg.presetId || '')
@@ -161,55 +161,50 @@ export default function ProvenanceCard({ result, fallbackMeta = null }) {
         </div>
         <div>
           <div className="text-xs text-tertiary">목소리</div>
-          <div style={{ fontWeight: 500, marginTop: 2 }}>
+          <div className="font-medium mt-0.5">
             {voice.voiceName || (voiceSourceRaw === 'upload' ? '녹음 파일' : '—')}
           </div>
           <div className="text-xs text-tertiary">{voiceSource}</div>
         </div>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 20, marginTop: 16, paddingTop: 14, borderTop: '1px solid var(--border)' }}>
+      <div className="grid grid-cols-4 gap-5 mt-4 pt-3.5 border-t border-border">
         <div>
           <div className="text-xs text-tertiary">해상도</div>
-          <div style={{ fontWeight: 500, marginTop: 2 }} className="num mono">
+          <div className="font-medium mt-0.5 num mono">
             {displayResolution(resolutionActual) || displayResolution(resolutionRequested) || '—'}
           </div>
-          {/* Surface the snap when it happened — the worker rounds each axis
-              down to a 16× multiple (FlashTalk VAE constraint), and users
-              deserve to know e.g. "요청 1080 → 실제 1072". */}
           {resolutionActual && resolutionRequested && resolutionActual !== resolutionRequested && (
             <div className="text-xs text-tertiary">요청 {displayResolution(resolutionRequested)}</div>
           )}
         </div>
         <div>
           <div className="text-xs text-tertiary">이미지 품질</div>
-          <div style={{ fontWeight: 500, marginTop: 2 }}>{qualityLabel}</div>
+          <div className="font-medium mt-0.5">{qualityLabel}</div>
         </div>
         <div>
           <div className="text-xs text-tertiary">샷</div>
-          <div style={{ fontWeight: 500, marginTop: 2 }}>{shotLabel}</div>
+          <div className="font-medium mt-0.5">{shotLabel}</div>
         </div>
         <div>
           <div className="text-xs text-tertiary">변동성 (쇼호스트 · 합성)</div>
-          <div style={{ fontWeight: 500, marginTop: 2 }}>
+          <div className="font-medium mt-0.5">
             {tempLabel(h.temperature)} · {tempLabel(c.temperature)}
           </div>
         </div>
       </div>
 
       {sceneDirection && (
-        <div style={{ marginTop: 16, paddingTop: 14, borderTop: '1px solid var(--border)' }}>
+        <div className="mt-4 pt-3.5 border-t border-border">
           <div className="text-xs text-tertiary">합성 지시사항</div>
-          <div style={{ fontSize: 13, marginTop: 4, whiteSpace: 'pre-wrap' }}>
-            {sceneDirection}
-          </div>
+          <div className="text-[13px] mt-1 whitespace-pre-wrap">{sceneDirection}</div>
         </div>
       )}
 
       {scriptText && (
-        <div style={{ marginTop: 16, paddingTop: 14, borderTop: '1px solid var(--border)' }}>
+        <div className="mt-4 pt-3.5 border-t border-border">
           <div className="text-xs text-tertiary">대본</div>
-          <div style={{ fontSize: 13, marginTop: 4, whiteSpace: 'pre-wrap', maxHeight: 120, overflowY: 'auto' }}>
+          <div className="text-[13px] mt-1 whitespace-pre-wrap max-h-[120px] overflow-y-auto">
             {scriptText.replace(/\[breath\]/g, ' · ')}
           </div>
         </div>

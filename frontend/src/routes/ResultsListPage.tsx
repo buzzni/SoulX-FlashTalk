@@ -14,6 +14,7 @@ import { Spinner } from '../components/spinner';
 import { EmptyState } from '../components/empty-state';
 import { videoTitle, formatCompactDate, formatDuration } from '../lib/format';
 import { startNewVideo } from '../lib/wizardNav';
+import { cn } from '@/lib/utils';
 import { fetchJSON, humanizeError } from '../api/http';
 import { schemas } from '../api/schemas-generated';
 import {
@@ -350,14 +351,15 @@ function FilterChip({ label, count, active, onClick }: FilterChipProps) {
     <button
       type="button"
       onClick={onClick}
-      className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[12.5px] font-medium transition-colors cursor-pointer ${
+      className={cn(
+        'inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[12.5px] font-medium transition-colors cursor-pointer',
         active
           ? 'bg-foreground text-background'
-          : 'bg-card border border-border text-ink-2 hover:border-rule-strong hover:text-foreground'
-      }`}
+          : 'bg-card border border-border text-ink-2 hover:border-rule-strong hover:text-foreground',
+      )}
     >
       <span>{label}</span>
-      <span className={`text-[11px] tabular-nums ${active ? 'text-background/70' : 'text-muted-foreground'}`}>
+      <span className={cn('text-[11px] tabular-nums', active ? 'text-background/70' : 'text-muted-foreground')}>
         {count}
       </span>
     </button>
@@ -441,14 +443,15 @@ function PlaylistChip({ playlist, active, onSelect, onChanged }: PlaylistChipPro
       <button
         type="button"
         onClick={onSelect}
-        className={`inline-flex items-center gap-1.5 pl-3 pr-2 py-1.5 rounded-l-full text-[12.5px] font-medium transition-colors cursor-pointer border ${
+        className={cn(
+          'inline-flex items-center gap-1.5 pl-3 pr-2 py-1.5 rounded-l-full text-[12.5px] font-medium transition-colors cursor-pointer border',
           active
             ? 'bg-foreground text-background border-foreground'
-            : 'bg-card border-border text-ink-2 hover:border-rule-strong hover:text-foreground'
-        }`}
+            : 'bg-card border-border text-ink-2 hover:border-rule-strong hover:text-foreground',
+        )}
       >
         <span>{playlist.name}</span>
-        <span className={`text-[11px] tabular-nums ${active ? 'text-background/70' : 'text-muted-foreground'}`}>
+        <span className={cn('text-[11px] tabular-nums', active ? 'text-background/70' : 'text-muted-foreground')}>
           {playlist.video_count}
         </span>
       </button>
@@ -457,11 +460,12 @@ function PlaylistChip({ playlist, active, onSelect, onChanged }: PlaylistChipPro
           <button
             type="button"
             aria-label={`${playlist.name} 옵션`}
-            className={`inline-flex items-center justify-center w-7 h-[30px] rounded-r-full border border-l-0 transition-colors cursor-pointer ${
+            className={cn(
+              'inline-flex items-center justify-center w-7 h-[30px] rounded-r-full border border-l-0 transition-colors cursor-pointer',
               active
                 ? 'bg-foreground text-background border-foreground hover:bg-foreground/85'
-                : 'bg-card border-border text-muted-foreground hover:text-foreground hover:border-rule-strong'
-            }`}
+                : 'bg-card border-border text-muted-foreground hover:text-foreground hover:border-rule-strong',
+            )}
           >
             <MoreHorizontal className="size-3.5" />
           </button>

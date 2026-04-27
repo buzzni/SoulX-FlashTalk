@@ -11,7 +11,7 @@ import Icon from '../Icon.jsx';
 import { LiveTaskRow } from './LiveTaskRow';
 import { RecentTaskRow } from './RecentTaskRow';
 import { formatTime } from './queueFormat';
-import { sectionStyle, sectionHeaderStyle } from './styles';
+import { SECTION_CLASS, SECTION_HEADER_CLASS } from './styles';
 
 export interface QueuePanelProps {
   queueData: QueueSnapshot;
@@ -42,41 +42,34 @@ export function QueuePanel({
 
   return (
     <div>
-      <div className="flex justify-between items-center" style={{ marginBottom: 8 }}>
-        <strong style={{ fontSize: 13 }}>작업 목록</strong>
+      <div className="flex justify-between items-center mb-2">
+        <strong className="text-[13px]">작업 목록</strong>
         <button
           type="button"
           onClick={onClose}
           aria-label="닫기"
-          style={{
-            background: 'transparent',
-            border: 0,
-            cursor: 'pointer',
-            color: 'var(--text-tertiary)',
-          }}
+          className="bg-transparent border-0 cursor-pointer text-ink-3"
         >
           <Icon name="close" size={14} />
         </button>
       </div>
 
-      {error && <div style={{ color: 'var(--danger)', fontSize: 12 }}>{error}</div>}
+      {error && <div className="text-destructive text-xs">{error}</div>}
 
       {running.length > 0 && (
-        <div style={sectionStyle}>
-          <div style={sectionHeaderStyle}>실행 중</div>
+        <div className={SECTION_CLASS}>
+          <div className={SECTION_HEADER_CLASS}>실행 중</div>
           {running.map((t) => (
             <LiveTaskRow
               key={t.task_id}
               task={t}
               // Backend can't kill a task mid-inference (worker is in a sync
-              // FlashTalk/Gemini call) — just hide the cancel button rather
-              // than showing a dead control that always says "can't cancel".
+              // FlashTalk/Gemini call) — hide the cancel button rather than
+              // showing a dead control that always says "can't cancel".
               showCancel={false}
               onOpen={onOpenLive}
               rightSlot={
-                <div
-                  style={{ textAlign: 'right', fontSize: 10, color: 'var(--success)' }}
-                >
+                <div className="text-right text-[10px] text-success">
                   {formatTime(t.started_at)}
                 </div>
               }
@@ -86,8 +79,8 @@ export function QueuePanel({
       )}
 
       {pending.length > 0 && (
-        <div style={sectionStyle}>
-          <div style={sectionHeaderStyle}>대기 중 ({pending.length})</div>
+        <div className={SECTION_CLASS}>
+          <div className={SECTION_HEADER_CLASS}>대기 중 ({pending.length})</div>
           {pending.map((t, idx) => (
             <LiveTaskRow
               key={t.task_id}
@@ -99,13 +92,7 @@ export function QueuePanel({
               onOpen={onOpenLive}
               onCancel={onCancel}
               rightSlot={
-                <div
-                  style={{
-                    textAlign: 'right',
-                    fontSize: 10,
-                    color: 'var(--text-tertiary)',
-                  }}
-                >
+                <div className="text-right text-[10px] text-ink-3">
                   {formatTime(t.created_at)}
                 </div>
               }
@@ -115,23 +102,14 @@ export function QueuePanel({
       )}
 
       {cancelError && (
-        <div
-          style={{
-            marginTop: 8,
-            padding: '6px 8px',
-            background: 'var(--danger-soft)',
-            color: 'var(--danger)',
-            borderRadius: 'var(--r-sm)',
-            fontSize: 11,
-          }}
-        >
+        <div className="mt-2 px-2 py-1.5 bg-destructive-soft text-destructive rounded-sm text-[11px]">
           {cancelError}
         </div>
       )}
 
       {recent.length > 0 && (
-        <div style={sectionStyle}>
-          <div style={sectionHeaderStyle}>최근 완료</div>
+        <div className={SECTION_CLASS}>
+          <div className={SECTION_HEADER_CLASS}>최근 완료</div>
           {recent.slice(0, 5).map((t) => (
             <RecentTaskRow key={t.task_id} task={t} onOpen={onOpenRecent} />
           ))}
@@ -139,11 +117,7 @@ export function QueuePanel({
       )}
 
       {totalActive === 0 && recent.length === 0 && (
-        <div
-          style={{ color: 'var(--text-tertiary)', fontSize: 12, padding: '10px 0' }}
-        >
-          처리할 작업이 없어요
-        </div>
+        <div className="text-ink-3 text-xs py-2.5">처리할 작업이 없어요</div>
       )}
     </div>
   );

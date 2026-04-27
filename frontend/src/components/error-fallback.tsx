@@ -27,68 +27,30 @@ export function TopLevelErrorFallback({ error, resetErrorBoundary }: FallbackPro
   };
 
   return (
-    <div
-      role="alert"
-      style={{
-        padding: 32,
-        maxWidth: 720,
-        margin: '40px auto',
-        fontFamily: 'Pretendard, -apple-system, sans-serif',
-        color: '#333',
-      }}
-    >
-      <h1 style={{ fontSize: 20, margin: 0 }}>잠깐, 문제가 발생했어요</h1>
-      <p style={{ color: '#666', marginTop: 8 }}>
+    <div role="alert" className="p-8 max-w-[720px] mx-auto my-10 font-sans text-foreground">
+      <h1 className="text-xl m-0 font-bold tracking-[-0.014em]">잠깐, 문제가 발생했어요</h1>
+      <p className="text-muted-foreground mt-2">
         화면을 그리는 중에 오류가 났어요. 대부분 일시적인 문제라 재시도하면 복구됩니다.
         계속 같은 오류가 보이면 저장된 상태가 새 버전과 호환되지 않을 수 있으니 초기화 후
         다시 시작해주세요.
       </p>
-      <div style={{ display: 'flex', gap: 8, marginTop: 16 }}>
+      <div className="flex gap-2 mt-4">
         <button
           onClick={resetErrorBoundary}
-          style={{
-            padding: '10px 14px',
-            background: '#222',
-            color: '#fff',
-            border: 0,
-            borderRadius: 8,
-            cursor: 'pointer',
-            fontSize: 13,
-          }}
+          className="px-3.5 py-2.5 bg-foreground text-background rounded-lg cursor-pointer text-[13px] font-semibold border-0 hover:bg-foreground/90"
         >
           재시도
         </button>
         <button
           onClick={wipeAndReload}
-          style={{
-            padding: '10px 14px',
-            background: '#fff',
-            color: '#222',
-            border: '1px solid #ddd',
-            borderRadius: 8,
-            cursor: 'pointer',
-            fontSize: 13,
-          }}
+          className="px-3.5 py-2.5 bg-card text-foreground border border-border rounded-lg cursor-pointer text-[13px] font-medium hover:bg-muted"
         >
           저장된 상태 지우고 새로고침
         </button>
       </div>
-      <details style={{ marginTop: 24 }}>
-        <summary style={{ cursor: 'pointer', color: '#666', fontSize: 12 }}>
-          기술 상세 보기
-        </summary>
-        <pre
-          style={{
-            marginTop: 8,
-            padding: 12,
-            background: '#f6f6f6',
-            border: '1px solid #ddd',
-            borderRadius: 6,
-            fontSize: 12,
-            overflow: 'auto',
-            whiteSpace: 'pre-wrap',
-          }}
-        >
+      <details className="mt-6">
+        <summary className="cursor-pointer text-muted-foreground text-xs">기술 상세 보기</summary>
+        <pre className="mt-2 p-3 bg-muted border border-border rounded-md text-xs overflow-auto whitespace-pre-wrap">
           {String((error as Error)?.stack || (error as Error)?.message || error)}
         </pre>
       </details>

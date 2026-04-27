@@ -23,6 +23,7 @@ import {
   videoTitle,
 } from '../lib/format';
 import { startNewVideo } from '../lib/wizardNav';
+import { cn } from '@/lib/utils';
 import { DraftBanner } from '../components/draft-banner';
 
 interface HistoryItem {
@@ -262,7 +263,7 @@ function Stat({ label, value, unit, trend, trendOk, sparkData, sparkKind, icon }
       </div>
       <div className="mt-2 flex items-end justify-between gap-2">
         {trend && (
-          <div className={`text-[11px] font-semibold ${trendOk ? 'text-success-on-soft' : 'text-muted-foreground'}`}>
+          <div className={cn('text-[11px] font-semibold', trendOk ? 'text-success-on-soft' : 'text-muted-foreground')}>
             {trend}
           </div>
         )}

@@ -25,6 +25,7 @@ import {
 } from '@/components/upload-tile-bridge';
 import { OptionCard } from '@/components/option-card';
 import { WizardTabs, WizardTab } from '@/components/wizard-tabs';
+import { cn } from '@/lib/utils';
 import {
   ImageIcon,
   Sparkles,
@@ -143,7 +144,7 @@ export function BackgroundPicker({ onPickServerFile }: BackgroundPickerProps) {
                     <button
                       key={p.id}
                       type="button"
-                      className={`bg-preset-tile${on ? ' bg-preset-tile--on' : ''}`}
+                      className={cn('bg-preset-tile', on && 'bg-preset-tile--on')}
                       onClick={() => swap({ kind: 'preset', presetId: p.id })}
                     >
                       <PresetIcon className="bg-preset-tile__icon" strokeWidth={1.6} />
@@ -187,11 +188,10 @@ export function BackgroundPicker({ onPickServerFile }: BackgroundPickerProps) {
           <div className="flex-col gap-3">
             <Field label="어떤 배경이 필요한가요?" hint="장소·분위기를 적어주세요">
               <textarea
-                className="textarea"
+                className="textarea min-h-[120px]"
                 placeholder="예) 밝고 깨끗한 모던 주방, 큰 창문으로 자연광이 들어오는 느낌"
                 value={background.prompt}
                 onChange={(e) => swap({ kind: 'prompt', prompt: e.target.value })}
-                style={{ minHeight: 120 }}
               />
             </Field>
             <div className="flex items-center gap-2 text-xs text-tertiary">

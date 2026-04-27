@@ -50,7 +50,7 @@ export function VoiceAdvancedSettings({
 
   return (
     <>
-      <div className="field-row" style={{ marginTop: 12 }}>
+      <div className="field-row mt-3">
         <Field label={`읽는 속도 · ${advanced.speed.toFixed(2)}배`} hint="0.5배 ~ 1.8배">
           <Slider
             value={advanced.speed}
@@ -65,25 +65,15 @@ export function VoiceAdvancedSettings({
       </div>
 
       <details
-        style={{ marginTop: 12 }}
+        className="mt-3"
         open={open}
         onToggle={(e) => onOpenChange((e.target as HTMLDetailsElement).open)}
       >
-        <summary
-          style={{
-            cursor: 'pointer',
-            userSelect: 'none',
-            fontSize: 12,
-            color: 'var(--text-tertiary)',
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: 4,
-          }}
-        >
+        <summary className="cursor-pointer select-none text-xs text-ink-3 inline-flex items-center gap-1">
           <Icon name={open ? 'chevron_up' : 'chevron_down'} size={11} />
           목소리 세밀 조정 (고급, 대부분 그대로 두셔도 괜찮아요)
         </summary>
-        <div className="field-row-3" style={{ marginTop: 10 }}>
+        <div className="field-row-3 mt-2.5">
           <Field
             label={`일정함 · ${Math.round(advanced.stability * 100)}`}
             hint="높을수록 톤 유지"

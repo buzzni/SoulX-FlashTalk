@@ -21,30 +21,24 @@ export function ResultStats({
   resolutionLabel,
 }: ResultStatsProps) {
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12 }}>
-      <div style={{ padding: 12, background: 'var(--bg-sunken)', borderRadius: 6 }}>
+    <div className="grid grid-cols-3 gap-3">
+      <div className="p-3 bg-secondary rounded-md">
         <div className="text-[11px] uppercase tracking-widest font-semibold text-muted-foreground">걸린 시간</div>
-        <div style={{ fontSize: 16, fontWeight: 600 }} className="num mono">
-          {formatElapsedSec(elapsedSec)}
-        </div>
+        <div className="text-base font-semibold num mono">{formatElapsedSec(elapsedSec)}</div>
         {completedAt && (
-          <div className="text-xs text-tertiary" style={{ marginTop: 2 }}>
-            완료 {formatDateTime(completedAt)}
-          </div>
+          <div className="text-xs text-tertiary mt-0.5">완료 {formatDateTime(completedAt)}</div>
         )}
       </div>
-      <div style={{ padding: 12, background: 'var(--bg-sunken)', borderRadius: 6 }}>
+      <div className="p-3 bg-secondary rounded-md">
         <div className="text-[11px] uppercase tracking-widest font-semibold text-muted-foreground">파일 용량</div>
-        <div style={{ fontSize: 16, fontWeight: 600 }}>{formatFileSize(fileSizeBytes)}</div>
+        <div className="text-base font-semibold">{formatFileSize(fileSizeBytes)}</div>
         {resolutionLabel && (
-          <div className="text-xs text-tertiary" style={{ marginTop: 2 }}>
-            {resolutionLabel}
-          </div>
+          <div className="text-xs text-tertiary mt-0.5">{resolutionLabel}</div>
         )}
       </div>
-      <div style={{ padding: 12, background: 'var(--bg-sunken)', borderRadius: 6 }}>
+      <div className="p-3 bg-secondary rounded-md">
         <div className="text-[11px] uppercase tracking-widest font-semibold text-muted-foreground">파일 형식</div>
-        <div style={{ fontSize: 16, fontWeight: 600 }}>MP4</div>
+        <div className="text-base font-semibold">MP4</div>
       </div>
     </div>
   );

@@ -19,6 +19,7 @@
 import { useState } from 'react';
 import { useFieldArray, useFormContext, useWatch } from 'react-hook-form';
 import Icon from '../Icon.jsx';
+import { cn } from '@/lib/utils';
 import { Field } from '@/components/field';
 import { Segmented } from '@/components/segmented';
 import { UploadTile } from '@/components/upload-tile';
@@ -115,7 +116,7 @@ export function ProductList() {
             return (
               <div
                 key={field.id}
-                className={`product-row ${dragIdx === idx ? 'dragging' : ''}`}
+                className={cn('product-row', dragIdx === idx && 'dragging')}
                 draggable
                 onDragStart={() => onDragStart(idx)}
                 onDragOver={(e) => onDragOver(e, idx)}
@@ -128,7 +129,7 @@ export function ProductList() {
                   {url ? (
                     <img src={url} alt="" />
                   ) : (
-                    <div className="striped-placeholder" style={{ fontSize: 9 }}>
+                    <div className="striped-placeholder text-[9px]">
                       상품 {idx + 1}
                     </div>
                   )}
@@ -136,11 +137,9 @@ export function ProductList() {
                 <div className="product-info flex-col gap-2">
                   <div className="product-label text-xs">
                     상품 {idx + 1}
-                    <span className="text-tertiary" style={{ marginLeft: 6, fontWeight: 400 }}>
+                    <span className="text-tertiary ml-1.5 font-normal">
                       · 구도 지시에서{' '}
-                      <strong style={{ color: 'var(--accent)', fontWeight: 600 }}>
-                        {idx + 1}번
-                      </strong>
+                      <strong className="text-accent font-semibold">{idx + 1}번</strong>
                     </span>
                   </div>
                   <Segmented

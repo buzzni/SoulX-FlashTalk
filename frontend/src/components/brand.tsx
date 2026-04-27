@@ -12,6 +12,7 @@
  *  - 'lg': login page hero (36px)
  */
 import { Link } from 'react-router-dom';
+import { cn } from '@/lib/utils';
 
 export interface BrandProps {
   size?: 'sm' | 'md' | 'lg';
@@ -51,7 +52,7 @@ export function Brand({ size = 'md', to, className = '', title }: BrandProps) {
     </>
   );
 
-  const cls = `inline-flex items-center no-underline text-foreground ${className}`;
+  const cls = cn('inline-flex items-center no-underline text-foreground', className);
 
   if (to) {
     return (

@@ -33,6 +33,7 @@ import { WizardBadge as Badge } from '@/components/wizard-badge';
 import { WizardErrorBanner } from '@/components/wizard-error-banner';
 import { WizardCard as Card } from '@/components/wizard-card';
 import { OptionCard } from '@/components/option-card';
+import { Spinner } from '@/components/spinner';
 import { humanizeError } from '../../api/http';
 import { uploadAudio } from '../../api/upload';
 import { useVoiceList } from '../../hooks/useVoiceList';
@@ -674,7 +675,7 @@ function GenerateBar({ label, done, disabled, generating, onClick, cta }: Genera
       >
         {generating ? (
           <>
-            <span className="spinner" /> 만드는 중
+            <Spinner size="sm" /> 만드는 중
           </>
         ) : (
           <>

@@ -40,7 +40,7 @@ export function Spinner({ size = 'sm', label = '불러오는 중', className, ..
         viewBox="0 0 24 24"
         fill="none"
         xmlns="http://www.w3.org/2000/svg"
-        style={{ animation: 'spinner-spin 0.8s linear infinite', display: 'block' }}
+        className="block animate-spin"
       >
         <circle
           cx="12"
@@ -57,7 +57,6 @@ export function Spinner({ size = 'sm', label = '불러오는 중', className, ..
           strokeLinecap="round"
         />
       </svg>
-      <style>{`@keyframes spinner-spin { to { transform: rotate(360deg); } }`}</style>
     </div>
   );
 }

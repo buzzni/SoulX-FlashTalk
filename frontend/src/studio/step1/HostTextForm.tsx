@@ -10,6 +10,7 @@
 import { Controller, useFormContext } from 'react-hook-form';
 import { Chip } from '@/components/chip';
 import { Field } from '@/components/field';
+import { cn } from '@/lib/utils';
 import type { HostFormValues } from '@/wizard/form-mappers';
 
 const HOST_PRESETS: Record<string, { value: string; label: string }[]> = {
@@ -56,14 +57,12 @@ export function HostTextForm() {
     <div className="flex-col gap-3">
       <Field label="어떤 모습의 쇼호스트를 원하세요?" hint="자유롭게 15자 이상">
         <textarea
-          className={`textarea ${prompt && prompt.length < 15 ? 'invalid' : ''}`}
+          className={cn('textarea', prompt && prompt.length < 15 && 'invalid')}
           placeholder="예) 30대 여성, 밝게 웃고 있음, 베이지 니트, 따뜻한 분위기"
           {...register('input.prompt')}
         />
-        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 6 }}>
-          <span className="text-xs text-tertiary" style={{ alignSelf: 'center' }}>
-            예시 클릭 →
-          </span>
+        <div className="flex flex-wrap gap-1.5 mt-1.5">
+          <span className="text-xs text-tertiary self-center">예시 클릭 →</span>
           {EXAMPLE_PROMPTS.map((ex) => (
             <Chip
               key={ex}
@@ -76,9 +75,7 @@ export function HostTextForm() {
       </Field>
 
       <div>
-        <div className="field-label" style={{ marginBottom: 10, marginTop: 6 }}>
-          또는 조건으로 선택해요
-        </div>
+        <div className="field-label mt-1.5 mb-2.5">또는 조건으로 선택해요</div>
         <Controller
           control={control}
           name="input.builder"
@@ -88,10 +85,8 @@ export function HostTextForm() {
               <div className="flex-col gap-3">
                 {Object.keys(HOST_PRESETS).map((key) => (
                   <div key={key}>
-                    <div className="text-xs text-tertiary" style={{ marginBottom: 6 }}>
-                      {key}
-                    </div>
-                    <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                    <div className="text-xs text-tertiary mb-1.5">{key}</div>
+                    <div className="flex flex-wrap gap-1.5">
                       {HOST_PRESETS[key]!.map((o) => (
                         <Chip
                           key={o.value}
@@ -110,10 +105,8 @@ export function HostTextForm() {
         />
       </div>
 
-      <details style={{ fontSize: 12, color: 'var(--text-tertiary)', marginTop: 4 }}>
-        <summary style={{ cursor: 'pointer', userSelect: 'none' }}>
-          피하고 싶은 표현이 있나요? (선택)
-        </summary>
+      <details className="text-xs text-tertiary mt-1">
+        <summary className="cursor-pointer select-none">피하고 싶은 표현이 있나요? (선택)</summary>
         <input
           className="input mt-2"
           placeholder="예) 과한 화장, 어두운 표정"

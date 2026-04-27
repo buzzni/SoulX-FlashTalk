@@ -20,6 +20,7 @@ import { useRef, useState } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
 import Icon from '../Icon.jsx';
 import { Field } from '@/components/field';
+import { cn } from '@/lib/utils';
 import type { Step3FormValues } from '@/wizard/form-mappers';
 
 const VOICE_PRESETS: VoiceItem[] = [
@@ -128,24 +129,12 @@ export function VoicePicker({ remoteVoices, loadError }: VoicePickerProps) {
                 className="voice-item voice-item--skeleton"
                 aria-hidden
               >
-                <div
-                  className="voice-avatar skeleton-shimmer"
-                  style={{ background: 'var(--bg-sunken)' }}
-                />
+                <div className="voice-avatar skeleton-shimmer bg-secondary" />
                 <div className="voice-info">
-                  <div
-                    className="skeleton-shimmer"
-                    style={{ height: 11, width: '40%', borderRadius: 4, marginBottom: 4 }}
-                  />
-                  <div
-                    className="skeleton-shimmer"
-                    style={{ height: 10, width: '70%', borderRadius: 4 }}
-                  />
+                  <div className="skeleton-shimmer h-[11px] w-2/5 rounded mb-1" />
+                  <div className="skeleton-shimmer h-2.5 w-[70%] rounded" />
                 </div>
-                <div
-                  className="skeleton-shimmer"
-                  style={{ width: 22, height: 22, borderRadius: 6, flexShrink: 0 }}
-                />
+                <div className="skeleton-shimmer w-[22px] h-[22px] rounded-md shrink-0" />
               </div>
             ))
           : voiceList.map((v) => {
@@ -153,7 +142,7 @@ export function VoicePicker({ remoteVoices, loadError }: VoicePickerProps) {
               return (
                 <div
                   key={v.id}
-                  className={`voice-item ${selectedVoiceId === v.id ? 'on' : ''}`}
+                  className={cn('voice-item', selectedVoiceId === v.id && 'on')}
                   onClick={() => selectVoice({ id: v.id, name: v.name })}
                 >
                   <div className="voice-avatar">{v.name[0]}</div>
@@ -181,7 +170,7 @@ export function VoicePicker({ remoteVoices, loadError }: VoicePickerProps) {
         ref={previewAudioRef}
         onEnded={() => setPlayingPreview(null)}
         onPause={() => setPlayingPreview(null)}
-        style={{ display: 'none' }}
+        className="hidden"
       />
     </Field>
   );

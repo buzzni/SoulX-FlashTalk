@@ -17,10 +17,10 @@
  */
 
 import { Controller, useFormContext, type Path } from 'react-hook-form';
-import Icon from '../Icon.jsx';
 import { Field } from '@/components/field';
 import { Segmented } from '@/components/segmented';
 import { UploadTile } from '@/components/upload-tile';
+import { WizardInfoBanner } from '@/components/wizard-info-banner';
 import { uploadFileFromAsset, type UploadTileFile } from '@/components/upload-tile-bridge';
 import { uploadReferenceImage } from '../../api/upload';
 import { useUploadReferenceImage } from '../../hooks/useUploadReferenceImage';
@@ -83,25 +83,10 @@ export function HostReferenceUploader() {
 
   return (
     <div className="flex-col gap-3">
-      <div
-        style={{
-          padding: 12,
-          background: 'var(--accent-soft)',
-          borderRadius: 'var(--r-sm)',
-          border: '1px solid var(--accent-soft-border)',
-          fontSize: 12,
-          color: 'var(--accent-text)',
-          display: 'flex',
-          gap: 8,
-          alignItems: 'flex-start',
-        }}
-      >
-        <Icon name="info" size={14} />
-        <div>
-          얼굴 사진이 필요해요. 의상은 비워둬도 됩니다. 원하는 느낌을 더 적으려면 아래
-          <b> 추가로 바라는 점</b> 필드를 쓰세요.
-        </div>
-      </div>
+      <WizardInfoBanner>
+        얼굴 사진이 필요해요. 의상은 비워둬도 됩니다. 원하는 느낌을 더 적으려면 아래
+        <b> 추가로 바라는 점</b> 필드를 쓰세요.
+      </WizardInfoBanner>
 
       <div className="field-row">
         <Field label="얼굴" hint="꼭 필요해요">

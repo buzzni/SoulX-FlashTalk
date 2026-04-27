@@ -59,27 +59,22 @@ export default function RenderHistory({ excludeTaskId, limit = 8 }) {
   return (
     <div className="surface-base p-5 mt-4">
       <div className="text-[11px] uppercase tracking-widest font-semibold text-muted-foreground">기다리는 동안 — 이전에 만든 영상 ({visible.length})</div>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 12 }}>
+      <div className="flex flex-col gap-1.5 mt-3">
         {visible.map(v => {
           const isOpen = playing === v.task_id;
           if (isOpen) {
             return (
               <div
                 key={v.task_id}
-                style={{
-                  background: 'var(--bg-sunken)',
-                  border: '1px solid var(--border)',
-                  borderRadius: 8,
-                  padding: 10,
-                }}
+                className="bg-secondary border border-border rounded-lg p-2.5"
               >
-                <div className="flex justify-between items-center" style={{ marginBottom: 8 }}>
-                  <div style={{ minWidth: 0, flex: 1 }}>
-                    <div className="truncate" style={{ fontSize: 13, fontWeight: 500 }}>
+                <div className="flex justify-between items-center mb-2">
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate text-[13px] font-medium">
                       {formatTaskTitle(v.task_id, v.type || 'generate')}
                     </div>
                     {v.script_text && (
-                      <div className="truncate text-xs text-secondary" style={{ marginTop: 2 }}>
+                      <div className="truncate text-xs text-secondary mt-0.5">
                         {v.script_text}
                       </div>
                     )}
@@ -91,13 +86,7 @@ export default function RenderHistory({ excludeTaskId, limit = 8 }) {
                   </div>
                   <button
                     onClick={() => setPlaying(null)}
-                    style={{
-                      background: 'transparent',
-                      border: 0,
-                      cursor: 'pointer',
-                      color: 'var(--text-tertiary)',
-                      padding: 4,
-                    }}
+                    className="bg-transparent border-0 cursor-pointer text-ink-3 p-1"
                     aria-label="닫기"
                   >
                     <Icon name="close" size={14} />
@@ -107,13 +96,7 @@ export default function RenderHistory({ excludeTaskId, limit = 8 }) {
                   src={v.video_url}
                   controls
                   autoPlay
-                  style={{
-                    width: '100%',
-                    maxHeight: 260,
-                    borderRadius: 6,
-                    background: '#000',
-                    display: 'block',
-                  }}
+                  className="block w-full max-h-[260px] rounded-md bg-black"
                 />
               </div>
             );
@@ -122,39 +105,17 @@ export default function RenderHistory({ excludeTaskId, limit = 8 }) {
             <button
               key={v.task_id}
               onClick={() => setPlaying(v.task_id)}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 10,
-                padding: '8px 10px',
-                background: 'var(--bg-sunken)',
-                border: '1px solid var(--border)',
-                borderRadius: 8,
-                cursor: 'pointer',
-                textAlign: 'left',
-                fontFamily: 'inherit',
-                color: 'inherit',
-              }}
+              className="flex items-center gap-2.5 px-2.5 py-2 bg-secondary border border-border rounded-lg cursor-pointer text-left font-sans text-inherit"
             >
-              <div
-                style={{
-                  width: 28,
-                  height: 28,
-                  borderRadius: 6,
-                  background: 'var(--accent-soft)',
-                  display: 'grid',
-                  placeItems: 'center',
-                  flexShrink: 0,
-                }}
-              >
+              <div className="grid place-items-center w-7 h-7 rounded-md bg-accent shrink-0">
                 <Icon name="play" size={12} />
               </div>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div className="truncate" style={{ fontSize: 13, fontWeight: 500 }}>
+              <div className="flex-1 min-w-0">
+                <div className="truncate text-[13px] font-medium">
                   {formatTaskTitle(v.task_id, v.type || 'generate')}
                 </div>
                 {v.script_text && (
-                  <div className="truncate text-xs text-secondary" style={{ marginTop: 2 }}>
+                  <div className="truncate text-xs text-secondary mt-0.5">
                     {v.script_text}
                   </div>
                 )}

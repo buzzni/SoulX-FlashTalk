@@ -23,6 +23,7 @@ import { Fragment } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
 import Icon from '../Icon.jsx';
 import { Field } from '@/components/field';
+import { cn } from '@/lib/utils';
 import type { Step3FormValues } from '@/wizard/form-mappers';
 
 const BREATH_TAG = ' [breath] ';
@@ -131,9 +132,7 @@ export function ScriptEditor({ disabled = false }: ScriptEditorProps) {
       hint={
         <span>
           문단과 문단 사이에는 짧은 텀을 두고 자연스럽게 이어 읽어요 · 전체{' '}
-          <strong
-            style={{ color: remaining < 200 ? 'var(--danger)' : 'var(--text-secondary)' }}
-          >
+          <strong className={remaining < 200 ? 'text-destructive' : 'text-ink-2'}>
             {totalLen.toLocaleString()}
           </strong>{' '}
           / {SCRIPT_LIMIT.toLocaleString()}자
@@ -151,20 +150,16 @@ export function ScriptEditor({ disabled = false }: ScriptEditorProps) {
             <div className="script-paragraph">
               <div className="script-paragraph__header">
                 <span className="script-paragraph__label">문단 {idx + 1}</span>
-                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                <span className="inline-flex items-center gap-2">
                   <span
-                    style={{
-                      fontFamily: 'var(--font-mono)',
-                      fontSize: 10.5,
-                      color:
-                        (p || '').length > 800
-                          ? 'var(--danger)'
-                          : (p || '').length > 500
-                            ? 'var(--warn)'
-                            : 'var(--text-tertiary)',
-                      letterSpacing: '0.02em',
-                      fontVariantNumeric: 'tabular-nums',
-                    }}
+                    className={cn(
+                      'font-mono text-[10.5px] tabular-nums tracking-[0.02em]',
+                      (p || '').length > 800
+                        ? 'text-destructive'
+                        : (p || '').length > 500
+                          ? 'text-amber'
+                          : 'text-ink-3',
+                    )}
                     title="문단별 글자수"
                   >
                     {(p || '').length.toLocaleString()}자
@@ -183,8 +178,7 @@ export function ScriptEditor({ disabled = false }: ScriptEditorProps) {
                 </span>
               </div>
               <textarea
-                className="textarea"
-                style={{ minHeight: 90 }}
+                className="textarea min-h-[90px]"
                 placeholder={
                   idx === 0
                     ? '예) 안녕하세요 여러분! 오늘 소개해드릴 제품은 정말 특별한데요, 한 번 써보시면 왜 다들 칭찬하는지 바로 아실 거예요.'

@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 import { Brand } from '../components/brand';
 import { useLastSavedAt } from '../stores/wizardStore';
+import { cn } from '@/lib/utils';
 import {
   formatDraftAge,
   resumeVideo,
@@ -153,10 +154,14 @@ function NavItem({ to, label, icon, active, quiet, count, dim }: NavItemProps) {
   return (
     <Link
       to={to}
-      className={`flex items-center justify-between gap-2 px-3 py-2 rounded-md no-underline text-[13.5px] font-medium tracking-[-0.012em] transition-colors ${cls} ${dim ? 'opacity-60' : ''}`}
+      className={cn(
+        'flex items-center justify-between gap-2 px-3 py-2 rounded-md no-underline text-[13.5px] font-medium tracking-[-0.012em] transition-colors',
+        cls,
+        dim && 'opacity-60',
+      )}
     >
       <span className="flex items-center gap-2.5 min-w-0">
-        <span className={`shrink-0 ${active ? 'text-primary' : 'text-muted-foreground'}`}>
+        <span className={cn('shrink-0', active ? 'text-primary' : 'text-muted-foreground')}>
           {icon}
         </span>
         <span className="truncate">{label}</span>

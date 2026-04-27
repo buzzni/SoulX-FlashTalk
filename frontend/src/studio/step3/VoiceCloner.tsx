@@ -17,6 +17,7 @@ import { useFormContext, useWatch } from 'react-hook-form';
 import Icon from '../Icon.jsx';
 import { Field } from '@/components/field';
 import { UploadTile } from '@/components/upload-tile';
+import { WizardInfoBanner } from '@/components/wizard-info-banner';
 import {
   localAssetFromUploadFile,
   revokeLocalAssetIfBlob,
@@ -74,25 +75,10 @@ export function VoiceCloner() {
 
   return (
     <div className="flex-col gap-3">
-      <div
-        style={{
-          padding: 12,
-          background: 'var(--accent-soft)',
-          borderRadius: 'var(--r-sm)',
-          border: '1px solid var(--accent-soft-border)',
-          fontSize: 12,
-          color: 'var(--accent-text)',
-          display: 'flex',
-          gap: 8,
-          alignItems: 'flex-start',
-        }}
-      >
-        <Icon name="info" size={14} />
-        <div>
-          본인 또는 성우의 녹음 파일을 올리면, 그 목소리 그대로 대본을 읽어드려요.
-          조용한 곳에서 녹음한 10초 이상의 깨끗한 파일을 추천해요.
-        </div>
-      </div>
+      <WizardInfoBanner>
+        본인 또는 성우의 녹음 파일을 올리면, 그 목소리 그대로 대본을 읽어드려요.
+        조용한 곳에서 녹음한 10초 이상의 깨끗한 파일을 추천해요.
+      </WizardInfoBanner>
       <Field label="참고할 녹음 파일" hint="MP3 또는 WAV">
         <UploadTile
           file={tileFile}
@@ -104,12 +90,9 @@ export function VoiceCloner() {
         />
       </Field>
       {sample.state === 'cloned' && (
-        <div
-          className="flex items-center gap-3"
-          style={{ padding: 12, background: 'var(--success-soft)', borderRadius: 'var(--r-sm)' }}
-        >
-          <Icon name="check_circle" size={16} style={{ color: 'var(--success)' }} />
-          <div className="text-sm" style={{ color: 'var(--success)' }}>
+        <div className="flex items-center gap-3 p-3 bg-success-soft rounded-sm">
+          <Icon name="check_circle" size={16} className="text-success" />
+          <div className="text-sm text-success">
             목소리 준비 완료! 이제 이 목소리로 대본을 읽어드려요.
           </div>
         </div>

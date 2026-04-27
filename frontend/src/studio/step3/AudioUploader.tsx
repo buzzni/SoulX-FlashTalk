@@ -13,9 +13,9 @@
 
 import { useEffect } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
-import Icon from '../Icon.jsx';
 import { Field } from '@/components/field';
 import { UploadTile } from '@/components/upload-tile';
+import { WizardInfoBanner } from '@/components/wizard-info-banner';
 import {
   localAssetFromUploadFile,
   revokeLocalAssetIfBlob,
@@ -66,21 +66,9 @@ export function AudioUploader({ isUploading = false }: AudioUploaderProps) {
 
   return (
     <div className="flex-col gap-3">
-      <div
-        style={{
-          padding: 12,
-          background: 'var(--bg-sunken)',
-          borderRadius: 'var(--r-sm)',
-          fontSize: 12,
-          color: 'var(--text-secondary)',
-          display: 'flex',
-          gap: 8,
-          alignItems: 'flex-start',
-        }}
-      >
-        <Icon name="info" size={14} />
-        <div>직접 녹음한 MP3·WAV 파일을 그대로 영상에 넣고 싶을 때 사용하세요.</div>
-      </div>
+      <WizardInfoBanner tone="muted">
+        직접 녹음한 MP3·WAV 파일을 그대로 영상에 넣고 싶을 때 사용하세요.
+      </WizardInfoBanner>
       <Field
         label="녹음 파일"
         hint={isUploading ? '업로드 중…' : 'MP3, WAV, M4A · 최대 50MB'}

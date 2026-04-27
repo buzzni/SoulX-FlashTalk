@@ -28,11 +28,10 @@ export function StepHeading({
 }: StepHeadingProps) {
   return (
     <div className="step-heading-hero">
-      <div className="grid items-center gap-4 md:gap-5" style={{ gridTemplateColumns: 'auto 1fr auto' }}>
+      <div className="grid grid-cols-[auto_1fr_auto] items-center gap-4 md:gap-5">
         <div
           aria-hidden
-          className="grid place-items-center w-14 h-14 md:w-16 md:h-16 rounded-[12px] bg-foreground text-background font-bold tabular-nums"
-          style={{ fontSize: 28, letterSpacing: '-0.04em', lineHeight: 1 }}
+          className="grid place-items-center w-14 h-14 md:w-16 md:h-16 rounded-[12px] bg-foreground text-background font-bold tabular-nums text-[28px] tracking-[-0.04em] leading-none"
         >
           {String(step).padStart(2, '0')}
         </div>
@@ -42,16 +41,7 @@ export function StepHeading({
               {eyebrow}
             </div>
           )}
-          <h1
-            className="m-0 text-foreground"
-            style={{
-              fontFamily: 'var(--font-sans)',
-              fontSize: 22,
-              fontWeight: 700,
-              letterSpacing: '-0.024em',
-              lineHeight: 1.25,
-            }}
-          >
+          <h1 className="m-0 text-foreground font-sans text-[22px] font-bold tracking-[-0.024em] leading-[1.25]">
             {title}
           </h1>
           {description && (

@@ -266,21 +266,13 @@ export default function RenderDashboard({
   const jobTitleId = taskId ?? `job_${Date.now()}`;
 
   return (
-    <div
-      style={{
-        flex: 1,
-        overflowY: 'auto',
-        padding: '28px 32px 80px',
-        background: 'var(--bg)',
-        position: 'relative',
-      }}
-    >
+    <div className="relative flex-1 overflow-y-auto px-8 pt-7 pb-20 bg-background">
       {status === 'done' && <Confetti />}
-      <div style={{ maxWidth: 960, margin: '0 auto', position: 'relative', zIndex: 1 }}>
-        <div className="flex justify-between items-center" style={{ marginBottom: 24 }}>
+      <div className="relative z-[1] max-w-[960px] mx-auto">
+        <div className="flex justify-between items-center mb-6">
           <div>
             <div className="text-[11px] uppercase tracking-widest font-semibold text-muted-foreground">마지막 단계</div>
-            <h1 style={{ fontSize: 24, fontWeight: 600, letterSpacing: '-0.015em', margin: '2px 0 0' }}>
+            <h1 className="text-2xl font-semibold tracking-[-0.015em] mt-0.5 mb-0">
               {status === 'done'
                 ? '영상이 완성됐어요!'
                 : status === 'error'
@@ -288,7 +280,7 @@ export default function RenderDashboard({
                   : '영상 만드는 중이에요'}
             </h1>
           </div>
-          <div style={{ display: 'flex', gap: 8 }}>
+          <div className="flex gap-2">
             <Button icon="arrow_left" onClick={onBack}>
               앞으로 돌아가서 수정
             </Button>
@@ -298,15 +290,8 @@ export default function RenderDashboard({
           </div>
         </div>
 
-        <div className="surface-base p-5" style={{ padding: 24 }}>
-          <div
-            style={{
-              display: 'grid',
-              gridTemplateColumns: '220px 1fr',
-              gap: 28,
-              alignItems: 'start',
-            }}
-          >
+        <div className="surface-base p-6">
+          <div className="grid grid-cols-[220px_1fr] gap-7 items-start">
             <RenderPreview
               status={status === 'dispatching' ? 'rendering' : status}
               videoUrl={playableVideoUrl}
@@ -315,10 +300,10 @@ export default function RenderDashboard({
               queuePosition={queuePos}
             />
 
-            <div className="flex-col gap-3" style={{ minWidth: 0 }}>
+            <div className="flex-col gap-3 min-w-0">
               <div className="flex justify-between items-center">
                 <div>
-                  <div style={{ fontSize: 16, fontWeight: 600 }}>
+                  <div className="text-base font-semibold">
                     {formatTaskTitle(jobTitleId, job.entry?.type || 'generate')}
                   </div>
                   <div className="text-xs text-tertiary">

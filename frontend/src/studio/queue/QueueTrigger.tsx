@@ -7,6 +7,7 @@
  */
 import { forwardRef } from 'react';
 import Icon from '../Icon.jsx';
+import { cn } from '@/lib/utils';
 
 export interface QueueTriggerProps {
   loading: boolean;
@@ -30,46 +31,24 @@ export const QueueTrigger = forwardRef<HTMLButtonElement, QueueTriggerProps & Re
       disabled={loading}
       aria-label={ariaLabel}
       {...rest}
-      style={{
-        position: 'relative',
-        display: 'inline-flex',
-        alignItems: 'center',
-        gap: 6,
-        padding: '6px 10px',
-        background: active ? 'var(--accent)' : 'var(--bg-elev)',
-        color: active ? '#fff' : 'var(--text-secondary)',
-        border: '1px solid var(--border)',
-        borderRadius: 'var(--r-sm)',
-        fontSize: 12,
-        fontWeight: 500,
-        cursor: loading ? 'wait' : 'pointer',
-        opacity: loading ? 0.6 : 1,
-        boxShadow: 'var(--shadow-sm)',
-      }}
+      className={cn(
+        'relative inline-flex items-center gap-1.5 px-2.5 py-1.5 border border-border rounded-sm text-xs font-medium shadow-[var(--shadow-sm)]',
+        active ? 'bg-primary text-white' : 'bg-card text-ink-2',
+        loading ? 'cursor-wait opacity-60' : 'cursor-pointer',
+      )}
       title={loading ? '작업 목록 불러오는 중…' : '작업 목록 보기'}
     >
       <Icon name="settings" size={12} />
       작업
       {active && (
-        // Red dot — single liveness indicator. Pulse animation is
-        // disabled globally under prefers-reduced-motion (index.css:281).
-        // role/aria-live announces state changes to screen readers
-        // since the dot is a color-only visual signal.
+        // Pulse animation is disabled globally under prefers-reduced-motion
+        // (index.css). role/aria-live announces state changes to screen
+        // readers since the dot is a color-only visual signal.
         <span
           role="status"
           aria-live="polite"
           aria-label="작업 진행 중"
-          style={{
-            position: 'absolute',
-            top: -2,
-            right: -2,
-            width: 8,
-            height: 8,
-            borderRadius: 999,
-            background: 'var(--destructive)',
-            boxShadow: '0 0 0 3px var(--destructive-soft)',
-            animation: 'var(--animate-pulse-slow)',
-          }}
+          className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-destructive shadow-[0_0_0_3px_var(--destructive-soft)] animate-pulse-slow"
         />
       )}
     </button>
