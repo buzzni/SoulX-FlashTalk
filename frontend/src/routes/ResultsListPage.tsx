@@ -6,13 +6,14 @@
  * 가로 strip (이전엔 별도 사이드바였음 — 마스터 사이드바와 공간 충돌).
  */
 import { useCallback, useEffect, useMemo, useState, useRef } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
 import { MoreHorizontal, Plus, Play } from 'lucide-react';
 import { AppLayout } from './AppLayout';
 import { Spinner } from '../components/spinner';
 import { EmptyState } from '../components/empty-state';
 import { videoTitle, formatCompactDate, formatDuration } from '../lib/format';
+import { startNewVideo } from '../lib/wizardNav';
 import { fetchJSON, humanizeError } from '../api/http';
 import { schemas } from '../api/schemas-generated';
 import {
@@ -52,6 +53,7 @@ interface HistoryResponse {
 type Filter = 'all' | 'unassigned' | string;
 
 export function ResultsListPage() {
+  const navigate = useNavigate();
   const [filter, setFilter] = useState<Filter>('all');
   const [items, setItems] = useState<HistoryItem[] | null>(null);
   const [historyError, setHistoryError] = useState<string | null>(null);
@@ -174,12 +176,13 @@ export function ResultsListPage() {
               }
               action={
                 filter === 'all' ? (
-                  <Link
-                    to="/step/1"
-                    className="text-primary text-[13px] font-semibold no-underline hover:underline"
+                  <button
+                    type="button"
+                    onClick={() => startNewVideo(navigate)}
+                    className="text-primary text-[13px] font-semibold hover:underline cursor-pointer"
                   >
                     첫 영상 만들러 가기 →
-                  </Link>
+                  </button>
                 ) : undefined
               }
             />

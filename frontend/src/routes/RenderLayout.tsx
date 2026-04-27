@@ -12,6 +12,7 @@ import QueueStatus from '../studio/QueueStatus';
 import { WizardButton as Button } from '@/components/wizard-button';
 import { WizardModal as Modal } from '@/components/wizard-modal';
 import { useWizardStore } from '../stores/wizardStore';
+import { startNewVideo } from '../lib/wizardNav';
 import { TopBar } from './TopBar';
 import { computeValidity, deepestReachableStep } from './wizardValidation';
 
@@ -22,13 +23,11 @@ interface RenderLayoutProps {
 export default function RenderLayout({ attachToTaskId = null }: RenderLayoutProps) {
   const navigate = useNavigate();
   const state = useWizardStore();
-  const resetState = useWizardStore((s) => s.reset);
   const [resetOpen, setResetOpen] = useState(false);
 
   const confirmReset = () => {
     setResetOpen(false);
-    resetState();
-    navigate('/step/1');
+    startNewVideo(navigate);
   };
 
   const handleBack = () => {

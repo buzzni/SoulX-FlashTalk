@@ -22,6 +22,7 @@ import { WizardButton as Button } from '@/components/wizard-button';
 import { generateVideo } from '../../api/video';
 import { getVideoMeta } from '../../api/file';
 import { humanizeError } from '../../api/http';
+import { clearDraftIfDispatched, markDispatched } from '../../lib/wizardNav';
 import { useRenderJob } from '../../hooks/useRenderJob';
 import { useQueuePosition } from '../../stores/queueStore';
 import { RESOLUTION_META } from '../../wizard/schema';
@@ -121,6 +122,12 @@ export default function RenderDashboard({
         if (!id) {
           throw new Error('서버가 task_id를 돌려주지 않았어요');
         }
+        // Stamp this session as the dispatcher of `id` so a later
+        // completion event can auto-reset the wizard. Reset can't
+        // happen here yet — RenderDashboard still depends on the
+        // wizard state (resolution etc.) for display fallbacks until
+        // the queue snapshot lands.
+        markDispatched(id);
         // Promote the URL from /render → /render/:taskId so refresh
         // survives and the task is permalink-able. `replace: true` so
         // the back button skips the transient dispatch URL. No
@@ -154,6 +161,7 @@ export default function RenderDashboard({
     const entry = job.entry;
     if (!entry) return; // snapshot hasn't landed yet
     if (entry.status === 'completed') {
+      clearDraftIfDispatched(attachToTaskId);
       navigate(`/result/${attachToTaskId}`, { replace: true });
     } else if (entry.status === 'cancelled') {
       setDispatchError('취소된 작업이에요');
@@ -161,9 +169,12 @@ export default function RenderDashboard({
     // running / pending / error: useRenderJob drives the display
   }, [attachToTaskId, job.entry, navigate]);
 
-  // ── When useRenderJob flips to done, hand off to /result.
+  // ── When useRenderJob flips to done, hand off to /result. If this
+  //    session dispatched the task, clear the now-stale draft so the
+  //    sidebar/home stop offering "이어 만들기" for finished work.
   useEffect(() => {
     if (job.isDone && taskId) {
+      clearDraftIfDispatched(taskId);
       navigate(`/result/${taskId}`, { replace: true });
     }
   }, [job.isDone, taskId, navigate]);

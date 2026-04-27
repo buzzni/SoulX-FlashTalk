@@ -15,6 +15,7 @@ import QueueStatus from '../studio/QueueStatus';
 import { WizardButton as Button } from '@/components/wizard-button';
 import { WizardModal as Modal } from '@/components/wizard-modal';
 import { useWizardStore } from '../stores/wizardStore';
+import { startNewVideo } from '../lib/wizardNav';
 import { TopBar, STEPS } from './TopBar';
 import { StepFooter } from './StepFooter';
 import {
@@ -43,7 +44,6 @@ export default function WizardLayout({ children }: WizardLayoutProps) {
   // Each step page subscribes to its own slice — this layer only needs
   // the validity bits for routing guards + step footer.
   const state = useWizardStore();
-  const resetState = useWizardStore((s) => s.reset);
   const [resetOpen, setResetOpen] = useState(false);
 
   const valid = useMemo(() => computeValidity(state), [state]);
@@ -76,8 +76,7 @@ export default function WizardLayout({ children }: WizardLayoutProps) {
   };
   const confirmReset = () => {
     setResetOpen(false);
-    resetState();
-    navigate('/step/1');
+    startNewVideo(navigate);
   };
 
   // Only jump to a step the user has already reached (or the current one).
