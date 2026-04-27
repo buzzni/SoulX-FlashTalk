@@ -23,7 +23,20 @@ import { fetchResult } from '../api/result';
 import { fetchJSON, humanizeError } from '../api/http';
 import { retryFailedTask } from '../api/queue';
 import { useWizardStore } from '../stores/wizardStore';
-import { RESOLUTION_META, type ResolutionKey } from '../wizard/schema';
+import {
+  RESOLUTION_META,
+  type ResolutionKey,
+  INITIAL_WIZARD_STATE,
+  INITIAL_HOST,
+  INITIAL_COMPOSITION,
+  INITIAL_BACKGROUND,
+  INITIAL_VOICE,
+  type Host,
+  type Composition,
+  type Background,
+  type Voice,
+  type Product,
+} from '../wizard/schema';
 import {
   computeValidity,
   deepestReachableStep,
@@ -112,15 +125,15 @@ export default function ResultPage() {
     }
   };
 
-  // "수정해서 다시 만들기" — hydrate the wizard with the params we can
-  // safely restore (script text, resolution) and drop the user back at
-  // step 1 to re-pick host + voice. We can't restore host/voice/composition
-  // directly because their lifecycle (selected/url/seed/etc.) is wider
-  // than what the manifest carries — better to make the user re-confirm
-  // than fake a half-valid generation.
+  // "수정해서 다시 만들기" — atomically rebuild the entire wizard state
+  // from the failed task's manifest. Single useWizardStore.setState()
+  // call avoids the race the previous version had where 8 sequential
+  // setters left intermediate states visible to RHF/zustand sync hooks
+  // long enough to clobber the rebuild.
   const doEditAndRetry = () => {
     setConfirmAction(null);
     if (!result) return;
+
     const params = (result.params ?? {}) as Record<string, unknown>;
     const meta = ((result as Record<string, unknown>).meta ?? {}) as Record<string, unknown>;
     const obj = (k: string): Record<string, unknown> => {
@@ -135,38 +148,18 @@ export default function ResultPage() {
     const str = (v: unknown) => (typeof v === 'string' ? v : null);
     const strOr = (v: unknown, d: string) => (typeof v === 'string' ? v : d);
 
-    // Derive an imageId from a path tail (e.g. host_7158068b_s77.png →
-    // host_7158068b_s77). meta carries selectedPath/selectedUrl but
-    // never the original imageId — wizard tolerates a synthesized one.
     const imageIdFromPath = (p: string | null): string => {
       if (!p) return '';
       const base = p.split('/').pop() ?? p;
       return base.replace(/\.\w+$/, '');
     };
 
-    // backend's params.script_text is sometimes empty — meta.voice.script
-    // (joined with ' [breath] ' for tts/clone, '\n\n' for upload) is the
-    // reliable source. Try meta first, params second.
-    const scriptText =
-      (typeof metaVoice.script === 'string' && metaVoice.script) ||
-      (typeof params.script_text === 'string' ? params.script_text : '');
-    const resReq =
-      typeof params.resolution_requested === 'string' ? params.resolution_requested : '';
-
-    const store = useWizardStore.getState();
-    store.reset();
-
-    // ── Host hydrate (image + prompt + builder) ──────────────────────
-    // meta.host snapshot looks like:
-    //   { mode, selectedSeed, selectedPath, imageUrl, prompt,
-    //     negativePrompt, faceRefPath?, outfitRefPath?, outfitText?,
-    //     faceStrength?, outfitStrength?, temperature }
-    // We reconstruct Host.input + a synthetic 'ready' generation slice
-    // pinned to the saved variant so step1's gallery shows it selected.
+    // ── Host build ───────────────────────────────────────────────────
     const hostMode = strOr(metaHost.mode, 'text');
     const hostSelectedPath = str(metaHost.selectedPath);
     const hostSelectedUrl = str(metaHost.imageUrl);
     const hostSelectedSeed = num(metaHost.selectedSeed, 0);
+    let nextHost: Host = INITIAL_HOST;
     if (hostSelectedPath || hostSelectedUrl) {
       const variant = {
         seed: hostSelectedSeed,
@@ -174,7 +167,7 @@ export default function ResultPage() {
         url: hostSelectedUrl ?? '',
         path: hostSelectedPath ?? '',
       };
-      store.setHost(() => ({
+      nextHost = {
         input:
           hostMode === 'image'
             ? {
@@ -201,30 +194,36 @@ export default function ResultPage() {
           selected: variant,
           prevSelected: null,
         },
-      }));
+      };
     }
 
-    // ── Background hydrate ───────────────────────────────────────────
+    // ── Background build ─────────────────────────────────────────────
+    let nextBackground: Background = INITIAL_BACKGROUND;
     const bgSource = strOr(metaBackground.source, '');
     if (bgSource === 'preset') {
-      store.setBackground(() => ({
-        kind: 'preset',
-        presetId: str(metaBackground.presetId),
-      }));
+      nextBackground = { kind: 'preset', presetId: str(metaBackground.presetId) };
     } else if (bgSource === 'prompt') {
-      store.setBackground(() => ({
-        kind: 'prompt',
-        prompt: strOr(metaBackground.prompt, ''),
-      }));
+      nextBackground = { kind: 'prompt', prompt: strOr(metaBackground.prompt, '') };
     } else if (bgSource === 'url' && typeof metaBackground.imageUrl === 'string') {
-      store.setBackground(() => ({
-        kind: 'url',
-        url: metaBackground.imageUrl as string,
-      }));
+      nextBackground = { kind: 'url', url: metaBackground.imageUrl as string };
+    } else if (bgSource === 'upload') {
+      const upPath = str(metaBackground.uploadPath);
+      const upUrl = str(metaBackground.imageUrl);
+      if (upPath || upUrl) {
+        const fname = ((upPath ?? upUrl) ?? '').split('/').pop() ?? '';
+        nextBackground = {
+          kind: 'upload',
+          asset: {
+            path: upPath ?? '',
+            url: upUrl ?? (upPath ? `/api/files/${fname}` : ''),
+            name: fname,
+          },
+        };
+      }
     }
-    // upload mode skipped — needs a re-uploaded asset to be schema-valid.
 
-    // ── Composition hydrate (image + settings) ───────────────────────
+    // ── Composition build ────────────────────────────────────────────
+    let nextComposition: Composition = INITIAL_COMPOSITION;
     const compPath = str(metaComposition.selectedPath);
     const compUrl = str(metaComposition.selectedUrl);
     const compSeed = num(metaComposition.selectedSeed, 0);
@@ -237,17 +236,15 @@ export default function ResultPage() {
       };
       const shotRaw = strOr(metaComposition.shot, 'medium');
       const angleRaw = strOr(metaComposition.angle, 'eye');
-      const shot = (['closeup', 'bust', 'medium', 'full'] as const).includes(
-        shotRaw as 'closeup' | 'bust' | 'medium' | 'full',
-      )
+      const shotEnum: Array<'closeup' | 'bust' | 'medium' | 'full'> = ['closeup', 'bust', 'medium', 'full'];
+      const angleEnum: Array<'eye' | 'high' | 'low'> = ['eye', 'high', 'low'];
+      const shot = shotEnum.includes(shotRaw as 'closeup' | 'bust' | 'medium' | 'full')
         ? (shotRaw as 'closeup' | 'bust' | 'medium' | 'full')
         : 'medium';
-      const angle = (['eye', 'high', 'low'] as const).includes(
-        angleRaw as 'eye' | 'high' | 'low',
-      )
+      const angle = angleEnum.includes(angleRaw as 'eye' | 'high' | 'low')
         ? (angleRaw as 'eye' | 'high' | 'low')
         : 'eye';
-      store.setComposition(() => ({
+      nextComposition = {
         settings: {
           direction: strOr(metaComposition.direction, ''),
           shot,
@@ -262,34 +259,23 @@ export default function ResultPage() {
           selected: compVariant,
           prevSelected: null,
         },
-      }));
+      };
     }
 
-    // Re-split the script back into paragraphs. Tries the tts/clone
-    // separator (`[breath]`) first, falls back to upload-mode (`\n\n`),
-    // then a single-paragraph entry for legacy rows.
+    // ── Voice build (script + audio + voice id) ──────────────────────
     const splitScript = (text: string): string[] => {
       if (text.includes('[breath]')) {
-        return text
-          .split(/\s*\[breath\]\s*/g)
-          .map((p) => p.trim())
-          .filter((p) => p.length > 0);
+        return text.split(/\s*\[breath\]\s*/g).map((p) => p.trim()).filter((p) => p.length > 0);
       }
       if (text.includes('\n\n')) {
-        return text
-          .split(/\n\n+/g)
-          .map((p) => p.trim())
-          .filter((p) => p.length > 0);
+        return text.split(/\n\n+/g).map((p) => p.trim()).filter((p) => p.length > 0);
       }
       return text.trim() ? [text.trim()] : [];
     };
+    const scriptText =
+      (typeof metaVoice.script === 'string' && metaVoice.script) ||
+      (typeof params.script_text === 'string' ? params.script_text : '');
     const paragraphs = scriptText ? splitScript(scriptText) : [];
-
-    // ── Voice hydrate (incl. already-generated audio) ───────────────
-    // The generated wav lives at params.audio_path. Building a
-    // ServerAsset from it lets the wizard skip TTS regeneration —
-    // step3's voice card sees a 'ready' generation and just plays the
-    // file. Audio files in outputs/ are served from /api/files/{name}.
     const audioPath = typeof params.audio_path === 'string' ? params.audio_path : '';
     const audioName = audioPath ? (audioPath.split('/').pop() ?? '') : '';
     const audioAsset = audioPath
@@ -305,23 +291,21 @@ export default function ResultPage() {
     const scriptForVoice = {
       paragraphs: paragraphs.length > 0 ? paragraphs : [''],
     };
+    let nextVoice: Voice = INITIAL_VOICE;
     if (voiceSource === 'upload') {
-      // upload mode bypasses TTS entirely; audio is the canonical artifact.
-      store.setVoice(() => ({
+      nextVoice = {
         source: 'upload',
         audio: audioAsset,
         script: scriptForVoice,
-      }));
+      };
     } else if (voiceSource === 'clone') {
-      // clone mode needs a cloned sample. We can restore the cloned-state
-      // when meta carried voiceId/voiceName, plus the generated audio.
       const cloneVoiceId = str(metaVoice.voiceId);
       const cloneVoiceName = str(metaVoice.voiceName);
       const sample =
         cloneVoiceId && cloneVoiceName
           ? { state: 'cloned' as const, voiceId: cloneVoiceId, name: cloneVoiceName }
           : { state: 'empty' as const };
-      store.setVoice(() => ({
+      nextVoice = {
         source: 'clone',
         sample,
         advanced: advancedFromMeta,
@@ -329,12 +313,9 @@ export default function ResultPage() {
         generation: audioAsset
           ? { state: 'ready', audio: audioAsset }
           : { state: 'idle' },
-      }));
+      };
     } else {
-      // Default to tts (most runs). voiceId/voiceName + the already-
-      // generated audio mean step3 plays the existing wav rather than
-      // making the user click "음성 생성" again.
-      store.setVoice(() => ({
+      nextVoice = {
         source: 'tts',
         voiceId: str(metaVoice.voiceId),
         voiceName: str(metaVoice.voiceName),
@@ -343,11 +324,44 @@ export default function ResultPage() {
         generation: audioAsset
           ? { state: 'ready', audio: audioAsset }
           : { state: 'idle' },
-      }));
+      };
     }
 
-    // Restore the resolution preset by reverse-looking-up RESOLUTION_META.
-    // Backend stores 'WxH' (portrait canonical, e.g. '1080x1920').
+    // ── Products build ───────────────────────────────────────────────
+    let nextProducts: Product[] = [];
+    if (Array.isArray(meta.products)) {
+      nextProducts = (meta.products as unknown[]).map((raw, idx): Product => {
+        const p = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
+        const name = typeof p.name === 'string' ? p.name : `Product ${idx + 1}`;
+        const pPath = typeof p.path === 'string' ? p.path : '';
+        const pUrl = typeof p.url === 'string' ? p.url : '';
+        if (pPath || pUrl) {
+          const fname = (pPath || pUrl).split('/').pop() ?? '';
+          return {
+            id: `product-${idx}-${fname}`,
+            name,
+            source: {
+              kind: 'uploaded',
+              asset: {
+                path: pPath || '',
+                url: pUrl || (pPath ? `/api/files/${fname}` : ''),
+                name: fname || name,
+              },
+            },
+          };
+        }
+        return {
+          id: `product-${idx}-empty`,
+          name,
+          source: { kind: 'empty' },
+        };
+      });
+    }
+
+    // ── Resolution + image quality + playlist ────────────────────────
+    let nextResolution: ResolutionKey = INITIAL_WIZARD_STATE.resolution;
+    const resReq =
+      typeof params.resolution_requested === 'string' ? params.resolution_requested : '';
     const m = /^(\d+)\s*x\s*(\d+)$/.exec(resReq);
     if (m) {
       const w = Number(m[1]);
@@ -355,15 +369,41 @@ export default function ResultPage() {
       const matched = (Object.keys(RESOLUTION_META) as ResolutionKey[]).find(
         (k) => RESOLUTION_META[k].width === w && RESOLUTION_META[k].height === h,
       );
-      if (matched) store.setResolution(matched);
+      if (matched) nextResolution = matched;
     }
+    const iqRaw = str(meta.imageQuality);
+    const nextImageQuality: '1K' | '2K' | '4K' =
+      iqRaw === '1K' || iqRaw === '2K' || iqRaw === '4K'
+        ? iqRaw
+        : INITIAL_WIZARD_STATE.imageQuality;
+    const nextPlaylistId =
+      str(params.playlist_id) || str((result as Record<string, unknown>).playlist_id) || null;
+
+    // ── ATOMIC swap ──────────────────────────────────────────────────
+    // One setState() call replaces the whole wizard slice. wizardEpoch
+    // increment forces RHF default-values memos to recompute, so step3
+    // doesn't render with stale defaultValues from a prior session.
+    const prevEpoch = useWizardStore.getState().wizardEpoch ?? 0;
+    useWizardStore.setState({
+      ...INITIAL_WIZARD_STATE,
+      host: nextHost,
+      products: nextProducts,
+      background: nextBackground,
+      composition: nextComposition,
+      voice: nextVoice,
+      resolution: nextResolution,
+      imageQuality: nextImageQuality,
+      playlistId: nextPlaylistId,
+      wizardEpoch: prevEpoch + 1,
+      lastSavedAt: Date.now(),
+    });
 
     // Land on the deepest step that's already valid after hydration —
-    // host+composition restore in one shot, so the user usually drops
-    // straight into step 3 (review + 영상 만들기 시작) without having
-    // to re-confirm anything in step 1 / 2.
-    const valid = computeValidity(useWizardStore.getState());
-    navigate(`/step/${deepestReachableStep(valid)}`);
+    // a complete restore drops the user straight into step 3 with the
+    // host image, composite, voice, audio, script, and resolution all
+    // pre-filled. They click 영상 만들기 시작 once and they're done.
+    const fresh = useWizardStore.getState();
+    navigate(`/step/${deepestReachableStep(computeValidity(fresh))}`);
   };
 
   // Fetch a few recent results to show as "다른 영상 둘러보기" sidebar.
