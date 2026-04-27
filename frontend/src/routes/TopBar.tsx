@@ -1,9 +1,10 @@
 /**
  * TopBar — wizard + render header.
  *
- * Workspace mark + "HostStudio" wordmark + Korean step pills (1 / 2 / 3
- * with circular numbered dots, Korean labels). Visual styling lives in
- * studio/styles/app.css under `.topbar` / `.brand` / `.step-pill`.
+ * Brand lockup + Korean step pills (1 / 2 / 3 with circular numbered
+ * dots, Korean labels). Visual styling lives in studio/styles/app.css
+ * under `.topbar` / `.step-pill`; the brand mark is the shared
+ * `<Brand>` component.
  */
 import { Fragment, type ReactNode } from 'react';
 import { Check } from 'lucide-react';

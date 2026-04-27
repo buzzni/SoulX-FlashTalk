@@ -38,12 +38,11 @@ export function Brand({ size = 'md', to, className = '', title }: BrandProps) {
         className="block"
       />
       <span
-        className="font-bold tracking-[-0.014em] text-foreground border-l border-border"
+        className="font-bold tracking-[-0.014em] leading-none text-foreground border-l border-border"
         style={{
           fontSize: s.fontSize,
           paddingLeft: s.padL,
           marginLeft: s.padL,
-          lineHeight: 1,
         }}
       >
         스튜디오
@@ -61,8 +60,8 @@ export function Brand({ size = 'md', to, className = '', title }: BrandProps) {
     );
   }
   return (
-    <span className={cls} title={title}>
+    <div className={cls} title={title}>
       {inner}
-    </span>
+    </div>
   );
 }

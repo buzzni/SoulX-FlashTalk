@@ -21,39 +21,7 @@
 .topbar::-webkit-scrollbar { display: none; }
 @media (max-width: 700px) {
   .topbar { padding: 0 12px; min-height: 52px; gap: 8px; }
-  .topbar .brand-tag { display: none !important; }
   .topbar .meta { display: none !important; }
-}
-.topbar .brand {
-  display: flex; align-items: center; gap: 10px;
-  white-space: nowrap;
-}
-.brand-mark {
-  width: 28px; height: 28px;
-  background: var(--text);
-  color: var(--bg);
-  display: grid; place-items: center;
-  border-radius: 6px;
-  font-weight: 700; font-size: 13px;
-  letter-spacing: -0.01em;
-}
-.brand-mark::after { content: none; }
-.brand > span:not(.brand-tag) {
-  font-family: var(--font-sans);
-  font-size: 14px; font-weight: 700;
-  letter-spacing: -0.018em;
-  line-height: 1;
-}
-.brand .brand-tag {
-  font-family: var(--font-sans) !important;
-  font-size: 12px !important;
-  letter-spacing: -0.005em !important;
-  text-transform: none !important;
-  color: var(--text-tertiary) !important;
-  margin-left: 4px !important;
-  padding-left: 10px !important;
-  border-left: 1px solid var(--border) !important;
-  font-weight: 500 !important;
 }
 .topbar .meta {
   color: var(--text-tertiary);
@@ -73,7 +41,6 @@
   border: 1px dashed var(--border);
 }
 @keyframes shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
-@media (max-width: 1100px) { .brand-tag { display: none; } }
 .topbar-right { display: flex; gap: 8px; align-items: center; }
 
 /* Main split — desktop has form column + preview column. Below 1100px,

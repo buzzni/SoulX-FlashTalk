@@ -31,9 +31,12 @@ export function Sidebar({ active }: SidebarProps) {
 
   return (
     <aside className="hidden md:flex flex-col bg-sidebar-background border-r border-sidebar-border px-3.5 py-4">
-      <div className="px-2 py-2 mb-3 rounded-md hover:bg-card transition-colors">
-        <Brand size="sm" to="/" title="홈으로" />
-      </div>
+      <Brand
+        size="sm"
+        to="/"
+        title="홈으로"
+        className="px-2 py-2 mb-3 rounded-md hover:bg-card transition-colors"
+      />
 
       <button
         type="button"
