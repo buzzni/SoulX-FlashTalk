@@ -103,11 +103,15 @@ describe('useTaskProgress', () => {
     });
     await waitFor(() => expect(result.current.data?.stage).toBe('complete'));
     const callsAtTerminal = callCount;
-    // refetchInterval must return false on 'complete'; wait well past
-    // the 1500ms POLL_MS to confirm no second fetch fires.
-    await new Promise((r) => setTimeout(r, 2_000));
+    // Assert the predicate directly — refetchInterval reads the
+    // cached Query and should return false once stage is terminal.
+    const query = client.getQueryCache().find({ queryKey: ['task-state', 't-4'] });
+    expect(query).toBeDefined();
+    const interval = (query!.options as { refetchInterval?: unknown }).refetchInterval;
+    const intervalResult = typeof interval === 'function' ? interval(query!) : interval;
+    expect(intervalResult).toBe(false);
     expect(callCount).toBe(callsAtTerminal);
-  }, 10_000);
+  });
 
   it('aborts the in-flight fetch when the consumer unmounts', async () => {
     let abortCalled = false;
@@ -136,9 +140,8 @@ describe('useTaskProgress', () => {
     const client = new QueryClient({
       defaultOptions: {
         queries: {
-          // Mirror the prod default of 3 retries; fast retryDelay so the
-          // budget exhausts inside the test instead of the 5s default.
           retry: 3,
+          // retryDelay 1ms so the 3-retry budget exhausts in-test (vs TQ's 5s default).
           retryDelay: 1,
           refetchOnWindowFocus: false,
         },

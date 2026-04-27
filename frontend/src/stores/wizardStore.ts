@@ -46,20 +46,8 @@ import {
   persistVoice,
 } from '../wizard/normalizers';
 
-// ────────────────────────────────────────────────────────────────────
-// Wizard state shape — single source of truth lives in wizard/schema.ts
-// (`WizardStateSchema`). The store re-imports the schema-derived
-// `WizardState` so adding a field can never produce a store/schema
-// drift — it's the same type by construction.
-//
-// Lane B.5 (D11): retired the dead top-level `script: string` (voice
-// already owns the script via `voice.script`), retired the
-// `[k: string]: unknown` escape hatch, and added top-level
-// `playlistId: string | null` to match the schema. Lane C bumps the
-// persist envelope to v8 so `safeParse` can run on hydrate without
-// rejecting every existing user blob.
-// ────────────────────────────────────────────────────────────────────
-
+// Wizard state shape lives in wizard/schema.ts. Re-exported here so
+// adding a field flows through one type, not two.
 export type { WizardState };
 
 // ────────────────────────────────────────────────────────────────────
@@ -283,10 +271,8 @@ export function migrateWizardEnvelope(
     }
     return INITIAL_WIZARD_STATE;
   }
-  // The serialized schema is structurally narrower than the runtime
-  // schema (LocalAsset slots that the runtime allows are filtered to
-  // null/empty by partializeForPersist). Narrow → wide is assignment-
-  // compatible, so a single `as WizardState` is enough.
+  // Serialized schema narrows the runtime LocalAsset slots; widening
+  // back to WizardState is safe.
   return parsed.data as WizardState;
 }
 

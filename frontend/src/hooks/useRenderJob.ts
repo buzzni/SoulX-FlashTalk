@@ -56,13 +56,10 @@ export function useRenderJob(taskId: string | null | undefined): UseRenderJobRet
   // terminal (attach-to-completed-task should skip the subscribe
   // entirely, not subscribe-then-immediately-unsubscribe).
   const { data: queueSnapshot } = useQueue();
-  // Derive a stable boolean from the snapshot reference: once the
-  // first poll lands, `data` stays non-null forever, so this flips
-  // from false → true exactly once. Depending on `queueSnapshot`
-  // directly in the effect below would re-fire every 4s (queueStore
-  // writes a fresh object on every poll), causing the progress
-  // subscription to tear down + recreate on every tick — extra HTTP
-  // traffic and a reset of the 12s error-give-up budget.
+  // Stable boolean: flips false → true once on first poll, then never
+  // again. Depending on `queueSnapshot` itself would re-fire every 4s
+  // (queueStore writes a fresh object on every poll) and tear down +
+  // recreate the progress subscription on every tick.
   const queueSnapshotReady = queueSnapshot !== null;
 
   // Short-circuit: if the queue snapshot already shows the task is in
@@ -137,12 +134,8 @@ export function useRenderJob(taskId: string | null | undefined): UseRenderJobRet
   }, [startedAt, isTerminal, entry?.completed_at]);
 
   const isDone = isTerminalStage ? stage === 'complete' : entry?.status === 'completed';
-  // `pollFailed` flips when the progress poller gives up after ~12s of
-  // backend errors. Before this was folded in, pollFailed set a flag
-  // nobody read — RenderDashboard's status aggregator only looks at
-  // `isError`, so a dying progress endpoint surfaced as an eternal
-  // spinner instead of a "뭔가 잘못됐어요" shell with the reconnect
-  // message already staged in `errorMessage`.
+  // `pollFailed` is folded into `isError` so a dying progress endpoint
+  // surfaces as the "뭔가 잘못됐어요" shell instead of an eternal spinner.
   const isError =
     stage === 'error' ||
     entry?.status === 'error' ||

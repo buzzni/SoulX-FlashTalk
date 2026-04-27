@@ -176,9 +176,6 @@ describe('migrateImageQuality', () => {
     expect(migrateImageQuality('4K')).toBe('4K');
   });
   it('collapses unknown legacy strings to the 1K default', () => {
-    // Legacy blobs that survived the old `typeof === 'string'` guard
-    // (e.g. 'HD', 'medium') previously persisted as-is; now they
-    // narrow to the schema-valid '1K' fallback.
     expect(migrateImageQuality('HD')).toBe('1K');
     expect(migrateImageQuality('medium')).toBe('1K');
     expect(migrateImageQuality('')).toBe('1K');
