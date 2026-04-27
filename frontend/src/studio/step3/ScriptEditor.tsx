@@ -41,27 +41,33 @@ export function buildScript(paragraphs: string[]): string {
 /** Clamp a paragraphs array so buildScript(...).length <= SCRIPT_LIMIT.
  * Truncates from the END of the over-budget paragraph so earlier
  * content stays intact. Used when carrying script across mode swaps
- * (upload subtitle → TTS) and on hydration from possibly-stale
- * localStorage blobs that predate the cap. */
+ * (upload subtitle → TTS) and on hydration from stale localStorage
+ * blobs that predate the cap. Runs on every AudioUploader keystroke,
+ * so the loop is O(N) — track `hasNonEmpty` and `used` instead of
+ * re-scanning `out` per iteration. */
 export function clampParagraphs(paragraphs: string[]): string[] {
   const out: string[] = [];
   let used = 0;
+  let hasNonEmpty = false;
   for (let i = 0; i < paragraphs.length; i++) {
     const p = paragraphs[i] ?? '';
     const trimmed = p.trim();
-    const isFirstNonEmpty = out.every((q) => (q || '').trim().length === 0);
-    const sepCost = trimmed.length > 0 && !isFirstNonEmpty ? BREATH_TAG.length : 0;
+    const sepCost = trimmed.length > 0 && hasNonEmpty ? BREATH_TAG.length : 0;
     const available = SCRIPT_LIMIT - used - sepCost;
     if (available <= 0) {
       out.push('');
       continue;
     }
     if (p.length > available) {
-      out.push(p.slice(0, available));
-      used += sepCost + p.slice(0, available).trim().length;
+      const sliced = p.slice(0, available);
+      out.push(sliced);
+      const slicedTrimmedLen = sliced.trim().length;
+      used += sepCost + slicedTrimmedLen;
+      if (slicedTrimmedLen > 0) hasNonEmpty = true;
     } else {
       out.push(p);
       used += sepCost + trimmed.length;
+      if (trimmed.length > 0) hasNonEmpty = true;
     }
   }
   return out;

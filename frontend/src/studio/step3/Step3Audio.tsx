@@ -29,8 +29,8 @@ import { Sparkles, Mic, Copy, MicVocal, Film, Volume2, FileText, Monitor } from 
 import { useNavigate } from 'react-router-dom';
 import { FormProvider, useForm, useWatch } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
-import Icon from '../Icon.jsx';
 import { WizardBadge as Badge } from '@/components/wizard-badge';
+import { WizardErrorBanner } from '@/components/wizard-error-banner';
 import { WizardCard as Card } from '@/components/wizard-card';
 import { OptionCard } from '@/components/option-card';
 import { humanizeError } from '../../api/http';
@@ -251,9 +251,8 @@ export default function Step3Audio({ state, update }: Step3AudioProps) {
   const isAi = watchedSource !== 'upload';
   const aiSubMode: 'tts' | 'clone' = watchedSource === 'clone' ? 'clone' : 'tts';
 
-  // Mode swaps abort any in-flight TTS / clone request — otherwise
-  // the resolution lands on the new variant via setVoice and the
-  // user sees stale audio attributed to the wrong source.
+  // Mode swaps abort in-flight TTS/clone — otherwise the result
+  // lands on the new variant and shows stale audio under the wrong source.
   const abortInflight = () => {
     tts.abort();
     cloner.abort();
@@ -359,10 +358,8 @@ export default function Step3Audio({ state, update }: Step3AudioProps) {
         if (v.source === 'upload') return;
         setErrorMsg(null);
         try {
-          // Cancel any pending debounce timer + sync form → store
-          // synchronously. Without the cancel, a buffered timer can
-          // fire AFTER cloner.clone resolves and overwrite the new
-          // sample:'cloned' with form's stale sample:'pending'.
+          // Drop the pending debounce + sync form → store. See
+          // useDebouncedFormSync.cancel docblock for the clone race.
           formSync.cancel();
           setVoice((prev) => formValuesToVoiceSlice(v, prev));
 
@@ -475,21 +472,7 @@ export default function Step3Audio({ state, update }: Step3AudioProps) {
                 disabled={generationLocked}
               />
 
-              {errorMsg && (
-                <div
-                  style={{
-                    padding: '10px 12px',
-                    background: 'var(--danger-soft)',
-                    border: '1px solid var(--danger)',
-                    borderRadius: 'var(--r-sm)',
-                    color: 'var(--danger)',
-                    fontSize: 12,
-                  }}
-                >
-                  <Icon name="alert_circle" size={13} style={{ marginRight: 6 }} />
-                  {errorMsg}
-                </div>
-              )}
+              {errorMsg && <WizardErrorBanner message={errorMsg} />}
 
               <GenerateBar
                 label={
@@ -515,20 +498,11 @@ export default function Step3Audio({ state, update }: Step3AudioProps) {
                 <AudioUploader isUploading={audioUpload.isLoading} />
               </div>
               {uploadErrorMsg && (
-                <div
+                <WizardErrorBanner
                   className="mt-3"
-                  style={{
-                    padding: '10px 12px',
-                    background: 'var(--danger-soft)',
-                    border: '1px solid var(--danger)',
-                    borderRadius: 'var(--r-sm)',
-                    color: 'var(--danger)',
-                    fontSize: 12,
-                  }}
-                >
-                  <Icon name="alert_circle" size={13} style={{ marginRight: 6 }} />
-                  {uploadErrorMsg} · 다시 시도하려면 파일을 다시 골라주세요.
-                </div>
+                  message={uploadErrorMsg}
+                  hint="다시 시도하려면 파일을 다시 골라주세요"
+                />
               )}
               {watchedAudio && isServerAsset(watchedAudio) && (
                 <div className="mt-3 flex items-center gap-2">

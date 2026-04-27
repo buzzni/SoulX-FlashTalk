@@ -264,6 +264,44 @@ describe('Step3Audio — eager upload effect', () => {
   });
 });
 
+import { clampParagraphs, buildScript, SCRIPT_LIMIT } from '../step3/ScriptEditor';
+
+describe('clampParagraphs', () => {
+  it('preserves under-limit input verbatim', () => {
+    const input = ['hello', 'world'];
+    expect(clampParagraphs(input)).toEqual(['hello', 'world']);
+  });
+
+  it('truncates the over-budget paragraph and keeps the join under the cap', () => {
+    // 3 paragraphs of 2000 chars; BREATH_TAG separator costs 10 chars
+    // between non-empty entries.
+    //   used after p1 = 2000, after p2 = 4010 (2000 + sep10),
+    //   available for p3 = 5000 - 4010 - 10 = 980.
+    const input = ['a'.repeat(2000), 'b'.repeat(2000), 'c'.repeat(2000)];
+    const out = clampParagraphs(input);
+    expect((out[0] ?? '').length).toBe(2000);
+    expect((out[1] ?? '').length).toBe(2000);
+    expect((out[2] ?? '').length).toBe(980);
+    expect(buildScript(out).length).toBeLessThanOrEqual(SCRIPT_LIMIT);
+  });
+
+  it('emits empty strings for paragraphs that arrive after the budget is exhausted', () => {
+    const input = ['x'.repeat(SCRIPT_LIMIT), 'tail-1', 'tail-2'];
+    const out = clampParagraphs(input);
+    expect((out[0] ?? '').length).toBe(SCRIPT_LIMIT);
+    expect(out[1]).toBe('');
+    expect(out[2]).toBe('');
+    expect(buildScript(out).length).toBeLessThanOrEqual(SCRIPT_LIMIT);
+  });
+
+  it('treats leading empty paragraphs as no separator cost (first non-empty omits BREATH_TAG)', () => {
+    const input = ['', '', 'a'.repeat(SCRIPT_LIMIT)];
+    const out = clampParagraphs(input);
+    expect((out[2] ?? '').length).toBe(SCRIPT_LIMIT);
+    expect(buildScript(out).length).toBe(SCRIPT_LIMIT);
+  });
+});
+
 describe('ScriptEditor — SCRIPT_LIMIT clamp', () => {
   it('typing past 5000 chars in a paragraph clips at the limit', async () => {
     const seed = 'a'.repeat(4500);
