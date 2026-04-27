@@ -41,15 +41,15 @@ export default function LoginPage() {
   return (
     <div className="min-h-screen flex items-center justify-center bg-background px-5 py-10">
       <div className="w-full max-w-sm animate-rise">
-        {/* Workspace mark */}
-        <div className="mb-7">
+        {/* Workspace mark — centered hero */}
+        <div className="mb-8 flex justify-center">
           <Brand size="lg" />
         </div>
 
-        <h1 id="login-heading" className="headline-section m-0 mb-1.5">
+        <h1 id="login-heading" className="headline-section m-0 mb-2 text-center">
           다시 만나요.
         </h1>
-        <p className="m-0 mb-7 text-[14px] text-ink-2">
+        <p className="m-0 mb-7 text-[14px] text-ink-2 text-center">
           작업실에 들어오려면 로그인이 필요해요.
         </p>
 

@@ -6,20 +6,16 @@
  * mono labels. Active item gets a soft surface background + signal-blue
  * icon tint.
  */
-import { useSyncExternalStore } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import {
   Home,
+  Folder,
   FolderOpen,
   Plus,
   Play,
   HelpCircle,
   Settings,
-  Moon,
-  Sun,
 } from 'lucide-react';
-import { getTheme, subscribeTheme, toggleTheme } from '../lib/theme';
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { Brand } from '../components/brand';
 import { useLastSavedAt } from '../stores/wizardStore';
 import {
@@ -35,7 +31,6 @@ interface SidebarProps {
 
 export function Sidebar({ active }: SidebarProps) {
   const navigate = useNavigate();
-  const theme = useSyncExternalStore(subscribeTheme, getTheme, getTheme);
   const lastSavedAt = useLastSavedAt();
   useDraftAgeTick(lastSavedAt != null);
 
@@ -85,7 +80,13 @@ export function Sidebar({ active }: SidebarProps) {
         <NavItem
           to="/results"
           label="내 영상들"
-          icon={<FolderOpen className="size-4" />}
+          icon={
+            active === 'results' ? (
+              <FolderOpen className="size-4" />
+            ) : (
+              <Folder className="size-4" />
+            )
+          }
           active={active === 'results'}
         />
         {/* "진행 중" item removed — link was /render (dispatch-new),
@@ -111,27 +112,6 @@ export function Sidebar({ active }: SidebarProps) {
         />
       </NavGroup>
 
-      {/* Theme toggle pinned at the bottom */}
-      <div className="mt-3 pt-3 border-t border-sidebar-border flex items-center justify-between px-2">
-        <span className="text-[11px] text-muted-foreground tracking-[-0.005em]">테마</span>
-        <TooltipProvider>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button
-                type="button"
-                onClick={() => toggleTheme()}
-                aria-label="다크 모드 전환"
-                className="grid place-items-center size-7 rounded-md text-muted-foreground hover:bg-card hover:text-foreground transition-colors cursor-pointer"
-              >
-                {theme === 'dark' ? <Sun className="size-3.5" /> : <Moon className="size-3.5" />}
-              </button>
-            </TooltipTrigger>
-            <TooltipContent side="top" sideOffset={6}>
-              {theme === 'dark' ? '라이트 모드로 전환' : '다크 모드로 전환'}
-            </TooltipContent>
-          </Tooltip>
-        </TooltipProvider>
-      </div>
     </aside>
   );
 }

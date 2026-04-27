@@ -1,9 +1,8 @@
 /**
  * ProfileMenu — top-right user chip with dropdown.
  *
- * Shows avatar + name on the chip. The dropdown reveals role +
- * subscription pills, theme toggle, then nav items. Logout uses the
- * destructive variant.
+ * Shows avatar + name on the chip. The dropdown reveals theme toggle,
+ * then nav items. Logout uses the destructive variant.
  */
 import { useSyncExternalStore } from 'react';
 import { useNavigate } from 'react-router-dom';
@@ -15,7 +14,6 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
@@ -26,8 +24,6 @@ export function ProfileMenu() {
   const theme = useSyncExternalStore(subscribeTheme, getTheme, getTheme);
   const display = user?.display_name || user?.user_id || '게스트';
   const initial = (display[0] || '?').toUpperCase();
-  const subs = user?.subscriptions || [];
-  const role = user?.role || 'member';
 
   async function onLogout() {
     try {
@@ -39,10 +35,6 @@ export function ProfileMenu() {
     navigate('/login', { replace: true });
   }
 
-  function onToggleTheme() {
-    toggleTheme();
-    toast.success(theme === 'dark' ? '라이트 모드로 바꿨어요' : '다크 모드로 바꿨어요');
-  }
 
   return (
     <DropdownMenu>
@@ -77,14 +69,8 @@ export function ProfileMenu() {
             <div className="text-[11px] text-muted-foreground truncate">{user?.user_id || ''}</div>
           </div>
         </div>
-        <div className="px-3 pb-2 flex flex-wrap gap-1">
-          <span className="pill-neutral">{roleLabel(role)}</span>
-          {subs.map((s) => (
-            <span key={s} className="pill-primary">{s}</span>
-          ))}
-        </div>
         <DropdownMenuSeparator />
-        <DropdownMenuItem onSelect={onToggleTheme} className="gap-2">
+        <DropdownMenuItem onSelect={() => toggleTheme()} className="gap-2">
           {theme === 'dark' ? <Sun className="size-4" /> : <Moon className="size-4" />}
           {theme === 'dark' ? '라이트 모드' : '다크 모드'}
         </DropdownMenuItem>
@@ -102,13 +88,4 @@ export function ProfileMenu() {
       </DropdownMenuContent>
     </DropdownMenu>
   );
-}
-
-function roleLabel(role: string): string {
-  switch (role) {
-    case 'admin': return '관리자';
-    case 'member': return '멤버';
-    case 'studio': return '스튜디오';
-    default: return role;
-  }
 }

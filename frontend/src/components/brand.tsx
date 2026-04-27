@@ -22,9 +22,9 @@ export interface BrandProps {
 }
 
 const SIZES = {
-  sm: { logoH: 28, fontSize: 14, padL: 10 },
-  md: { logoH: 24, fontSize: 13, padL: 10 },
-  lg: { logoH: 36, fontSize: 16, padL: 12 },
+  sm: { logoH: 28, fontSize: 14, gap: 10, ruleH: 18 },
+  md: { logoH: 24, fontSize: 13, gap: 10, ruleH: 16 },
+  lg: { logoH: 40, fontSize: 18, gap: 14, ruleH: 24 },
 } as const;
 
 export function Brand({ size = 'md', to, className = '', title }: BrandProps) {
@@ -38,12 +38,13 @@ export function Brand({ size = 'md', to, className = '', title }: BrandProps) {
         className="block"
       />
       <span
-        className="font-bold tracking-[-0.014em] leading-none text-foreground border-l border-border"
-        style={{
-          fontSize: s.fontSize,
-          paddingLeft: s.padL,
-          marginLeft: s.padL,
-        }}
+        aria-hidden
+        className="block bg-border"
+        style={{ width: 1, height: s.ruleH, marginLeft: s.gap, marginRight: s.gap }}
+      />
+      <span
+        className="font-bold tracking-[-0.014em] leading-none text-foreground"
+        style={{ fontSize: s.fontSize }}
       >
         스튜디오
       </span>

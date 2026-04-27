@@ -42,17 +42,11 @@ createRoot(document.getElementById('root')).render(
       </QueryClientProvider>
     </ErrorBoundary>
     <Toaster
-      position="top-right"
-      richColors
-      closeButton
-      toastOptions={{
-        className: 'font-sans',
-        style: {
-          fontFamily: 'var(--font-sans)',
-          fontSize: '13px',
-          letterSpacing: '-0.012em',
-        },
-      }}
+      position="top-center"
+      offset={20}
+      gap={8}
+      visibleToasts={3}
+      duration={3500}
     />
   </StrictMode>,
 )

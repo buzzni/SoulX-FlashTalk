@@ -538,3 +538,93 @@
   background: var(--primary);
   box-shadow: 0 0 0 4px var(--primary-soft);
 }
+
+/* ───── Sonner toast — productivity-shell aesthetic ─────
+ * Card surface + thin type-colored accent stripe on the left.
+ * No saturated rich-color floods, no jarring shadows. */
+[data-sonner-toaster] {
+  --width: 380px;
+}
+
+[data-sonner-toast] {
+  background: var(--popover) !important;
+  color: var(--popover-foreground) !important;
+  border: 1px solid var(--border) !important;
+  border-radius: 10px !important;
+  box-shadow: var(--shadow-2) !important;
+  padding: 12px 14px 12px 18px !important;
+  font-family: var(--font-sans) !important;
+  font-size: 13px !important;
+  letter-spacing: -0.012em !important;
+  position: relative !important;
+  overflow: hidden !important;
+}
+
+[data-sonner-toast]::before {
+  content: '';
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 3px;
+  background: var(--ink-3);
+}
+[data-sonner-toast][data-type="success"]::before { background: var(--success); }
+[data-sonner-toast][data-type="error"]::before { background: var(--destructive); }
+[data-sonner-toast][data-type="warning"]::before { background: var(--amber); }
+[data-sonner-toast][data-type="info"]::before { background: var(--primary); }
+
+[data-sonner-toast] [data-title] {
+  font-weight: 600 !important;
+  font-size: 13.5px !important;
+  letter-spacing: -0.014em !important;
+  line-height: 1.35 !important;
+  color: var(--ink) !important;
+}
+[data-sonner-toast] [data-description] {
+  color: var(--ink-3) !important;
+  font-size: 12.5px !important;
+  line-height: 1.45 !important;
+  margin-top: 2px !important;
+}
+
+[data-sonner-toast] [data-icon] {
+  width: 16px !important;
+  height: 16px !important;
+  margin-right: 10px !important;
+  display: grid !important;
+  place-items: center !important;
+}
+[data-sonner-toast][data-type="success"] [data-icon] { color: var(--success) !important; }
+[data-sonner-toast][data-type="error"] [data-icon]   { color: var(--destructive) !important; }
+[data-sonner-toast][data-type="warning"] [data-icon] { color: var(--amber) !important; }
+[data-sonner-toast][data-type="info"] [data-icon]    { color: var(--primary) !important; }
+
+[data-sonner-toast] [data-button] {
+  background: var(--primary) !important;
+  color: var(--primary-foreground) !important;
+  border-radius: 6px !important;
+  padding: 6px 10px !important;
+  font-size: 12px !important;
+  font-weight: 600 !important;
+  letter-spacing: -0.012em !important;
+  border: none !important;
+}
+[data-sonner-toast] [data-cancel] {
+  background: var(--surface-2) !important;
+  color: var(--ink-2) !important;
+}
+[data-sonner-toast] [data-close-button] {
+  background: transparent !important;
+  border: 1px solid var(--border) !important;
+  color: var(--ink-3) !important;
+  width: 20px !important;
+  height: 20px !important;
+  border-radius: 6px !important;
+  top: 8px !important;
+  right: 8px !important;
+  left: auto !important;
+  transform: none !important;
+}
+[data-sonner-toast] [data-close-button]:hover {
+  background: var(--surface-2) !important;
+  color: var(--ink) !important;
+}
