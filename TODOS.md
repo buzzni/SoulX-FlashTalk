@@ -181,15 +181,14 @@ Deferred work captured during plan reviews. Each entry includes context for futu
 **What**: Add a Playwright job to `.github/workflows/test.yml` that runs `frontend/e2e/refresh-during-typing.spec.ts`, `back-during-render.spec.ts`, `mode-switching.spec.ts`, and `sse-fatal-error.spec.ts` against a built dev server.
 1. New job in CI: `playwright-e2e`. Build frontend (`npm run build`), serve via `npm run preview` (or a Playwright `webServer` config), run `npx playwright test e2e/`.
 2. Cache the Playwright browser binaries (`actions/cache` keyed on `playwright-core` version from `package-lock.json`) to keep the job under 3 minutes.
-3. The `mode-switching` and `sse-fatal-error` specs assume the Step 2/3 RHF migration is complete (the `<ErrorAlert>` is wired to the generation button). Until that lands, gate those two with `test.skip` and a TODO note pointing to the RHF migration TODO entry above.
-4. `refresh-during-typing` and `back-during-render` should pass against current `main` — they exercise persist hardening (Lane C) which is fully shipped.
+3. **All 4 specs gate on Step 1/2/3 RHF wire-up** (verified 2026-04-27 against `main` post-PR-8): `refresh-during-typing` types into a Step 3 `<textarea>` and asserts the value survives a reload, but Step 3's script editor doesn't yet bridge keystrokes through RHF→zustand fast enough for the 500ms idle window — fails as `unexpected value ""`. `back-during-render`'s scrub assertion (`['generating', 'idle']`) does pass, but the follow-up `getByRole('button', name: /음성 생성|만들기/)` matches multiple buttons (Step 2's "합성 이미지 만들기" + Step 3's "음성 만들기") and fails strict-mode. `mode-switching` and `sse-fatal-error` need RHF resolver + `<ErrorAlert>` wiring. So the actual ordering is: Step 1 RHF → Step 2/3 RHF → tighten button selector in `back-during-render` → land all 4 in CI.
 
 **Why**: Lane G shipped the spec files as documented contracts but they don't run anywhere. Plan §7 done-criteria says "4 critical-path Playwright E2E specs green in CI" — currently false. A regression in persist scrub or RHF reset semantics ships silently.
 
 **Pros**:
 - Makes the spec files load-bearing rather than aspirational.
 - Catches the regressions they were written to catch: persist `'streaming'` not scrubbed, RHF defaults overriding store-restored drafts, mode-switch tagged-union leakage, fatal SSE going to toast-only instead of `<ErrorAlert>`.
-- The 2 currently-passable specs (`refresh-during-typing`, `back-during-render`) start guarding `main` immediately; the other 2 join when Step 2/3 RHF lands.
+- Once unblocked, all 4 specs guard regressions in persist hardening, RHF reset semantics, mode-switch tagged-union leakage, and fatal-SSE inline alerts in one CI gate.
 
 **Cons**:
 - Playwright on CI adds ~2-3 minutes per PR (cache hit) or ~5 minutes (cache miss). Tolerable but real.
@@ -198,9 +197,9 @@ Deferred work captured during plan reviews. Each entry includes context for futu
 
 **Context**: Lane G shipped the 4 spec files but the workflow didn't add a Playwright job. PR #8 test plan listed "Run the 4 new Playwright specs against staging" as deferred. Frontend job already runs `npm run test -- --run` (Vitest); this is a separate Playwright job.
 
-**Effort**: human ~half a day (workflow + cache config + first-run debugging) / CC ~30 min for the workflow + skip-flagging, plus per-spec debug as Step 2/3 RHF lands.
+**Effort**: human ~half a day (workflow + cache config + first-run debugging) / CC ~30 min for the workflow + skip-flagging, plus per-spec debug as RHF lands.
 
-**Priority**: P2 (closes a stated done-criteria item; small immediate win on the 2 already-passable specs).
+**Priority**: P2 (closes a stated done-criteria item).
 
-**Depends on / blocked by**: For full coverage, the Step 2/3 RHF follow-up. For the 2 immediately-runnable specs, nothing — could land standalone.
+**Depends on / blocked by**: Step 1 RHF wire-up + Step 2/3 RHF migration (both TODO entries above). All 4 specs need RHF for their assertions to pass; landing this entry standalone would just add a permanently-red CI job.
 
