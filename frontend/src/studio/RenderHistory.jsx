@@ -107,7 +107,7 @@ export default function RenderHistory({ excludeTaskId, limit = 8 }) {
               onClick={() => setPlaying(v.task_id)}
               className="flex items-center gap-2.5 px-2.5 py-2 bg-secondary border border-border rounded-lg cursor-pointer text-left font-sans text-inherit"
             >
-              <div className="grid place-items-center w-7 h-7 rounded-md bg-accent shrink-0">
+              <div className="grid place-items-center w-7 h-7 rounded-md bg-accent shrink-0 text-white">
                 <Icon name="play" size={12} />
               </div>
               <div className="flex-1 min-w-0">
