@@ -121,16 +121,17 @@ export function VoicePicker({ remoteVoices, loadError }: VoicePickerProps) {
             : '재생 버튼으로 미리 들어보세요'
       }
     >
-      <div className="voice-list">
+      <div className="flex flex-col gap-1.5 max-h-[360px] overflow-y-auto pr-1">
         {voicesLoading
           ? Array.from({ length: VOICE_SKELETON_COUNT }, (_, i) => (
               <div
                 key={`sk-${i}`}
-                className="voice-item voice-item--skeleton"
+                data-testid="voice-row"
                 aria-hidden
+                className="flex items-center gap-2.5 px-3 py-2.5 rounded-md border border-border bg-card pointer-events-none"
               >
-                <div className="voice-avatar skeleton-shimmer bg-secondary" />
-                <div className="voice-info">
+                <div className="skeleton-shimmer bg-secondary w-8 h-8 rounded-full shrink-0" />
+                <div className="flex-1 min-w-0">
                   <div className="skeleton-shimmer h-[11px] w-2/5 rounded mb-1" />
                   <div className="skeleton-shimmer h-2.5 w-[70%] rounded" />
                 </div>
@@ -139,20 +140,46 @@ export function VoicePicker({ remoteVoices, loadError }: VoicePickerProps) {
             ))
           : voiceList.map((v) => {
               const isPlaying = playingPreview === v.id;
+              const on = selectedVoiceId === v.id;
               return (
                 <div
                   key={v.id}
-                  className={cn('voice-item', selectedVoiceId === v.id && 'on')}
+                  data-testid="voice-row"
+                  data-selected={on || undefined}
                   onClick={() => selectVoice({ id: v.id, name: v.name })}
+                  className={cn(
+                    'group flex items-center gap-2.5 px-3 py-2.5 rounded-md border cursor-pointer transition-[border-color,background-color,box-shadow] duration-150',
+                    on
+                      ? 'border-primary bg-primary-soft shadow-[0_0_0_3px_color-mix(in_oklch,var(--primary)_14%,transparent)]'
+                      : 'border-border bg-card hover:border-rule-strong hover:bg-secondary',
+                  )}
                 >
-                  <div className="voice-avatar">{v.name[0]}</div>
-                  <div className="voice-info">
-                    <div className="voice-name">{v.name}</div>
-                    <div className="voice-meta">{v.desc || v.lang || ''}</div>
+                  <div
+                    className={cn(
+                      'w-8 h-8 rounded-full shrink-0 grid place-items-center text-xs font-bold tracking-tight transition-all border',
+                      on
+                        ? 'bg-primary border-primary text-white'
+                        : 'bg-secondary border-border text-foreground group-hover:border-rule-strong',
+                    )}
+                  >
+                    {v.name[0]}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div
+                      className={cn(
+                        'text-[13px] font-semibold leading-snug tracking-tight',
+                        on && 'text-primary-on-soft',
+                      )}
+                    >
+                      {v.name}
+                    </div>
+                    <div className="text-[11.5px] text-muted-foreground leading-snug mt-px">
+                      {v.desc || v.lang || ''}
+                    </div>
                   </div>
                   <button
                     type="button"
-                    className="voice-play inline-flex items-center justify-center size-8 rounded-md text-muted-foreground hover:bg-secondary hover:text-foreground disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                    className="shrink-0 inline-flex items-center justify-center size-8 rounded-md text-muted-foreground hover:bg-secondary hover:text-foreground disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
                     title={v.preview_url ? '미리 듣기' : '미리듣기 샘플이 없어요'}
                     disabled={!v.preview_url}
                     onClick={(e) => {

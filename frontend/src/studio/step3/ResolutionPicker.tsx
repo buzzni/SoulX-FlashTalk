@@ -19,20 +19,38 @@ export interface ResolutionPickerProps {
 
 export function ResolutionPicker({ selectedKey, onSelect }: ResolutionPickerProps) {
   return (
-    <div className="res-grid">
+    <div className="grid grid-cols-[repeat(auto-fill,minmax(110px,1fr))] gap-2.5">
       {RES_OPTION_KEYS.map((key) => {
         const r = RESOLUTION_META[key];
+        const on = selectedKey === r.key;
         return (
-        <button
-          key={r.key}
-          className={cn('res-tile', selectedKey === r.key && 'on')}
-          onClick={() => onSelect(r.key)}
-        >
-          <div className="res-label mb-0.5">{r.label}</div>
-          <div className="res-dim">
-            {key} · {r.width}×{r.height}
-          </div>
-        </button>
+          <button
+            key={r.key}
+            onClick={() => onSelect(r.key)}
+            className={cn(
+              'relative px-3.5 py-4 rounded-md border bg-card text-left transition-[border-color,box-shadow,transform,background-color] duration-150',
+              on
+                ? 'border-primary bg-primary-soft -translate-y-px shadow-[0_0_0_3px_color-mix(in_oklch,var(--primary)_16%,transparent)]'
+                : 'border-border hover:border-rule-strong hover:-translate-y-px hover:shadow-sm',
+            )}
+          >
+            <div
+              className={cn(
+                'mb-0.5 text-sm font-bold tracking-tight',
+                on && 'text-primary-on-soft',
+              )}
+            >
+              {r.label}
+            </div>
+            <div
+              className={cn(
+                'text-[11px] mt-0.5 font-mono',
+                on ? 'text-primary-on-soft/75' : 'text-muted-foreground',
+              )}
+            >
+              {key} · {r.width}×{r.height}
+            </div>
+          </button>
         );
       })}
     </div>

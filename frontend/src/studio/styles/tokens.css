@@ -145,9 +145,7 @@
   outline: none;
 }
 .studio-root .file-btn:focus-visible,
-.studio-root .upload-tile:focus-visible,
-.studio-root .res-tile:focus-visible,
-.studio-root .voice-item:focus-visible {
+.studio-root .upload-tile:focus-visible {
   outline: 2px solid var(--primary);
   outline-offset: 2px;
 }

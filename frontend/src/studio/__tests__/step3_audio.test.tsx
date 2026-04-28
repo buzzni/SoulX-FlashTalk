@@ -166,7 +166,7 @@ describe('Step3Audio — submit handler', () => {
     renderStep3();
     // Pick '민지' (preset row). VoicePicker fallback list is rendered
     // because useVoiceList mock returns empty voices.
-    const minjiRow = screen.getByText('민지').closest('.voice-item');
+    const minjiRow = screen.getByText('민지').closest('[data-testid="voice-row"]');
     if (!minjiRow) throw new Error('expected 민지 preset row');
     fireEvent.click(minjiRow);
     // Generate button enables once form has voiceId; no debounce wait.
