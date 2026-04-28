@@ -27,6 +27,31 @@ export function videoTitle(item: {
 }
 
 /**
+ * Resolve a filesystem path or URL fragment to a frontend-loadable URL.
+ *
+ * Backend mounts /api/files at the SAFE_ROOTS (outputs / uploads / examples).
+ * Server stores absolute paths like "/opt/.../outputs/x.png" or
+ * "/opt/.../examples/woman.png". We strip the path up to the first known
+ * root segment and prefix /api/files. Pre-formed /api/* URLs and full
+ * http(s) URLs pass through unchanged.
+ *
+ * Returns null for paths we can't resolve (off-roots, empty, non-string).
+ */
+export function outputsPathToUrl(input: string | null | undefined): string | null {
+  if (!input || typeof input !== 'string') return null;
+  if (input.startsWith('/api/') || /^https?:\/\//.test(input)) return input;
+  // outputs/ keeps the legacy segment-stripping shape that ProvenanceCard
+  // already relied on (no double "/outputs/" in the URL).
+  const outIdx = input.indexOf('/outputs/');
+  if (outIdx >= 0) return `/api/files${input.slice(outIdx + '/outputs'.length)}`;
+  for (const segment of ['/uploads/', '/examples/']) {
+    const idx = input.indexOf(segment);
+    if (idx >= 0) return `/api/files${input.slice(idx)}`;
+  }
+  return null;
+}
+
+/**
  * Format a generation_time (seconds, fractional) into a human string.
  *   0.4   → "0.4초"
  *   12.7  → "13초"

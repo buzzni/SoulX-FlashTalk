@@ -21,6 +21,8 @@
 // manifest doesn't exist yet (dispatch-in-progress). ResultPage always
 // omits this since it fetches the real manifest.
 
+import { outputsPathToUrl } from '../lib/format';
+
 // Only used when we can't find a more specific label (e.g., preset name).
 const BG_SOURCE_DEFAULTS = {
   preset: '추천 장소',
@@ -54,15 +56,7 @@ const QUALITY_LABELS = {
 
 const tempLabel = (t) => t == null ? '—' : (t <= 0.4 ? '안정적' : t >= 1.0 ? '창의적' : '보통');
 
-// outputs/ absolute path → public /api/files/… URL that the frontend can load.
-// The /api/files mount serves OUTPUTS_DIR, so the URL is the path RELATIVE
-// to outputs/, NOT including the literal "/outputs/" segment.
-function outputsPathToUrl(absPath) {
-  if (!absPath || typeof absPath !== 'string') return null;
-  const idx = absPath.indexOf('/outputs/');
-  if (idx >= 0) return `/api/files${absPath.slice(idx + '/outputs'.length)}`;
-  return null;
-}
+// outputsPathToUrl moved to ../lib/format so ResultsListPage can reuse it.
 
 // Backend stores resolution as "HxW" (e.g. "1920x1080" — portrait 9:16);
 // display as "W×H" (e.g. "1080×1920") to match how users think about

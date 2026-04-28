@@ -13,7 +13,7 @@ import { MoreHorizontal, Plus, Play, RotateCw, Trash2 } from 'lucide-react';
 import { AppLayout } from './AppLayout';
 import { EmptyState } from '../components/empty-state';
 import { Pagination } from '../components/pagination';
-import { videoTitle, formatCompactDate } from '../lib/format';
+import { videoTitle, formatCompactDate, outputsPathToUrl } from '../lib/format';
 import { startNewVideo } from '../lib/wizardNav';
 import { cn } from '@/lib/utils';
 import { humanizeError } from '../api/http';
@@ -47,6 +47,11 @@ interface HistoryItem {
   status?: 'completed' | 'error' | 'cancelled' | null;
   public_error?: string | null;
   timestamp?: string | null;
+  /** Step-2 composite still (the FINAL frame FlashTalk animates).
+   * Backend `_project_history_row` exposes it from `params.host_image`.
+   * Used as the card thumbnail for failed/cancelled tasks (no video to
+   * play) and as the poster image for completed cards. */
+  host_image?: string | null;
   output_path?: string | null;
   file_size?: number | null;
   video_url?: string;
@@ -828,6 +833,7 @@ function ResultCard({ item, playlists, onMoved }: ResultCardProps) {
   };
 
   const videoUrl = item.video_url || `/api/videos/${item.task_id}`;
+  const compositeUrl = outputsPathToUrl(item.host_image);
   const title = videoTitle(item);
   const ts = formatCompactDate(item.timestamp);
 
@@ -844,19 +850,34 @@ function ResultCard({ item, playlists, onMoved }: ResultCardProps) {
       >
         <div className="relative w-full aspect-video bg-foreground overflow-hidden">
           {isCompleted ? (
+            // Completed: hover-play video, fall back to composite still as
+            // poster while metadata loads. object-contain preserves the
+            // source's true aspect ratio (portrait videos letterbox cleanly
+            // against the black surface).
             <video
               ref={videoRef}
               src={videoUrl}
+              poster={compositeUrl ?? undefined}
               preload="metadata"
               muted
               playsInline
               loop
-              className="block w-full h-full object-cover"
+              className="block w-full h-full object-contain"
+            />
+          ) : compositeUrl ? (
+            // Failed/cancelled: show the step-2 composite still (the final
+            // frame FlashTalk would have animated). Dimmed so it reads as
+            // "not a finished video" without becoming an opaque gradient.
+            <img
+              src={compositeUrl}
+              alt=""
+              aria-hidden
+              loading="lazy"
+              className="block w-full h-full object-contain opacity-65"
             />
           ) : (
-            // Failed/cancelled: no playable video. Dimmed thumbnail surface
-            // (decision §13.4) — a neutral gradient stands in for what would
-            // have been the video. Keeps grid alignment consistent.
+            // No composite still recorded — fall back to the prior
+            // gradient surface so the grid stays uniform.
             <div
               aria-hidden
               className="block w-full h-full bg-gradient-to-br from-surface-2 to-bg-sunken opacity-70"
