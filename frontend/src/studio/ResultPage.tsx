@@ -519,26 +519,26 @@ export default function ResultPage() {
                 </h1>
               </div>
               <div className="flex gap-2">
+                {(isError || isDone) && (
+                  <Button
+                    icon="settings"
+                    variant="secondary"
+                    onClick={() => setConfirmAction('edit')}
+                    title="이 작업의 입력값을 마법사에 채우고 처음부터 다시"
+                  >
+                    수정해서 다시 만들기
+                  </Button>
+                )}
                 {isError && (
-                  <>
-                    <Button
-                      icon="refresh"
-                      variant="secondary"
-                      onClick={() => setConfirmAction('retry')}
-                      disabled={retrying}
-                      title="같은 입력으로 그대로 다시 시도"
-                    >
-                      {retrying ? '재시도 중…' : '재시도'}
-                    </Button>
-                    <Button
-                      icon="settings"
-                      variant="secondary"
-                      onClick={() => setConfirmAction('edit')}
-                      title="이 작업의 입력값을 마법사에 채우고 처음부터 다시"
-                    >
-                      수정해서 다시 만들기
-                    </Button>
-                  </>
+                  <Button
+                    icon="refresh"
+                    variant="secondary"
+                    onClick={() => setConfirmAction('retry')}
+                    disabled={retrying}
+                    title="같은 입력으로 그대로 다시 시도"
+                  >
+                    {retrying ? '재시도 중…' : '재시도'}
+                  </Button>
                 )}
                 <Button icon="plus" variant="secondary" onClick={() => navigate('/')}>
                   새로 만들기
