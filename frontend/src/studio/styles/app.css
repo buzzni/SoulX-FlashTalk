@@ -469,91 +469,15 @@
 .input-group .input.has-prefix { padding-left: 30px; }
 .input-group .input.has-suffix { padding-right: 40px; }
 
-/* Buttons */
-/* Upload tile — soft dashed dropzone with comfort padding + lift hover */
-.upload-tile {
-  border: 1.5px dashed var(--border-strong); border-radius: var(--r-lg);
-  background: var(--bg-elev);
-  padding: 28px 20px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px;
-  text-align: center; cursor: pointer;
-  transition: border-color .15s, background .15s, transform .15s;
-  min-height: 132px;
-  color: var(--text-secondary);
-}
-.upload-tile:hover {
-  border-color: var(--primary);
-  background: var(--accent-soft);
-  color: var(--accent-text);
-  transform: translateY(-1px);
-}
-.upload-tile.has-file {
-  border-style: solid;
-  border-color: var(--border);
-  padding: 12px;
-  background: var(--bg-elev);
-  /* Match empty-state min-height so the surrounding layout doesn't
-   * jump when the user picks a file. */
-  display: grid;
-  grid-template-columns: auto 1fr auto;
-  grid-template-rows: auto;
-  align-items: center;
-  gap: 14px;
-  cursor: default;
-  transform: none;
-}
-.upload-tile.has-file .file-thumb {
-  /* Bigger thumb to fill the matched 132px height. */
-  width: 108px;
-  height: 108px;
-}
-.upload-tile.has-file:hover { background: var(--bg-elev); border-color: var(--border-strong); color: inherit; transform: none; }
-.upload-tile .icon { width: 28px; height: 28px; color: var(--text-tertiary); }
-.upload-tile .label { font-size: 14px; font-weight: 600; letter-spacing: -0.014em; color: inherit; }
-.upload-tile .sub { font-size: 12px; color: var(--text-tertiary); }
-
-.file-thumb {
-  width: 56px; height: 56px;
-  border-radius: var(--r-sm);
-  overflow: hidden;
-  display: flex; align-items: center; justify-content: center;
-  background: var(--bg-sunken);
-  position: relative;
-  flex-shrink: 0;
-}
-.file-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
-.file-meta {
-  padding: 0;
-  font-size: 13px;
-  color: var(--text-primary);
-  display: flex; flex-direction: column; gap: 2px;
-  min-width: 0;
-  border: 0;
-}
-.file-meta .truncate { font-weight: 600; letter-spacing: -0.014em; }
-.file-meta .mono { color: var(--text-tertiary); font-size: 11px; font-family: var(--font-mono); }
-.file-remove {
-  position: absolute; top: 6px; right: 6px; width: 24px; height: 24px;
-  background: oklch(0 0 0 / 0.6); color: #fff; border-radius: 99px;
-  display: grid; place-items: center; border: 0; cursor: pointer;
-}
-.file-buttons {
-  display: flex;
-  gap: 4px;
-  flex-shrink: 0;
-  border: 0;
-}
-.file-btn {
-  padding: 7px 12px;
-  border: 1px solid var(--border);
-  border-radius: var(--r-sm);
-  background: var(--bg-elev); color: var(--text-secondary);
-  font-size: 12px; font-weight: 600;
-  display: inline-flex; align-items: center; justify-content: center; gap: 5px;
-  cursor: pointer;
-  transition: background .12s, border-color .12s, color .12s;
-}
-.file-btn:hover { background: var(--bg-sunken); color: var(--text-primary); border-color: var(--border-strong); }
-.file-btn-danger:hover { background: var(--danger-soft); color: var(--danger); border-color: var(--danger); }
+/* `.upload-tile` family (`.upload-tile`, `.upload-tile.has-file`,
+ * `.file-thumb`, `.file-meta`, `.file-buttons`, `.file-btn`,
+ * `.file-btn-danger`) migrated to inline Tailwind utilities. The shared
+ * shells live in components/upload-tile.tsx as exported constants
+ * (UPLOAD_TILE_HAS_FILE_CLASS, UPLOAD_TILE_THUMB_CLASS,
+ * UPLOAD_TILE_FILE_BTN_CLASS, UPLOAD_TILE_FILE_BTN_DANGER_CLASS) so
+ * BackgroundPicker's server-asset confirmation row can stamp the same
+ * chrome without duplicating the Tailwind chain. The unused
+ * `.file-remove` selector was dropped at the same time. */
 
 /* `.preset-tile` (host candidate + composition variant tiles) and
  * `.bg-preset-tile` (Step 2 background preset grid) both migrated to

@@ -1,14 +1,18 @@
 import { useState, useRef } from 'react';
 import { Upload, RefreshCcw, Trash2 } from 'lucide-react';
+import { cn } from '@/lib/utils';
 
 /**
- * UploadTile — file dropzone with click / drag / paste. Custom because
- * shadcn ships no equivalent. The paste-from-clipboard fallback exists
- * specifically because some enterprise security agents (AhnLab ASTx and
- * friends) block FileReader/multipart-POST paths but allow clipboard reads.
+ * UploadTile — file dropzone with click / drag / paste.
  *
- * Migrated to Tailwind utilities so it isn't tied to .studio-root scope
- * anymore. Tokens stay (--accent, --accent-soft) for the wizard color bridge.
+ * Custom because shadcn ships no equivalent. The paste-from-clipboard
+ * fallback exists specifically because some enterprise security agents
+ * (AhnLab ASTx and friends) block FileReader/multipart-POST paths but
+ * allow clipboard reads.
+ *
+ * Migrated from `.upload-tile`/`.upload-tile.has-file`/`.file-*` BEM to
+ * inline Tailwind utilities (Phase C-8). Empty + has-file states match
+ * heights (132px floor) so the surrounding layout doesn't jump on pick.
  */
 
 // Shape consumers pass — narrow types like RefFile / UploadedAudio /
@@ -34,6 +38,17 @@ export interface UploadTileProps {
   accept?: string;
   compact?: boolean;
 }
+
+// Reused shells so consumers can stamp out a server-asset confirmation
+// row (BackgroundPicker) with the same chrome.
+export const UPLOAD_TILE_HAS_FILE_CLASS =
+  'min-h-[132px] grid grid-cols-[auto_1fr_auto] grid-rows-[auto] items-center gap-3.5 p-3 rounded-lg border border-border bg-card cursor-default';
+export const UPLOAD_TILE_THUMB_CLASS =
+  'w-[108px] h-[108px] rounded shrink-0 overflow-hidden flex items-center justify-center bg-secondary relative';
+export const UPLOAD_TILE_FILE_BTN_CLASS =
+  'inline-flex items-center justify-center gap-1.5 px-3 py-[7px] rounded-sm border border-border bg-card text-ink-2 text-xs font-semibold cursor-pointer transition-[background-color,border-color,color] duration-150 hover:bg-secondary hover:text-foreground hover:border-rule-strong';
+export const UPLOAD_TILE_FILE_BTN_DANGER_CLASS =
+  'hover:bg-destructive-soft hover:text-destructive hover:border-destructive';
 
 export function UploadTile({
   file,
@@ -83,7 +98,7 @@ export function UploadTile({
 
   if (file) {
     return (
-      <div className="upload-tile has-file">
+      <div className={UPLOAD_TILE_HAS_FILE_CLASS}>
         <input
           type="file"
           accept={accept}
@@ -92,11 +107,15 @@ export function UploadTile({
           onChange={(e) => handleFile(e.target.files?.[0])}
         />
         <div
-          className="file-thumb cursor-pointer"
+          className={cn(UPLOAD_TILE_THUMB_CLASS, 'cursor-pointer')}
           onClick={() => openPicker()}
         >
           {file.url ? (
-            <img src={file.url} alt={file.name ?? ''} />
+            <img
+              src={file.url}
+              alt={file.name ?? ''}
+              className="w-full h-full object-cover block"
+            />
           ) : (
             <div className="striped-placeholder">
               {(file.name ?? '').toLowerCase().endsWith('.mp3') ||
@@ -108,13 +127,15 @@ export function UploadTile({
             </div>
           )}
         </div>
-        <div className="file-meta">
-          <span className="truncate">{file.name ?? ''}</span>
-          <span className="font-mono">{((file.size ?? 0) / 1024).toFixed(0)}KB</span>
+        <div className="flex flex-col gap-0.5 min-w-0 text-[13px] text-foreground">
+          <span className="truncate font-semibold tracking-tight">{file.name ?? ''}</span>
+          <span className="font-mono text-[11px] text-muted-foreground">
+            {((file.size ?? 0) / 1024).toFixed(0)}KB
+          </span>
         </div>
-        <div className="file-buttons">
+        <div className="flex gap-1 shrink-0">
           <button
-            className="file-btn"
+            className={UPLOAD_TILE_FILE_BTN_CLASS}
             onClick={(e) => {
               e.stopPropagation();
               openPicker();
@@ -124,7 +145,7 @@ export function UploadTile({
             교체
           </button>
           <button
-            className="file-btn file-btn-danger"
+            className={cn(UPLOAD_TILE_FILE_BTN_CLASS, UPLOAD_TILE_FILE_BTN_DANGER_CLASS)}
             onClick={(e) => {
               e.stopPropagation();
               onRemove?.();
@@ -155,8 +176,6 @@ export function UploadTile({
 
   return (
     <div
-      className="upload-tile"
-      style={dragOver ? { borderColor: 'var(--primary)', background: 'var(--accent-soft)' } : undefined}
       tabIndex={0}
       onClick={() => openPicker()}
       onDragOver={(e) => {
@@ -170,6 +189,15 @@ export function UploadTile({
         handleFile(e.dataTransfer.files[0]);
       }}
       onPaste={onPaste}
+      className={cn(
+        'min-h-[132px] flex flex-col items-center justify-center gap-2 px-5 py-7 rounded-lg border-[1.5px] border-dashed border-rule-strong bg-card text-ink-2 text-center cursor-pointer transition-[border-color,background-color,color,transform] duration-150',
+        'hover:border-primary hover:bg-primary-soft hover:text-primary-on-soft hover:-translate-y-px',
+      )}
+      style={
+        dragOver
+          ? { borderColor: 'var(--primary)', background: 'var(--accent-soft)' }
+          : undefined
+      }
     >
       <input
         type="file"
@@ -179,8 +207,8 @@ export function UploadTile({
         onChange={(e) => handleFile(e.target.files?.[0])}
       />
       <Upload className={compact ? 'size-4' : 'size-5'} />
-      <div className="label">{label}</div>
-      <div className="sub">{sub}</div>
+      <div className="text-sm font-semibold tracking-tight text-inherit">{label}</div>
+      <div className="text-xs text-muted-foreground">{sub}</div>
     </div>
   );
 }

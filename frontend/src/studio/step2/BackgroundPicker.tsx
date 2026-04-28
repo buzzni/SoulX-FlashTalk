@@ -17,7 +17,13 @@
 
 import { useFormContext } from 'react-hook-form';
 import Icon from '../Icon.jsx';
-import { UploadTile } from '@/components/upload-tile';
+import {
+  UploadTile,
+  UPLOAD_TILE_HAS_FILE_CLASS,
+  UPLOAD_TILE_THUMB_CLASS,
+  UPLOAD_TILE_FILE_BTN_CLASS,
+  UPLOAD_TILE_FILE_BTN_DANGER_CLASS,
+} from '@/components/upload-tile';
 import {
   uploadFileFromAsset,
   localAssetFromUploadFile,
@@ -220,20 +226,28 @@ function UploadView({ asset, onChange, onPickServerFile }: UploadViewProps) {
   if (isServerAsset(asset)) {
     return (
       <div className="flex-col gap-2">
-        <div className="upload-tile has-file">
-          <div className="file-thumb">
-            {asset.url && <img src={asset.url} alt={asset.name ?? ''} />}
+        <div className={UPLOAD_TILE_HAS_FILE_CLASS}>
+          <div className={UPLOAD_TILE_THUMB_CLASS}>
+            {asset.url && (
+              <img
+                src={asset.url}
+                alt={asset.name ?? ''}
+                className="w-full h-full object-cover block"
+              />
+            )}
           </div>
-          <div className="file-meta">
-            <span className="truncate">{asset.name || '(서버 파일)'}</span>
-            <span className="mono">server</span>
+          <div className="flex flex-col gap-0.5 min-w-0 text-[13px] text-foreground">
+            <span className="truncate font-semibold tracking-tight">
+              {asset.name || '(서버 파일)'}
+            </span>
+            <span className="font-mono text-[11px] text-muted-foreground">server</span>
           </div>
-          <div className="file-buttons">
-            <button className="file-btn" onClick={onPickServerFile}>
+          <div className="flex gap-1 shrink-0">
+            <button className={UPLOAD_TILE_FILE_BTN_CLASS} onClick={onPickServerFile}>
               <Icon name="swap" size={12} /> 다른 파일
             </button>
             <button
-              className="file-btn file-btn-danger"
+              className={cn(UPLOAD_TILE_FILE_BTN_CLASS, UPLOAD_TILE_FILE_BTN_DANGER_CLASS)}
               onClick={() => onChange({ kind: 'upload', asset: null })}
             >
               <Icon name="trash" size={12} /> 삭제
