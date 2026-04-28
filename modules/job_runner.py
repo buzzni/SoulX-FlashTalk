@@ -12,13 +12,15 @@ Mirrors `modules.task_queue.TaskQueue` ownership:
 
 Eng-spec §2.4 — single-process only. The pubsub is in-process asyncio,
 so `WEB_CONCURRENCY > 1` cannot work without Redis (deferred to v2.1).
-The fail-fast assertion lives in app.py startup (commit 11) so this
-module stays reusable in tests.
+The fail-fast assertion lives in `assert_single_process_or_raise()`
+below; app.py calls it as the first line of the startup hook so a
+misconfigured deploy aborts before any DB connections are opened.
 """
 from __future__ import annotations
 
 import asyncio
 import logging
+import os
 from datetime import datetime, timedelta, timezone
 from typing import AsyncIterator, Awaitable, Callable, Optional
 
@@ -44,6 +46,41 @@ Publisher = Callable[[str, dict], Awaitable[None]]
 
 async def _noop_publish(job_id: str, event: dict) -> None:
     return None
+
+
+def assert_single_process_or_raise() -> None:
+    """Refuse to boot under multi-worker (eng-spec §2.4).
+
+    JobRunner relies on in-process state — `_running` task map, per-job
+    seq counters, and an asyncio.Queue per SSE subscriber. Each worker
+    in a multi-worker setup has its OWN copy of these, so an event
+    published by the worker that handled POST /api/jobs never reaches
+    the worker that's serving GET /api/jobs/:id/events. The user sees
+    a forever-pending stream.
+
+    v2.1 will swap pubsub for Redis so multi-worker becomes safe. Until
+    then, the fail-fast guard converts a silent UX bug into a loud
+    deploy failure.
+
+    Reads WEB_CONCURRENCY (gunicorn convention; uvicorn honors it when
+    launched as a gunicorn worker). Unset or "1" → OK. Anything else
+    → RuntimeError. Malformed values also raise — better to surface a
+    config error than to fall through to a permissive default.
+    """
+    raw = os.environ.get("WEB_CONCURRENCY", "1")
+    try:
+        n = int(raw)
+    except ValueError:
+        raise RuntimeError(
+            f"WEB_CONCURRENCY must be an integer, got {raw!r}"
+        )
+    if n > 1:
+        raise RuntimeError(
+            f"GenerationJobs requires single-process "
+            f"(WEB_CONCURRENCY=1, got {n}). The in-process pubsub does "
+            f"not span workers; v2.1 will introduce Redis-backed pubsub "
+            f"for multi-worker scaling."
+        )
 
 
 class JobRunner:

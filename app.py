@@ -23,7 +23,7 @@ import uvicorn
 import config
 from modules import auth as auth_module
 from modules import db as db_module
-from modules.job_runner import job_runner
+from modules.job_runner import assert_single_process_or_raise, job_runner
 from modules.jobs_pubsub import jobs_pubsub
 from modules.repositories import studio_jobs_repo as jobs_repo
 from modules.task_queue import task_queue
@@ -880,6 +880,12 @@ async def generate_video_task(
 
 @app.on_event("startup")
 async def startup_event():
+    # Refuse to boot under multi-worker. JobRunner's in-process pubsub
+    # cannot fan events across workers; a misconfigured deploy would
+    # silently break SSE for half the users (eng-spec §2.4). Run this
+    # FIRST so the failure surfaces before any DB / model init.
+    assert_single_process_or_raise()
+
     global pipeline_lock
     pipeline_lock = asyncio.Lock()
 

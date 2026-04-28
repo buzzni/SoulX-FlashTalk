@@ -12,7 +12,7 @@ from motor.motor_asyncio import AsyncIOMotorClient
 import config
 from modules import db as db_module
 from modules import job_runner as job_runner_module
-from modules.job_runner import JobRunner
+from modules.job_runner import JobRunner, assert_single_process_or_raise
 from modules.repositories import studio_jobs_repo as repo
 
 
@@ -436,6 +436,41 @@ async def test_publisher_sees_events(repo_db):
         assert "done" in kinds
     finally:
         await runner.stop()
+
+
+# ── single-process fail-fast (step 11) ────────────────────────────────
+
+def test_assert_single_process_passes_when_unset(monkeypatch):
+    """Default (WEB_CONCURRENCY unset) is single-process — boot proceeds."""
+    monkeypatch.delenv("WEB_CONCURRENCY", raising=False)
+    assert_single_process_or_raise()  # no raise
+
+
+def test_assert_single_process_passes_when_one(monkeypatch):
+    monkeypatch.setenv("WEB_CONCURRENCY", "1")
+    assert_single_process_or_raise()
+
+
+def test_assert_single_process_raises_on_two(monkeypatch):
+    monkeypatch.setenv("WEB_CONCURRENCY", "2")
+    with pytest.raises(RuntimeError, match="single-process"):
+        assert_single_process_or_raise()
+
+
+def test_assert_single_process_raises_on_large_value(monkeypatch):
+    """Any value > 1 trips the guard — proxies catch a typical
+    `gunicorn -w 4` config that passes through env."""
+    monkeypatch.setenv("WEB_CONCURRENCY", "8")
+    with pytest.raises(RuntimeError, match="single-process"):
+        assert_single_process_or_raise()
+
+
+def test_assert_single_process_raises_on_garbage(monkeypatch):
+    """Malformed values surface a config error rather than fall through
+    to a permissive default."""
+    monkeypatch.setenv("WEB_CONCURRENCY", "asdf")
+    with pytest.raises(RuntimeError, match="must be an integer"):
+        assert_single_process_or_raise()
 
 
 async def test_publisher_error_does_not_break_loop(repo_db):
