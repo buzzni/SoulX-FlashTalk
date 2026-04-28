@@ -627,15 +627,15 @@ function RenderBooth({ state }: RenderBoothProps) {
 
       <button
         type="button"
-        className="render-booth__cta"
         disabled={!allValid}
         onClick={() => navigate('/render')}
+        className="mt-1 inline-flex items-center justify-center gap-2 h-12 px-5 rounded-md border-0 bg-primary text-primary-foreground text-sm font-bold tracking-tight cursor-pointer transition-colors duration-150 hover:enabled:bg-primary-hover disabled:opacity-50 disabled:cursor-not-allowed"
       >
         <Sparkles className="size-4" strokeWidth={2.2} />
         <span>영상 만들기 시작</span>
       </button>
       {!allValid && (
-        <p className="render-booth__hint">
+        <p className="m-0 text-[11.5px] text-muted-foreground text-center tracking-tight">
           {!valid[1]
             ? '먼저 쇼호스트를 만들어야 해요'
             : !valid[2]

@@ -351,35 +351,9 @@
   line-height: 1.4;
   word-break: break-word;
 }
-.render-booth__cta {
-  margin-top: 4px;
-  display: inline-flex; align-items: center; justify-content: center;
-  gap: 8px;
-  height: 48px;
-  padding: 0 20px;
-  border-radius: var(--r-md);
-  border: none;
-  background: var(--primary); color: var(--primary-foreground);
-  font-family: var(--font-sans);
-  font-size: 14px; font-weight: 700;
-  letter-spacing: -0.01em;
-  cursor: pointer;
-  transition: background-color 120ms ease;
-}
-.render-booth__cta:hover:not(:disabled) {
-  background: var(--primary-hover);
-}
-.render-booth__cta:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-.render-booth__hint {
-  margin: 0;
-  font-size: 11.5px;
-  color: var(--text-tertiary);
-  text-align: center;
-  letter-spacing: -0.005em;
-}
+/* `.render-booth__cta` + `.render-booth__hint` migrated to inline
+ * Tailwind utilities in step3/Step3Audio.tsx. The rest of the
+ * `.render-booth*` layout block stays in CSS — purely structural. */
 .step-heading { display: flex; flex-direction: column; gap: 6px; margin-bottom: 6px; }
 .step-heading h1 {
   font-family: var(--font-sans);
