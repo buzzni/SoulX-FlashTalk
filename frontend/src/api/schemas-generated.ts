@@ -108,6 +108,7 @@ const VideoHistoryItem = z
       .union([z.enum(["completed", "error", "cancelled"]), z.null()])
       .optional(),
     public_error: z.union([z.string(), z.null()]).optional(),
+    retried_from: z.union([z.string(), z.null()]).optional(),
     script_text: z.union([z.string(), z.null()]).optional(),
     host_image: z.union([z.string(), z.null()]).optional(),
     audio_source: z.union([z.string(), z.null()]).optional(),
@@ -194,6 +195,7 @@ const ResultManifest = z
     params: ResultParams.optional(),
     meta: z.union([z.object({}).partial().passthrough(), z.null()]).optional(),
     error: z.union([z.string(), z.null()]).optional(),
+    retried_from: z.union([z.string(), z.null()]).optional(),
     synthesized: z.boolean().optional().default(false),
   })
   .passthrough();

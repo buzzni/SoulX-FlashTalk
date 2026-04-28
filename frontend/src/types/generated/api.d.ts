@@ -1501,6 +1501,8 @@ export interface components {
             } | null;
             /** Error */
             error?: string | null;
+            /** Retried From */
+            retried_from?: string | null;
             /**
              * Synthesized
              * @default false
@@ -1600,6 +1602,8 @@ export interface components {
             status?: ("completed" | "error" | "cancelled") | null;
             /** Public Error */
             public_error?: string | null;
+            /** Retried From */
+            retried_from?: string | null;
             /** Script Text */
             script_text?: string | null;
             /** Host Image */
