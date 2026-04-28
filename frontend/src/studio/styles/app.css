@@ -12,7 +12,7 @@
  * narrow but stays functional. */
 .topbar {
   display: flex; align-items: center; justify-content: space-between;
-  min-height: 56px; padding: 0 20px; background: var(--bg-elev);
+  min-height: 57px; padding: 0 20px; background: var(--bg-elev);
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
   overflow-x: auto;
@@ -20,7 +20,7 @@
 }
 .topbar::-webkit-scrollbar { display: none; }
 @media (max-width: 700px) {
-  .topbar { padding: 0 12px; min-height: 52px; gap: 8px; }
+  .topbar { padding: 0 12px; min-height: 53px; gap: 8px; }
   .topbar .meta { display: none !important; }
 }
 .topbar .meta {

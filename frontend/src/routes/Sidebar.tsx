@@ -38,10 +38,10 @@ export function Sidebar({ active }: SidebarProps) {
   return (
     <aside className="hidden md:flex md:sticky md:top-0 md:h-screen flex-col bg-sidebar-background border-r border-sidebar-border px-3.5 py-4 overflow-y-auto">
       <Brand
-        size="sm"
+        size="md"
         to="/"
         title="홈으로"
-        className="px-2 py-2 mb-3 rounded-md hover:bg-card transition-colors"
+        className="px-1.5 mb-3"
       />
 
       <button
