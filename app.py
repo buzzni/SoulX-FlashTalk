@@ -3036,6 +3036,23 @@ async def create_job(
     return job
 
 
+@app.get("/api/jobs/{job_id}", response_model=JobSnapshot)
+async def get_job(job_id: str, request: Request):
+    """Owner-scoped snapshot of a generation job.
+
+    A miss returns 404 regardless of whether the row exists or belongs to
+    a different user — eng-spec §8 forbids leaking id existence across
+    user boundaries (the row id is a uuid, but a 403-vs-404 distinction
+    would still expose membership). The repository's get_by_id already
+    folds both cases into None.
+    """
+    user = auth_module.get_request_user(request)
+    snap = await jobs_repo.get_by_id(user["user_id"], job_id)
+    if snap is None:
+        raise HTTPException(status_code=404, detail="job not found")
+    return snap
+
+
 # ========================================
 # Main
 # ========================================

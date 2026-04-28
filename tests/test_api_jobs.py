@@ -416,3 +416,83 @@ def test_host_and_composite_partition_dedupe_space(client):
     assert c["kind"] == "composite"
     assert h["id"] != c["id"]
     assert h["input_hash"] != c["input_hash"]
+
+
+# ── GET /api/jobs/:id (step 5) ────────────────────────────────────────
+
+def test_get_job_returns_owner_snapshot(client):
+    tc, uploads = client
+    face = _seed_image(uploads)
+    created = tc.post("/api/jobs", json=_host_payload(face)).json()
+    r = tc.get(f"/api/jobs/{created['id']}")
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["id"] == created["id"]
+    assert body["state"] == "pending"
+    assert body["kind"] == "host"
+    # input_blob never leaks to the API client — eng-spec §8.
+    assert "input_blob" not in body
+
+
+def test_get_job_nonexistent_returns_404(client):
+    tc, _ = client
+    r = tc.get("/api/jobs/00000000-0000-0000-0000-000000000000")
+    assert r.status_code == 404
+
+
+def test_get_job_other_user_returns_404(client, monkeypatch):
+    """A job belonging to user A is invisible to user B — even the 'exists'
+    bit is not leaked (eng-spec §8). Both unknown-id and wrong-owner cases
+    fold into 404."""
+    tc, uploads = client
+    face = _seed_image(uploads)
+    a = tc.post("/api/jobs", json=_host_payload(face)).json()
+
+    other = {
+        "user_id": "otheruser", "display_name": "Other",
+        "role": "member", "is_active": True,
+        "approval_status": "approved",
+        "subscriptions": ["platform", "studio"],
+        "studio_token_version": 0, "hashed_password": "",
+    }
+
+    async def _bypass_other(req, call_next):
+        req.state.user = dict(other)
+        return await call_next(req)
+
+    monkeypatch.setattr("modules.auth.auth_middleware", _bypass_other)
+    r = tc.get(f"/api/jobs/{a['id']}")
+    assert r.status_code == 404
+
+
+def test_get_job_reflects_state_transition(client):
+    """The snapshot endpoint reads live DB state — a transition driven by
+    repo writes (e.g., the runner marking failed) shows up immediately."""
+    tc, uploads = client
+    face = _seed_image(uploads)
+    created = tc.post("/api/jobs", json=_host_payload(face)).json()
+
+    # Drive the row to ready directly with sync pymongo. The runner is
+    # stubbed in this fixture so it wouldn't naturally advance the row;
+    # we just need a different state in the DB to assert the GET endpoint
+    # reads it back.
+    import config
+    from pymongo import MongoClient
+
+    sync = MongoClient(config.MONGO_URL, serverSelectionTimeoutMS=2000)
+    sync[config.DB_NAME].generation_jobs.update_one(
+        {"_id": created["id"]},
+        {"$set": {
+            "state": "ready",
+            "batch_id": "b1",
+            "variants": [{"image_id": "v1"}],
+        }},
+    )
+    sync.close()
+
+    r = tc.get(f"/api/jobs/{created['id']}")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["state"] == "ready"
+    assert body["batch_id"] == "b1"
+    assert [v["image_id"] for v in body["variants"]] == ["v1"]
