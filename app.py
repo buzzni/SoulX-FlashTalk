@@ -24,6 +24,7 @@ import config
 from modules import auth as auth_module
 from modules import db as db_module
 from modules.job_runner import job_runner
+from modules.jobs_pubsub import jobs_pubsub
 from modules.repositories import studio_jobs_repo as jobs_repo
 from modules.task_queue import task_queue
 from modules.schemas import (
@@ -894,6 +895,7 @@ async def startup_event():
     # GenerationJob runner: recovers any orphaned pending/streaming rows from
     # the prior process and starts the heartbeat sweep. Handlers (host /
     # composite) are registered in steps 3-4 of streaming-resume Phase A.
+    job_runner.set_publisher(jobs_pubsub.publish)
     await job_runner.start()
 
     logger.info("SoulX-FlashTalk API server started (queue worker active)")
