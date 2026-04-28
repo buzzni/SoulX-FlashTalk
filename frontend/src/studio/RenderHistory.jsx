@@ -41,6 +41,7 @@ function formatDuration(sec) {
 export default function RenderHistory({ excludeTaskId, limit = 8 }) {
   const [items, setItems] = useState(null);
   const [playing, setPlaying] = useState(null);
+  const [playError, setPlayError] = useState({}); // task_id -> true once <video> errors
   const [error, setError] = useState(null);
 
   useEffect(() => {
@@ -53,7 +54,12 @@ export default function RenderHistory({ excludeTaskId, limit = 8 }) {
 
   if (error) return null; // silent failure — history is non-critical UI
   if (items == null) return null; // loading
-  const visible = excludeTaskId ? items.filter(v => v.task_id !== excludeTaskId) : items;
+  // Defense-in-depth: even though fetchHistory now passes status=completed,
+  // older API responses or schema drift could leak non-completed rows.
+  // Drop anything that isn't explicitly "completed" so the inline <video>
+  // never points at a 404.
+  const completed = items.filter(v => !v.status || v.status === 'completed');
+  const visible = excludeTaskId ? completed.filter(v => v.task_id !== excludeTaskId) : completed;
   if (visible.length === 0) return null;
 
   return (
@@ -92,12 +98,22 @@ export default function RenderHistory({ excludeTaskId, limit = 8 }) {
                     <Icon name="close" size={14} />
                   </button>
                 </div>
-                <video
-                  src={v.video_url}
-                  controls
-                  autoPlay
-                  className="block w-full max-h-[260px] rounded-md bg-black"
-                />
+                {playError[v.task_id] ? (
+                  <div className="grid place-items-center w-full h-[160px] rounded-md bg-black text-xs text-muted-foreground">
+                    영상을 불러올 수 없어요
+                  </div>
+                ) : (
+                  <video
+                    src={v.video_url}
+                    controls
+                    autoPlay
+                    muted
+                    playsInline
+                    preload="metadata"
+                    onError={() => setPlayError(prev => ({ ...prev, [v.task_id]: true }))}
+                    className="block w-full max-h-[260px] rounded-md bg-black"
+                  />
+                )}
               </div>
             );
           }

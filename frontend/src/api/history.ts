@@ -28,10 +28,14 @@ export interface HistoryQuery {
 /**
  * Legacy entry point — single call with default page size.
  * Used by RenderHistory ("기다리는 동안" panel).
+ *
+ * Filters to `status=completed` so the wait-screen panel never surfaces
+ * error/cancelled rows — those rows have no playable video file and
+ * <video src="/api/videos/{id}"> would 404, breaking the inline preview.
  */
 export function fetchHistory(limit = 10, { signal }: CallOptions = {}): Promise<HistoryResponse> {
   const clamped = Math.max(1, Math.min(100, limit | 0));
-  return fetchJSON(`/api/history?limit=${clamped}`, {
+  return fetchJSON(`/api/history?status=completed&limit=${clamped}`, {
     label: '히스토리 조회',
     signal,
     schema: schemas.HistoryResponse,
