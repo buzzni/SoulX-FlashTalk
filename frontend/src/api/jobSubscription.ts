@@ -19,7 +19,13 @@
  *     a Vite hot reload doesn't leave dangling EventSources.
  */
 
-import { useJobCacheStore } from '../stores/jobCacheStore';
+import { API_BASE, getAuthHeaders } from './http';
+import { parseRichSSEStream, type SSEFrame } from './sseParser';
+import {
+  type JobSnapshot,
+  type JobVariant,
+  useJobCacheStore,
+} from '../stores/jobCacheStore';
 
 interface ActiveSubscription {
   jobId: string;
@@ -91,16 +97,136 @@ function makeHandle(jobId: string): JobSubscriptionHandle {
   };
 }
 
-/** Step-15 stub. Replaced with real fetch('/api/jobs/:id/events') + SSE
- * parsing that drives setSnapshot / appendVariant / markReady etc. */
+/** Open the SSE connection and drive cache mutations. Reconnects on
+ * transient failure, carrying Last-Event-ID so the server skips the
+ * snapshot frame on resume (eng-spec §3.2 race-free handshake).
+ *
+ * Backoff: jittered 1-5s between reconnects. Aborted signal exits the
+ * loop without scheduling another retry. Terminal events (done /
+ * fatal / cancelled) close the connection cleanly and stop the loop. */
 async function _openConnection(
-  _jobId: string,
-  _signal: AbortSignal,
+  jobId: string,
+  signal: AbortSignal,
 ): Promise<void> {
-  // Intentionally empty until step 15. Returning a resolved promise
-  // means `subscribeToJob` does not surface any error here; the cache
-  // entry stays in `isLoading=true` indefinitely, which is fine
-  // because no UI is wired to consume it yet (step 16-17 wire it).
+  while (!signal.aborted) {
+    const lastSeq = useJobCacheStore.getState().jobs[jobId]?.lastSeq ?? 0;
+    const headers: Record<string, string> = {
+      Accept: 'text/event-stream',
+      ...getAuthHeaders(),
+    };
+    if (lastSeq > 0) {
+      headers['Last-Event-ID'] = String(lastSeq);
+    }
+    let res: Response;
+    try {
+      res = await fetch(
+        `${API_BASE}/api/jobs/${encodeURIComponent(jobId)}/events`,
+        { headers, signal },
+      );
+    } catch {
+      if (signal.aborted) return;
+      // Network error — retry after backoff.
+      await sleep(jitter(1000, 5000), signal);
+      continue;
+    }
+    if (!res.ok) {
+      // 401/403/404/429 are all terminal for this subscription — surface
+      // and stop. Other 5xx may be transient; retry.
+      if ([401, 403, 404, 429].includes(res.status)) {
+        useJobCacheStore.getState().setError(
+          jobId,
+          `구독 실패 (${res.status})`,
+        );
+        return;
+      }
+      await sleep(jitter(1000, 5000), signal);
+      continue;
+    }
+    const terminated = await _drive(jobId, res, signal);
+    if (terminated || signal.aborted) return;
+    // Connection dropped without a terminal event — reconnect.
+    await sleep(jitter(500, 2000), signal);
+  }
+}
+
+/** Apply each SSE frame to the cache. Returns true when a terminal
+ * event lands (or the server closes the stream after a terminal-state
+ * snapshot — see backend's `event_generator` in app.py). */
+async function _drive(
+  jobId: string,
+  res: Response,
+  signal: AbortSignal,
+): Promise<boolean> {
+  let sawTerminal = false;
+  for await (const frame of parseRichSSEStream(res, signal)) {
+    if (signal.aborted) return false;
+    if (_applyFrame(jobId, frame)) {
+      sawTerminal = true;
+    }
+  }
+  return sawTerminal;
+}
+
+/** Translate one parsed SSE frame into a cache action. Returns true if
+ * the frame was a terminal event (caller stops the reconnect loop). */
+function _applyFrame(jobId: string, frame: SSEFrame): boolean {
+  const seq = frame.id ?? 0;
+  const cache = useJobCacheStore.getState();
+  switch (frame.event) {
+    case 'snapshot': {
+      cache.setSnapshot(jobId, frame.data as JobSnapshot, seq);
+      // The endpoint closes the stream right after the snapshot if
+      // the snap is already in a terminal state — treat it as such.
+      const snap = frame.data as JobSnapshot;
+      return ['ready', 'failed', 'cancelled'].includes(snap.state);
+    }
+    case 'candidate': {
+      const payload = frame.data as { variant?: JobVariant };
+      const variant = payload?.variant ?? (frame.data as JobVariant);
+      cache.appendVariant(jobId, variant, seq);
+      return false;
+    }
+    case 'done': {
+      const payload = frame.data as {
+        batch_id?: string | null;
+        prev_selected_image_id?: string | null;
+      };
+      cache.markReady(jobId, {
+        batch_id: payload?.batch_id ?? null,
+        prev_selected_image_id: payload?.prev_selected_image_id ?? null,
+        seq,
+      });
+      return true;
+    }
+    case 'fatal': {
+      const payload = frame.data as { error?: string };
+      cache.markFailed(jobId, payload?.error ?? 'unknown error', seq);
+      return true;
+    }
+    case 'cancelled': {
+      cache.markCancelled(jobId, seq);
+      return true;
+    }
+    default:
+      // Unknown event types are tolerated — backend or frontend may
+      // ship a new event type before the other side catches up.
+      return false;
+  }
+}
+
+function jitter(min: number, max: number): number {
+  return min + Math.random() * (max - min);
+}
+
+async function sleep(ms: number, signal: AbortSignal): Promise<void> {
+  return new Promise<void>((resolve) => {
+    const t = setTimeout(() => resolve(), ms);
+    const onAbort = () => {
+      clearTimeout(t);
+      resolve();
+    };
+    signal.addEventListener('abort', onAbort, { once: true });
+  });
 }
 
 function errorMessage(err: unknown): string {
