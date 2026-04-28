@@ -435,13 +435,46 @@ async def test_list_by_user_stale_cursor_returns_head(repo_db):
 # ── partial unique index — DB-level enforcement ───────────────────────
 
 async def test_indexes_present(repo_db):
-    """init_indexes() must create all four eng-spec §7 indexes."""
+    """init_indexes() must create the eng-spec §7 indexes with the
+    correct uniqueness + partial-filter shape — name-only checks miss
+    cases where the unique flag is dropped (dedupe collapses) or the
+    partial filter widens (sweep over-scans)."""
     db = repo_db
-    idx_names = [ix["name"] async for ix in db.generation_jobs.list_indexes()]
-    assert "user_kind_created" in idx_names
-    assert "state_heartbeat_streaming" in idx_names
-    assert "state_updated_terminal" in idx_names
-    assert "user_input_hash_active_uniq" in idx_names
+    by_name = {ix["name"]: ix async for ix in db.generation_jobs.list_indexes()}
+
+    # Listing index — non-unique, no partial filter.
+    assert "user_kind_created" in by_name
+    listing = by_name["user_kind_created"]
+    assert not listing.get("unique", False)
+    assert "partialFilterExpression" not in listing
+
+    # Sweep index — partial on state=streaming.
+    assert "state_heartbeat_streaming" in by_name
+    sweep = by_name["state_heartbeat_streaming"]
+    assert sweep["partialFilterExpression"] == {"state": "streaming"}
+
+    # TTL candidates — partial on terminal-state $in.
+    assert "state_updated_terminal" in by_name
+    ttl = by_name["state_updated_terminal"]
+    assert ttl["partialFilterExpression"] == {
+        "state": {"$in": ["ready", "failed", "cancelled"]}
+    }
+
+    # Dedupe index — UNIQUE + partial on active states. The unique flag
+    # is the load-bearing bit: drop it and create_or_get_active stops
+    # collapsing concurrent re-rolls.
+    assert "user_input_hash_active_uniq" in by_name
+    dedupe = by_name["user_input_hash_active_uniq"]
+    assert dedupe["unique"] is True
+    assert dedupe["partialFilterExpression"] == {
+        "state": {"$in": ["pending", "streaming"]}
+    }
+
+    # Recovery scan — non-partial state idx so mark_active_as_failed
+    # at startup avoids a COLLSCAN while uvicorn is blocked on bind.
+    assert "state_idx" in by_name
+    recovery = by_name["state_idx"]
+    assert "partialFilterExpression" not in recovery
 
 
 # ── bulk recovery (JobRunner-owned) ────────────────────────────────────

@@ -48,7 +48,8 @@ def _bypass_studio_auth(monkeypatch, request):
                     "test_job_runner",
                     "test_db_connection", "test_user_repo",
                     "test_studio_006_add_subscriptions", "test_storage_local",
-                    "test_studio_007_local_import"):
+                    "test_studio_007_local_import",
+                    "test_studio_008_generation_jobs"):
         return
 
     # Redirect DB so api-level tests don't pollute the dev `ai_showhost`.
