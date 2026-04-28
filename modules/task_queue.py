@@ -10,7 +10,7 @@ import json
 import asyncio
 import logging
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional, Callable, Awaitable
 
 logger = logging.getLogger(__name__)
@@ -84,7 +84,7 @@ class TaskQueue:
                 "params": params,
                 "label": label,
                 "status": "pending",
-                "created_at": datetime.now().isoformat(),
+                "created_at": datetime.now(timezone.utc).isoformat(),
                 "started_at": None,
                 "completed_at": None,
                 "error": None,
@@ -116,7 +116,7 @@ class TaskQueue:
                         and entry.get("user_id") != requesting_user_id):
                     return "forbidden"
                 entry["status"] = "cancelled"
-                entry["completed_at"] = datetime.now().isoformat()
+                entry["completed_at"] = datetime.now(timezone.utc).isoformat()
                 self._save()
                 logger.info(f"Cancelled task {task_id} (by user={requesting_user_id})")
                 # Capture entry-fields-for-persist before releasing the lock —
@@ -203,7 +203,7 @@ class TaskQueue:
                 "params": dict(entry["params"]),
                 "label": entry.get("label", ""),
                 "status": "pending",
-                "created_at": datetime.now().isoformat(),
+                "created_at": datetime.now(timezone.utc).isoformat(),
                 "started_at": None,
                 "completed_at": None,
                 "error": None,
@@ -274,7 +274,7 @@ class TaskQueue:
             for entry in self._queue:
                 if entry["status"] == "pending":
                     entry["status"] = "running"
-                    entry["started_at"] = datetime.now().isoformat()
+                    entry["started_at"] = datetime.now(timezone.utc).isoformat()
                     self._save()
                     return entry
         return None
@@ -285,7 +285,7 @@ class TaskQueue:
             for entry in self._queue:
                 if entry["task_id"] == task_id:
                     entry["status"] = "error" if error else "completed"
-                    entry["completed_at"] = datetime.now().isoformat()
+                    entry["completed_at"] = datetime.now(timezone.utc).isoformat()
                     entry["error"] = error
                     break
             # Prune: keep at most 50 finished tasks

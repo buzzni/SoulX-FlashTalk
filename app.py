@@ -114,7 +114,7 @@ def update_task(task_id: str, stage: str, progress: float, message: str):
         "stage": stage,
         "progress": progress,
         "message": message,
-        "timestamp": datetime.now().isoformat(),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
     })
 
 
@@ -207,7 +207,7 @@ def set_task_error(task_id: str, error: str):
         "stage": "error",
         "progress": state["progress"],
         "message": error,
-        "timestamp": datetime.now().isoformat(),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
     })
 
 
@@ -805,7 +805,7 @@ async def generate_video_task(
                 "task_id": task_id,
                 "type": "generate",
                 "status": "completed",
-                "completed_at": datetime.now().isoformat(),
+                "completed_at": datetime.now(timezone.utc).isoformat(),
                 "generation_time_sec": round(generation_time, 2),
                 "video_url": f"/api/videos/{task_id}",
                 "video_storage_key": video_storage_key,
@@ -1779,6 +1779,31 @@ async def get_video(task_id: str, download: bool = False):
 _VALID_HISTORY_STATUSES = {"all", "completed", "error", "cancelled"}
 
 
+def _iso_utc(value) -> Optional[str]:
+    """Serialize a datetime/string as ISO 8601 with explicit UTC tz marker.
+
+    Without a tz marker, JS `new Date(iso)` interprets the string as local
+    time, so a UTC value displays 9h off in KST. We always emit `+00:00`
+    so the frontend can convert to the user's local zone correctly.
+
+    Naive datetimes (Mongo strips tzinfo on read; we write `_now()` =
+    `datetime.now(timezone.utc)`) and naive ISO strings are both assumed
+    to be UTC.
+    """
+    if value is None:
+        return None
+    if hasattr(value, "isoformat"):
+        if value.tzinfo is None:
+            value = value.replace(tzinfo=timezone.utc)
+        return value.isoformat()
+    if isinstance(value, str):
+        # Already has tz info (Z or ±HH:MM) → leave alone.
+        if value.endswith("Z") or "+" in value[10:] or value.count("-") > 2:
+            return value
+        return value + "+00:00"
+    return None
+
+
 def _project_history_row(r: dict) -> dict:
     """Convert a studio_results doc to the legacy /api/history row shape.
 
@@ -1792,9 +1817,7 @@ def _project_history_row(r: dict) -> dict:
         "status": r.get("status", "completed"),
         "public_error": r.get("public_error"),
         "retried_from": r.get("retried_from"),
-        "timestamp": (r.get("completed_at").isoformat()
-                      if hasattr(r.get("completed_at"), "isoformat")
-                      else r.get("completed_at")),
+        "timestamp": _iso_utc(r.get("completed_at")),
         "script_text": (r.get("params") or {}).get("script_text", ""),
         "host_image": (r.get("params") or {}).get("host_image", ""),
         "audio_source": (r.get("params") or {}).get("audio_source_label", ""),
@@ -2103,7 +2126,7 @@ async def generate_conversation_task(
                 "task_id": task_id,
                 "type": "conversation",
                 "status": "completed",
-                "completed_at": datetime.now().isoformat(),
+                "completed_at": datetime.now(timezone.utc).isoformat(),
                 "generation_time_sec": round(generation_time, 2),
                 "video_url": f"/api/videos/{task_id}",
                 "video_storage_key": video_storage_key,
@@ -2401,11 +2424,13 @@ async def get_result(task_id: str, request: Request):
         # and we don't want to expose it indirectly.
         doc.pop("user_id", None)
         # Legacy rows wrote `completed_at` as a BSON datetime; ResultManifest
-        # types it as Optional[str]. Coerce so pydantic validation passes.
+        # types it as Optional[str]. Coerce so pydantic validation passes,
+        # and ensure each timestamp carries an explicit UTC marker so the
+        # SPA renders local time correctly.
         for k in ("created_at", "started_at", "completed_at"):
             v = doc.get(k)
-            if hasattr(v, "isoformat"):
-                doc[k] = v.isoformat()
+            if v is not None:
+                doc[k] = _iso_utc(v)
         return doc
 
     # Fallback — in-flight tasks not yet persisted to studio_results.
