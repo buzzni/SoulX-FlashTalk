@@ -73,27 +73,38 @@ export function HostVariantGrid({
   );
 }
 
+// Shared tile chrome — outer border + bg + hover/active visuals migrated
+// from `.preset-tile`/`.preset-tile.on`/`.preset-tile .name`/`.swatch` BEM.
+const TILE_BASE =
+  'block p-0 rounded-md border border-border bg-card overflow-hidden transition-[border-color,box-shadow,transform] duration-150 relative';
+const TILE_NAME =
+  'block px-2.5 py-2 text-xs font-medium text-ink-2 text-left border-t border-border';
+const TILE_NAME_ACTIVE =
+  'text-foreground font-bold bg-primary-soft';
+const SWATCH_BASE =
+  'aspect-[9/16] bg-secondary flex items-center justify-center';
+
 function PlaceholderTile({ index }: { index: number }) {
   return (
-    <div className="preset-tile p-0 cursor-default">
-      <div className="swatch skeleton-shimmer relative grid place-items-center text-tertiary text-2xs aspect-[9/16]">
+    <div className={cn(TILE_BASE, 'cursor-default')}>
+      <div className={cn(SWATCH_BASE, 'skeleton-shimmer relative grid place-items-center text-muted-foreground text-2xs')}>
         <Spinner size="md" />
       </div>
-      <div className="name text-tertiary">후보 {index + 1}</div>
+      <div className={cn(TILE_NAME, 'text-muted-foreground')}>후보 {index + 1}</div>
     </div>
   );
 }
 
 function ErrorTile({ index }: { index: number }) {
   return (
-    <div className="preset-tile p-0 cursor-default border-destructive">
-      <div className="swatch grid place-items-center text-destructive text-center bg-destructive-soft text-2xs p-1.5 aspect-[9/16]">
+    <div className={cn(TILE_BASE, 'cursor-default border-destructive')}>
+      <div className={cn(SWATCH_BASE, 'grid place-items-center text-destructive text-center bg-destructive-soft text-2xs p-1.5')}>
         <div>
           <Icon name="alert_circle" size={16} />
           <div className="mt-1">실패</div>
         </div>
       </div>
-      <div className="name text-tertiary">후보 {index + 1}</div>
+      <div className={cn(TILE_NAME, 'text-muted-foreground')}>후보 {index + 1}</div>
     </div>
   );
 }
@@ -114,8 +125,12 @@ function PickableTile({
   return (
     <button
       className={cn(
-        'preset-tile p-0',
-        selected && 'on',
+        TILE_BASE,
+        'cursor-pointer',
+        // Hover lift only when not active and not prev.
+        !selected && !isPrev && 'hover:border-rule-strong hover:-translate-y-px hover:shadow-sm',
+        selected &&
+          'border-primary -translate-y-px shadow-[0_0_0_3px_color-mix(in_oklch,var(--primary)_18%,transparent),var(--shadow-1)]',
         // Subtle dashed border on the prev tile so the slot reads as
         // "carried over" rather than "fresh candidate".
         isPrev && !selected && 'border-dashed border-rule-strong',
@@ -124,7 +139,7 @@ function PickableTile({
       style={variant._gradient && !variant.url ? { background: variant._gradient } : undefined}
     >
       <div
-        className="swatch relative overflow-hidden aspect-[9/16]"
+        className={cn(SWATCH_BASE, 'relative overflow-hidden')}
         style={{ background: variant.url ? '#0b0d12' : undefined }}
       >
         {variant.url ? (
@@ -143,7 +158,7 @@ function PickableTile({
           </div>
         )}
       </div>
-      <div className="name">{label}</div>
+      <div className={cn(TILE_NAME, selected && TILE_NAME_ACTIVE)}>{label}</div>
     </button>
   );
 }

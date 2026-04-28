@@ -59,27 +59,36 @@ export function CompositionVariants({
   );
 }
 
+// Mirror of HostVariantGrid's tile chrome — see that file's header for
+// the BEM-to-utility migration rationale.
+const TILE_BASE =
+  'block p-0 rounded-md border border-border bg-card overflow-hidden transition-[border-color,box-shadow,transform] duration-150 relative';
+const TILE_NAME =
+  'block px-2.5 py-2 text-xs font-medium text-ink-2 text-left border-t border-border';
+const TILE_NAME_ACTIVE = 'text-foreground font-bold bg-primary-soft';
+const SWATCH_BASE = 'aspect-[9/16] bg-secondary flex items-center justify-center';
+
 function PlaceholderTile({ index }: { index: number }) {
   return (
-    <div className="preset-tile p-0 cursor-default">
-      <div className="swatch skeleton-shimmer relative grid place-items-center aspect-[9/16]">
+    <div className={cn(TILE_BASE, 'cursor-default')}>
+      <div className={cn(SWATCH_BASE, 'skeleton-shimmer relative grid place-items-center')}>
         <Spinner size="md" />
       </div>
-      <div className="name text-tertiary">합성 {index + 1}</div>
+      <div className={cn(TILE_NAME, 'text-muted-foreground')}>합성 {index + 1}</div>
     </div>
   );
 }
 
 function ErrorTile({ index }: { index: number }) {
   return (
-    <div className="preset-tile p-0 cursor-default border-destructive">
-      <div className="swatch grid place-items-center text-destructive bg-destructive-soft text-center text-2xs p-1.5 aspect-[9/16]">
+    <div className={cn(TILE_BASE, 'cursor-default border-destructive')}>
+      <div className={cn(SWATCH_BASE, 'grid place-items-center text-destructive bg-destructive-soft text-center text-2xs p-1.5')}>
         <div>
           <Icon name="alert_circle" size={16} />
           <div className="mt-1">실패</div>
         </div>
       </div>
-      <div className="name text-tertiary">합성 {index + 1}</div>
+      <div className={cn(TILE_NAME, 'text-muted-foreground')}>합성 {index + 1}</div>
     </div>
   );
 }
@@ -100,13 +109,16 @@ function PickableTile({
   return (
     <button
       className={cn(
-        'preset-tile p-0',
-        selected && 'on',
+        TILE_BASE,
+        'cursor-pointer',
+        !selected && !isPrev && 'hover:border-rule-strong hover:-translate-y-px hover:shadow-sm',
+        selected &&
+          'border-primary -translate-y-px shadow-[0_0_0_3px_color-mix(in_oklch,var(--primary)_18%,transparent),var(--shadow-1)]',
         isPrev && !selected && 'border-dashed border-rule-strong',
       )}
       onClick={() => onSelect(variant)}
     >
-      <div className="swatch relative overflow-hidden aspect-[9/16] bg-[#0b0d12]">
+      <div className={cn(SWATCH_BASE, 'relative overflow-hidden bg-[#0b0d12]')}>
         {variant.url && (
           <img src={variant.url} alt={label} className="w-full h-full object-cover" />
         )}
@@ -121,7 +133,7 @@ function PickableTile({
           </div>
         )}
       </div>
-      <div className="name">{label}</div>
+      <div className={cn(TILE_NAME, selected && TILE_NAME_ACTIVE)}>{label}</div>
     </button>
   );
 }

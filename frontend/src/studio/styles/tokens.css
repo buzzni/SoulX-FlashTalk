@@ -144,10 +144,8 @@
 .studio-root *:focus-visible {
   outline: none;
 }
-.studio-root .step-pill:focus-visible,
 .studio-root .file-btn:focus-visible,
 .studio-root .upload-tile:focus-visible,
-.studio-root .preset-tile:focus-visible,
 .studio-root .res-tile:focus-visible,
 .studio-root .voice-item:focus-visible {
   outline: 2px solid var(--primary);

@@ -555,35 +555,12 @@
 .file-btn:hover { background: var(--bg-sunken); color: var(--text-primary); border-color: var(--border-strong); }
 .file-btn-danger:hover { background: var(--danger-soft); color: var(--danger); border-color: var(--danger); }
 
-/* Preset tiles — soft cards with hover lift, active blue ring */
-.preset-tile {
-  border: 1px solid var(--border); border-radius: var(--r-md); padding: 0; cursor: pointer;
-  background: var(--bg-elev); overflow: hidden;
-  transition: border-color .15s, box-shadow .15s, transform .15s;
-  position: relative;
-}
-.preset-tile:hover {
-  border-color: var(--border-strong);
-  transform: translateY(-1px);
-  box-shadow: var(--shadow-sm);
-}
-.preset-tile.on {
-  border-color: var(--primary);
-  box-shadow: 0 0 0 3px color-mix(in oklch, var(--primary) 18%, transparent), var(--shadow-sm);
-  transform: translateY(-1px);
-}
-.preset-tile .swatch { aspect-ratio: 9/16; background: var(--bg-sunken); display: flex; align-items: center; justify-content: center; }
-.preset-tile .name {
-  padding: 8px 10px; font-size: 12px; font-weight: 500;
-  color: var(--text-secondary); text-align: left;
-  border-top: 1px solid var(--border);
-}
-.preset-tile.on .name { color: var(--text); font-weight: 700; background: var(--accent-soft); }
-
-/* Background preset tiles moved to inline Tailwind utilities in
- * BackgroundPicker.tsx — easier to reason about than nested CSS where
- * a forgotten variant on `.studio-root button` would silently override
- * the BEM rules. */
+/* `.preset-tile` (host candidate + composition variant tiles) and
+ * `.bg-preset-tile` (Step 2 background preset grid) both migrated to
+ * inline Tailwind utilities — see HostVariantGrid.tsx /
+ * CompositionVariants.tsx / BackgroundPicker.tsx. The component now
+ * owns its visual states instead of leaning on a global rule that a
+ * forgotten `.studio-root` selector could silently override. */
 
 /* Badge */
 /* Divider */
