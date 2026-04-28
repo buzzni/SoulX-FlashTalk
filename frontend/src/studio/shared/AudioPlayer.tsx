@@ -95,32 +95,42 @@ export function AudioPlayer({ src }: AudioPlayerProps) {
   const pct = duration > 0 ? Math.max(0, Math.min(100, (current / duration) * 100)) : 0;
 
   return (
-    <div className="audio-player">
+    <div className="mt-2.5 flex items-center gap-2.5 px-2.5 py-2 bg-card border border-border rounded">
       <button
         type="button"
-        className="audio-player__toggle"
         onClick={toggle}
         aria-label={playing ? '일시정지' : '재생'}
+        className="w-[30px] h-[30px] shrink-0 border-0 rounded-full bg-primary text-white cursor-pointer grid place-items-center transition-[background-color,filter] duration-150 hover:bg-primary-hover hover:brightness-105"
       >
         <Icon name={playing ? 'pause' : 'play'} size={12} />
       </button>
       <div
         ref={barRef}
-        className="audio-player__progress"
         onMouseDown={onBarMouseDown}
         role="slider"
         aria-valuemin={0}
         aria-valuemax={Math.round(duration)}
         aria-valuenow={Math.round(current)}
         tabIndex={0}
+        className="relative flex-1 min-w-0 h-3.5 cursor-pointer flex items-center"
       >
-        <div className="audio-player__bar" style={{ width: `${pct}%` }} />
-        <div className="audio-player__thumb" style={{ left: `${pct}%` }} />
+        {/* Track */}
+        <div className="absolute inset-x-0 h-1 rounded-sm bg-secondary pointer-events-none" />
+        {/* Fill */}
+        <div
+          className="relative h-1 rounded-sm bg-primary pointer-events-none"
+          style={{ width: `${pct}%` }}
+        />
+        {/* Thumb */}
+        <div
+          className="absolute top-1/2 w-3 h-3 rounded-full bg-primary -translate-x-1/2 -translate-y-1/2 pointer-events-none shadow-[0_1px_3px_oklch(0_0_0_/_0.2)]"
+          style={{ left: `${pct}%` }}
+        />
       </div>
-      <div className="audio-player__time">
+      <div className="shrink-0 text-[11px] tabular-nums text-muted-foreground min-w-[82px] text-right">
         {fmtTime(current)} / {fmtTime(duration)}
       </div>
-      <div className="audio-player__volume">
+      <div className="shrink-0 flex items-center gap-1.5 text-muted-foreground">
         <Icon name="sound" size={12} />
         <input
           type="range"
@@ -130,6 +140,7 @@ export function AudioPlayer({ src }: AudioPlayerProps) {
           value={volume}
           onChange={(e) => setVolume(parseFloat(e.target.value))}
           aria-label="음량"
+          className="w-[72px] [accent-color:var(--primary)]"
         />
       </div>
       <audio
