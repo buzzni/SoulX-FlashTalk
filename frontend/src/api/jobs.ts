@@ -13,7 +13,7 @@
  * api/* convention).
  */
 
-import { API_BASE, ApiError, getAuthHeaders } from './http';
+import { API_BASE, getAuthHeaders, parseResponse } from './http';
 import type { JobKind, JobSnapshot } from '../stores/jobCacheStore';
 
 // ────────────────────────────────────────────────────────────────────
@@ -66,17 +66,14 @@ export type CreateJobBody =
 // ────────────────────────────────────────────────────────────────────
 
 /** POST /api/jobs — returns the snapshot of the freshly-created (or
- * dedupe-hit) job. */
+ * dedupe-hit) job. parseResponse wires 401/403 → /login redirect. */
 export async function createJob(body: CreateJobBody): Promise<JobSnapshot> {
   const res = await fetch(`${API_BASE}/api/jobs`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
     body: JSON.stringify(body),
   });
-  if (!res.ok) {
-    throw await apiError(res, 'job 생성 실패');
-  }
-  return (await res.json()) as JobSnapshot;
+  return parseResponse<JobSnapshot>(res, 'job 생성');
 }
 
 /** GET /api/jobs/:id — owner-scoped snapshot. 404 surfaces as ApiError. */
@@ -85,10 +82,7 @@ export async function getJob(jobId: string): Promise<JobSnapshot> {
     `${API_BASE}/api/jobs/${encodeURIComponent(jobId)}`,
     { headers: getAuthHeaders() },
   );
-  if (!res.ok) {
-    throw await apiError(res, 'job 조회 실패');
-  }
-  return (await res.json()) as JobSnapshot;
+  return parseResponse<JobSnapshot>(res, 'job 조회');
 }
 
 /** DELETE /api/jobs/:id — cancel an active job. 409 on already-terminal. */
@@ -97,10 +91,7 @@ export async function deleteJob(jobId: string): Promise<JobSnapshot> {
     `${API_BASE}/api/jobs/${encodeURIComponent(jobId)}`,
     { method: 'DELETE', headers: getAuthHeaders() },
   );
-  if (!res.ok) {
-    throw await apiError(res, 'job 취소 실패');
-  }
-  return (await res.json()) as JobSnapshot;
+  return parseResponse<JobSnapshot>(res, 'job 취소');
 }
 
 export interface ListJobsOptions {
@@ -127,25 +118,5 @@ export async function listJobs(
   const qs = params.toString();
   const url = `${API_BASE}/api/jobs${qs ? `?${qs}` : ''}`;
   const res = await fetch(url, { headers: getAuthHeaders() });
-  if (!res.ok) {
-    throw await apiError(res, 'job 목록 조회 실패');
-  }
-  return (await res.json()) as JobListResponse;
-}
-
-// ────────────────────────────────────────────────────────────────────
-// Internals
-// ────────────────────────────────────────────────────────────────────
-
-async function apiError(res: Response, fallback: string): Promise<ApiError> {
-  let detail = '';
-  try {
-    detail = (await res.json())?.detail ?? '';
-  } catch {
-    /* non-JSON response — leave detail empty */
-  }
-  return new ApiError(`${fallback} (${res.status})`, {
-    status: res.status,
-    detail,
-  });
+  return parseResponse<JobListResponse>(res, 'job 목록 조회');
 }

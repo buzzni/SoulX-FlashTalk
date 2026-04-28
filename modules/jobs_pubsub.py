@@ -77,10 +77,9 @@ class JobsPubSub:
 
     def __init__(self) -> None:
         self._subs: dict[str, list[asyncio.Queue]] = defaultdict(list)
-        self._seqs: dict[str, int] = defaultdict(int)
+        # `.get(job_id, 0)` reads dominate; plain dict matches that intent.
+        self._seqs: dict[str, int] = {}
         self._user_conns: dict[str, int] = defaultdict(int)
-        # Reverse map so unsubscribe knows which user to decrement.
-        self._queue_owner: dict[int, str] = {}
 
     # ── Public API ────────────────────────────────────────────────────
 
@@ -103,7 +102,6 @@ class JobsPubSub:
         q: asyncio.Queue = asyncio.Queue(maxsize=SUBSCRIBER_QUEUE_MAX)
         self._subs[job_id].append(q)
         self._user_conns[user_id] += 1
-        self._queue_owner[id(q)] = user_id
         try:
             yield self._stream(q)
         finally:
@@ -115,7 +113,6 @@ class JobsPubSub:
             self._user_conns[user_id] -= 1
             if self._user_conns[user_id] <= 0:
                 del self._user_conns[user_id]
-            self._queue_owner.pop(id(q), None)
             # Drop the END sentinel into the queue too, in case the
             # consumer is mid-await (it'll see _END and break). Best-effort:
             # if the queue is full we don't block.

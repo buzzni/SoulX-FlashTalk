@@ -22,6 +22,7 @@
 import { API_BASE, getAuthHeaders } from './http';
 import { parseRichSSEStream, type SSEFrame } from './sseParser';
 import {
+  TERMINAL_STATES,
   type JobSnapshot,
   type JobVariant,
   useJobCacheStore,
@@ -178,7 +179,7 @@ function _applyFrame(jobId: string, frame: SSEFrame): boolean {
       // The endpoint closes the stream right after the snapshot if
       // the snap is already in a terminal state — treat it as such.
       const snap = frame.data as JobSnapshot;
-      return ['ready', 'failed', 'cancelled'].includes(snap.state);
+      return TERMINAL_STATES.has(snap.state);
     }
     case 'candidate': {
       const payload = frame.data as { variant?: JobVariant };

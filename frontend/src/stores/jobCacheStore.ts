@@ -42,10 +42,15 @@ export type JobState =
   | 'failed'
   | 'cancelled';
 
-const TERMINAL_STATES: ReadonlySet<JobState> = new Set([
+export const TERMINAL_STATES: ReadonlySet<JobState> = new Set([
   'ready',
   'failed',
   'cancelled',
+]);
+
+export const ACTIVE_STATES: ReadonlySet<JobState> = new Set([
+  'pending',
+  'streaming',
 ]);
 
 /** Variant shape carried in `JobSnapshot.variants[]`. The fields are
@@ -126,18 +131,23 @@ interface JobCacheState {
   clear: () => void;
 }
 
-// Helper — produces a no-op entry shape so callers don't have to
-// special-case undefined.
-function emptyEntry(): JobCacheEntry {
-  return { snapshot: null, lastSeq: 0, isLoading: false, error: null };
-}
+// Stable empty entry. Returning the same reference for missing-job
+// reads keeps zustand's Object.is comparator happy — without this,
+// every store mutation anywhere triggers a re-render in components
+// reading a not-yet-cached jobId.
+const EMPTY_ENTRY: JobCacheEntry = Object.freeze({
+  snapshot: null,
+  lastSeq: 0,
+  isLoading: false,
+  error: null,
+}) as JobCacheEntry;
 
 // Helper — read the current entry, falling back to empty.
 function read(
   state: JobCacheState,
   jobId: string,
 ): JobCacheEntry {
-  return state.jobs[jobId] ?? emptyEntry();
+  return state.jobs[jobId] ?? EMPTY_ENTRY;
 }
 
 export const useJobCacheStore = create<JobCacheState>((set) => ({
@@ -160,17 +170,24 @@ export const useJobCacheStore = create<JobCacheState>((set) => ({
     })),
 
   setSnapshot: (jobId, snapshot, seq) =>
-    set((s) => ({
-      jobs: {
-        ...s.jobs,
-        [jobId]: {
-          snapshot,
-          lastSeq: seq,
-          isLoading: false,
-          error: null,
+    set((s) => {
+      const entry = read(s, jobId);
+      // Idempotent replay guard: a snapshot redelivered at the same
+      // seq cannot have new information by definition. Returning `s`
+      // unchanged keeps zustand from notifying every selector.
+      if (seq <= entry.lastSeq && entry.snapshot !== null) return s;
+      return {
+        jobs: {
+          ...s.jobs,
+          [jobId]: {
+            snapshot,
+            lastSeq: seq,
+            isLoading: false,
+            error: null,
+          },
         },
-      },
-    })),
+      };
+    }),
 
   appendVariant: (jobId, variant, seq) =>
     set((s) => {
@@ -270,9 +287,13 @@ export const useJobCacheStore = create<JobCacheState>((set) => ({
   clear: () => set({ jobs: {} }),
 }));
 
-/** Selector helper — returns an empty entry instead of undefined so
- * components don't have to null-check on first render. */
+/** Selector helper — returns the stable EMPTY_ENTRY (same reference
+ * across calls) instead of undefined so components don't have to null-
+ * check on first render AND zustand's Object.is comparator can elide
+ * re-renders for not-yet-cached jobIds. */
 export function selectJobEntry(jobId: string | null) {
   return (s: JobCacheState): JobCacheEntry =>
-    jobId ? (s.jobs[jobId] ?? emptyEntry()) : emptyEntry();
+    jobId ? (s.jobs[jobId] ?? EMPTY_ENTRY) : EMPTY_ENTRY;
 }
+
+export { EMPTY_ENTRY };

@@ -74,6 +74,12 @@ _INDEXES = [
             "state": {"$in": ["pending", "streaming"]}
         },
     ),
+    dict(
+        keys=[("state", 1)],
+        name="state_idx",
+        unique=False,
+        partialFilterExpression=None,
+    ),
 ]
 
 

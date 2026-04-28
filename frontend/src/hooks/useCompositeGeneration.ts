@@ -5,7 +5,7 @@
  * maps composition-specific fields.
  */
 
-import { useCallback, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { humanizeError } from '../api/http';
 import { imageIdFromPath } from '../api/mapping';
 import {
@@ -13,10 +13,7 @@ import {
   deleteJob,
   type CompositeJobInput,
 } from '../api/jobs';
-import {
-  selectJobEntry,
-  useJobCacheStore,
-} from '../stores/jobCacheStore';
+import type { JobCacheEntry } from '../stores/jobCacheStore';
 import { useWizardStore } from '../stores/wizardStore';
 import { useJobSnapshot } from './useJobSnapshot';
 
@@ -88,16 +85,18 @@ export function useCompositeGeneration(): UseCompositeGenerationReturn {
     });
   }, [jobId]);
 
-  return deriveReturn(entry, error, regenerate, abort);
+  return useMemo(
+    () => deriveReturn(entry, error, regenerate, abort),
+    [entry, error, regenerate, abort],
+  );
 }
 
 function deriveReturn(
-  entry: ReturnType<ReturnType<typeof selectJobEntry>>,
+  entry: JobCacheEntry,
   error: string | null,
   regenerate: UseCompositeGenerationReturn['regenerate'],
   abort: UseCompositeGenerationReturn['abort'],
 ): UseCompositeGenerationReturn {
-  void useJobCacheStore;
   const snap = entry.snapshot;
   if (!snap) {
     return {

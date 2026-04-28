@@ -17,14 +17,11 @@
  * SSE fetch.
  */
 
-import { useCallback, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { humanizeError } from '../api/http';
 import { imageIdFromPath } from '../api/mapping';
 import { createJob, deleteJob, type HostJobInput } from '../api/jobs';
-import {
-  selectJobEntry,
-  useJobCacheStore,
-} from '../stores/jobCacheStore';
+import type { JobCacheEntry } from '../stores/jobCacheStore';
 import { useWizardStore } from '../stores/wizardStore';
 import { useJobSnapshot } from './useJobSnapshot';
 
@@ -143,30 +140,32 @@ export function useHostGeneration(): UseHostGenerationReturn {
     });
   }, [jobId]);
 
-  return deriveReturn(entry, selected, error, regenerate, abort);
+  // Memoize the projection so re-renders triggered by an unrelated
+  // store change don't allocate fresh variants/prevSelected arrays
+  // and break downstream React.memo / useMemo chains.
+  return useMemo(
+    () => deriveReturn(entry, selected, error, regenerate, abort),
+    [entry, selected, error, regenerate, abort],
+  );
 }
 
 /** Project the cache entry onto the v8-shaped return. The public
  * surface (variants, prevSelected, batchId, isLoading, error,
  * regenerate, abort) stays stable so Step1Host doesn't churn.
  *
- * step 18 prev-tile gate: if the snapshot doesn't yet carry a
+ * Prev-tile gate: if the snapshot doesn't yet carry a
  * prev_selected_image_id (server publishes it on 'done'), fall back
  * to host.selected — the user's pre-regenerate pick. Once the new
  * batch's variants render, handleSelectVariant overwrites
  * host.selected; once 'done' lands, snap.prev_selected_image_id wins.
  * Net: the 5th tile never blanks mid-stream. */
 function deriveReturn(
-  entry: ReturnType<ReturnType<typeof selectJobEntry>>,
+  entry: JobCacheEntry,
   schemaSelected: { imageId: string; path: string; url: string; seed: number } | null,
   error: string | null,
   regenerate: UseHostGenerationReturn['regenerate'],
   abort: UseHostGenerationReturn['abort'],
 ): UseHostGenerationReturn {
-  // suppress unused-import warning — useJobCacheStore re-export is
-  // for tests only; functional reference here keeps the linter happy.
-  void useJobCacheStore;
-
   const snap = entry.snapshot;
   if (!snap) {
     return {

@@ -1,31 +1,28 @@
 /**
- * ActiveJobsIndicator — TopBar pill that surfaces in-flight generation
- * jobs, eng-spec design-spec §2.
+ * ActiveJobsIndicator — TopBar pill surfacing in-flight generation
+ * jobs (eng-spec design-spec §2).
  *
- * Phase B step 19. This is the minimal functional shell:
- *   - greys out when no active job
- *   - red dot when ≥1 active (pending/streaming)
- *   - shows the count if >1
- *
- * Animations (220ms scale-in, conic-gradient ring, pulsing dot, ETA
- * sub-text), the multi-job panel, and the click-to-open dropdown
- * specified in design-spec §2-3 are deferred to a follow-up polish
- * commit. The shell here gives every wizard route the visibility hook
- * the spec requires; downstream design iteration replaces the
- * presentational layer without breaking the data wiring.
+ * Minimal shell: greys out when no active job; red dot when ≥1
+ * pending/streaming. Animations + multi-job dropdown + ETA sub-text
+ * (design-spec §2-3) are TODOS.md polish.
  */
 
-import { useJobCacheStore } from '../stores/jobCacheStore';
+import { ACTIVE_STATES, useJobCacheStore } from '../stores/jobCacheStore';
+
+/** Count active jobs as a primitive — components subscribing via
+ * this selector only re-render when the count actually changes,
+ * not on every cache mutation. */
+const selectActiveCount = (s: ReturnType<typeof useJobCacheStore.getState>) =>
+  Object.values(s.jobs).reduce(
+    (n, e) =>
+      e.snapshot && ACTIVE_STATES.has(e.snapshot.state) ? n + 1 : n,
+    0,
+  );
 
 export function ActiveJobsIndicator() {
-  const jobs = useJobCacheStore((s) => s.jobs);
-  const active = Object.values(jobs).filter(
-    (e) =>
-      e.snapshot != null &&
-      (e.snapshot.state === 'pending' || e.snapshot.state === 'streaming'),
-  );
-  if (active.length === 0) return null;
-  const label = active.length === 1 ? '생성 중' : `${active.length}개 생성 중`;
+  const count = useJobCacheStore(selectActiveCount);
+  if (count === 0) return null;
+  const label = count === 1 ? '생성 중' : `${count}개 생성 중`;
   return (
     <div
       role="status"

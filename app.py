@@ -899,10 +899,15 @@ async def startup_event():
     task_queue.register_handler("conversation", _queue_conversation_handler)
     await task_queue.start()
 
-    # GenerationJob runner: recovers any orphaned pending/streaming rows from
-    # the prior process and starts the heartbeat sweep. Handlers (host /
-    # composite) are registered in steps 3-4 of streaming-resume Phase A.
+    # GenerationJob runner: recovers any orphaned pending/streaming rows
+    # from the prior process and starts the heartbeat sweep. Handlers
+    # adapt the existing host_generator / composite_generator streams
+    # into the runner's event protocol (modules/job_handlers.py).
+    from modules.job_handlers import composite_job_handler, host_job_handler
+
     job_runner.set_publisher(jobs_pubsub.publish)
+    job_runner.register_handler("host", host_job_handler)
+    job_runner.register_handler("composite", composite_job_handler)
     await job_runner.start()
 
     logger.info("SoulX-FlashTalk API server started (queue worker active)")
@@ -2991,7 +2996,7 @@ async def stream_job_events(job_id: str, request: Request):
 
             # Snap already terminal — nothing to drain. The stream closes
             # immediately after the snapshot frame.
-            if snap.get("state") in ("ready", "failed", "cancelled"):
+            if snap.get("state") in jobs_repo.TERMINAL_STATES:
                 return
 
             async for evt in buffer:

@@ -157,6 +157,17 @@ async def init_indexes() -> None:
         },
         name="user_input_hash_active_uniq",
     )
+    # Recovery scan at startup (mark_active_as_failed) filters by
+    # state $in [pending, streaming]. The partial sweep / dedupe
+    # indexes above don't satisfy that query as a leading column, so
+    # without this index every cold start COLLSCANs the collection
+    # while blocking uvicorn bind. Single-process invariant means the
+    # write amplification of a non-partial state index is one extra
+    # entry per insert/update — cheap.
+    await db.generation_jobs.create_index(
+        [("state", 1)],
+        name="state_idx",
+    )
 
 
 async def close() -> None:
