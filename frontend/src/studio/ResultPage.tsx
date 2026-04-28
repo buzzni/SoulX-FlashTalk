@@ -300,6 +300,7 @@ export default function ResultPage() {
       nextVoice = {
         source: 'clone',
         sample,
+        pendingName: '',
         advanced: advancedFromMeta,
         script: scriptForVoice,
         generation: audioAsset
@@ -486,9 +487,6 @@ export default function ResultPage() {
             <QueueStatus />
             <Button icon="video" size="sm" onClick={() => navigate('/results')}>
               내 영상
-            </Button>
-            <Button icon="home" size="sm" onClick={() => navigate('/')}>
-              처음으로
             </Button>
             <ProfileMenu />
           </div>

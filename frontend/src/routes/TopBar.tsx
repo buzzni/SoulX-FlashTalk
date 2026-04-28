@@ -9,6 +9,7 @@
  * component instead of from a global stylesheet.
  */
 import { Fragment, type ReactNode } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Check } from 'lucide-react';
 import { WizardButton as Button } from '@/components/wizard-button';
 import { ProfileMenu } from './ProfileMenu';
@@ -31,6 +32,7 @@ export interface TopBarProps {
 }
 
 export function TopBar({ step, valid, onStepClick, onReset, queueSlot }: TopBarProps) {
+  const navigate = useNavigate();
   return (
     <header className="topbar">
       <div className="flex items-center gap-5">
@@ -106,6 +108,9 @@ export function TopBar({ step, valid, onStepClick, onReset, queueSlot }: TopBarP
       </div>
       <div className="topbar-right">
         {queueSlot}
+        <Button size="sm" icon="video" onClick={() => navigate('/results')}>
+          내 영상
+        </Button>
         <Button size="sm" icon="refresh" onClick={onReset}>
           처음부터
         </Button>
