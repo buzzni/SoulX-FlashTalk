@@ -645,6 +645,160 @@ def test_sse_snapshot_seq_id_present(client):
     assert frames[0]["id"] == "0"
 
 
+# ── SSE drain loop integration ─────────────────────────────────────────
+# Tests below exercise the `async for evt in buffer` block inside
+# stream_job_events(). TestClient is synchronous, so we publish into the
+# pubsub buffer from a hook on the second `get_by_id` (the snap fetch
+# inside the generator runs AFTER `subscribe()`, so the buffer is open).
+
+def _publish_on_snap_fetch(monkeypatch, payloads: list[dict]) -> None:
+    """Hook jobs_repo.get_by_id so the SECOND call (snap fetch inside
+    event_generator) publishes `payloads` into the pubsub buffer.
+
+    First call is the route's pre-check (before subscribe). Second call
+    happens inside `async with subscribe(...)` so the queue is registered
+    and our publishes land in it.
+    """
+    from modules.repositories import studio_jobs_repo
+    from modules.jobs_pubsub import jobs_pubsub
+
+    call_count = {"n": 0}
+    orig = studio_jobs_repo.get_by_id
+
+    async def hooked(uid, jid):
+        call_count["n"] += 1
+        snap = await orig(uid, jid)
+        if call_count["n"] == 2:
+            for p in payloads:
+                await jobs_pubsub.publish(jid, p)
+        return snap
+
+    monkeypatch.setattr(studio_jobs_repo, "get_by_id", hooked)
+
+
+def test_sse_drain_yields_live_event_then_breaks_on_done(client, monkeypatch):
+    """Mid-flight publish lands in the open buffer; drain yields the frame,
+    then break fires on the terminal 'done' type so the response closes."""
+    tc, uploads = client
+    face = _seed_image(uploads)
+    created = tc.post("/api/jobs", json=_host_payload(face)).json()
+    _set_db_state(created["id"], state="streaming")
+
+    _publish_on_snap_fetch(monkeypatch, [
+        {"type": "candidate", "image_id": "v1"},
+        {"type": "done", "batch_id": "bx"},
+    ])
+
+    r = tc.get(f"/api/jobs/{created['id']}/events")
+    assert r.status_code == 200
+    frames = _parse_sse_frames(r.text)
+    # snapshot + candidate + done
+    assert [f["event"] for f in frames] == ["snapshot", "candidate", "done"]
+    # seq tagging: snapshot=0 (no publishes before subscribe), then 1, 2.
+    assert frames[1]["id"] == "1"
+    assert frames[2]["id"] == "2"
+
+
+def test_sse_drain_breaks_on_fatal(client, monkeypatch):
+    """Fatal is one of the three terminal types; the drain loop must break
+    after yielding it (otherwise the stream hangs on a dead job)."""
+    tc, uploads = client
+    face = _seed_image(uploads)
+    created = tc.post("/api/jobs", json=_host_payload(face)).json()
+    _set_db_state(created["id"], state="streaming")
+
+    _publish_on_snap_fetch(monkeypatch, [
+        {"type": "fatal", "error": "GPU OOM"},
+    ])
+
+    r = tc.get(f"/api/jobs/{created['id']}/events")
+    frames = _parse_sse_frames(r.text)
+    assert [f["event"] for f in frames] == ["snapshot", "fatal"]
+    assert "GPU OOM" in frames[1]["data"]
+
+
+def test_sse_drain_breaks_on_cancelled(client, monkeypatch):
+    """Cancelled is the third terminal trigger (DELETE → publish → drain
+    sees it → break). Mirrors the fatal/done cases."""
+    tc, uploads = client
+    face = _seed_image(uploads)
+    created = tc.post("/api/jobs", json=_host_payload(face)).json()
+    _set_db_state(created["id"], state="streaming")
+
+    _publish_on_snap_fetch(monkeypatch, [
+        {"type": "cancelled"},
+    ])
+
+    r = tc.get(f"/api/jobs/{created['id']}/events")
+    frames = _parse_sse_frames(r.text)
+    assert [f["event"] for f in frames] == ["snapshot", "cancelled"]
+
+
+def test_sse_drain_skips_non_terminal_event_below_floor(client, monkeypatch):
+    """Race tail: an event published between subscribe() and current_seq()
+    has seq <= effective_floor and is already reflected in the snapshot.
+    The drain loop's `if evt.seq > effective_floor` filter must drop it."""
+    tc, uploads = client
+    face = _seed_image(uploads)
+    created = tc.post("/api/jobs", json=_host_payload(face)).json()
+    _set_db_state(created["id"], state="streaming")
+
+    # Bump the per-job seq before subscribe by publishing without a
+    # subscriber. _seq advances; nothing lands in any buffer.
+    from modules.jobs_pubsub import jobs_pubsub
+    import asyncio
+
+    async def _bump():
+        await jobs_pubsub.publish(created["id"], {"type": "candidate"})
+        await jobs_pubsub.publish(created["id"], {"type": "candidate"})
+    asyncio.get_event_loop().run_until_complete(_bump())
+    # current_seq is now 2; effective_floor will be 2 at subscribe time.
+
+    # Publish an event with seq=3 after subscribe — strictly greater than
+    # the floor → must be yielded. Then a 'done' (seq=4) to terminate.
+    _publish_on_snap_fetch(monkeypatch, [
+        {"type": "candidate", "image_id": "post"},
+        {"type": "done", "batch_id": "bx"},
+    ])
+
+    r = tc.get(f"/api/jobs/{created['id']}/events")
+    frames = _parse_sse_frames(r.text)
+    # Snapshot seq is 2 (current at subscribe time).
+    assert frames[0]["event"] == "snapshot"
+    assert frames[0]["id"] == "2"
+    # The two pre-subscribe publishes never queued (no subscriber); the
+    # post-subscribe publishes have seq 3 + 4, both > floor 2.
+    assert [f["event"] for f in frames[1:]] == ["candidate", "done"]
+    assert frames[1]["id"] == "3"
+    assert frames[2]["id"] == "4"
+
+
+def test_sse_drain_snap_null_after_subscribe_closes_cleanly(client, monkeypatch):
+    """Race: job is deleted between the pre-check and the snap fetch
+    inside event_generator (e.g. owner DELETE landed in another request
+    handler). The endpoint must close the stream without emitting
+    snapshot or drain frames — anything else would leak phantom state."""
+    tc, uploads = client
+    face = _seed_image(uploads)
+    created = tc.post("/api/jobs", json=_host_payload(face)).json()
+
+    from modules.repositories import studio_jobs_repo
+    call_count = {"n": 0}
+    orig = studio_jobs_repo.get_by_id
+
+    async def hooked(uid, jid):
+        call_count["n"] += 1
+        if call_count["n"] == 1:
+            return await orig(uid, jid)  # pre-check sees the row
+        return None  # generator's snap fetch sees None (deleted)
+
+    monkeypatch.setattr(studio_jobs_repo, "get_by_id", hooked)
+
+    r = tc.get(f"/api/jobs/{created['id']}/events")
+    assert r.status_code == 200
+    assert _parse_sse_frames(r.text) == []
+
+
 # ── DELETE /api/jobs/:id (step 8) ─────────────────────────────────────
 
 def test_delete_pending_job_returns_cancelled_snapshot(client):
