@@ -447,3 +447,215 @@ async def test_mark_heartbeat_stale_skips_non_streaming(repo_db):
     assert n == 0
     snap = await repo.get_by_id("u1", a["id"])
     assert snap["state"] == "pending"
+
+
+# ── mark_ready_with_lifecycle (step 10) ───────────────────────────────
+
+@pytest_asyncio.fixture
+async def lifecycle_dirs(monkeypatch, tmp_path):
+    """host_repo.record_batch needs OUTPUTS_DIR + a real file behind each
+    storage_key. This fixture redirects config dirs and gives tests a
+    helper to seed PNGs."""
+    import config
+    uploads = tmp_path / "uploads"
+    outputs = tmp_path / "outputs"
+    examples = tmp_path / "examples"
+    saved = outputs / "hosts" / "saved"
+    for d in (uploads, outputs, examples, saved):
+        d.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(config, "UPLOADS_DIR", str(uploads))
+    monkeypatch.setattr(config, "OUTPUTS_DIR", str(outputs))
+    monkeypatch.setattr(config, "EXAMPLES_DIR", str(examples))
+    yield {"saved": saved}
+
+
+def _write_png(path):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(b"\x89PNG\r\n\x1a\n" + b"\0" * 16)
+
+
+async def test_lifecycle_writes_candidates_and_marks_ready(repo_db, lifecycle_dirs):
+    """Variants with real paths land in studio_hosts via record_batch and
+    the row's state flips to ready. prev_selected is None on a fresh
+    user (no prior committed selection)."""
+    saved = lifecycle_dirs["saved"]
+    p1 = saved / "host_a_s1.png"; _write_png(p1)
+    p2 = saved / "host_b_s1.png"; _write_png(p2)
+
+    job = await repo.create(user_id="u1", kind="host",
+                            input_hash="h1", input_blob={})
+    db = repo_db
+    await db.generation_jobs.update_one(
+        {"_id": job["id"]},
+        {"$set": {
+            "state": "streaming",
+            "variants": [
+                {"image_id": "host_a_s1", "path": str(p1)},
+                {"image_id": "host_b_s1", "path": str(p2)},
+            ],
+        }},
+    )
+
+    ok = await repo.mark_ready_with_lifecycle(
+        job["id"], user_id="u1", kind="host", batch_id="b1",
+    )
+    assert ok is True
+
+    snap = await repo.get_by_id("u1", job["id"])
+    assert snap["state"] == "ready"
+    assert snap["batch_id"] == "b1"
+    assert snap["prev_selected_image_id"] is None  # no prior selection
+
+    # studio_hosts has the candidates now (record_batch ran).
+    rows = [d async for d in db.studio_hosts.find({"user_id": "u1"})]
+    assert len(rows) == 2
+    assert {r["image_id"] for r in rows} == {"host_a_s1", "host_b_s1"}
+    assert all(r["batch_id"] == "b1" for r in rows)
+    assert all(r["status"] == "draft" for r in rows)
+
+
+async def test_lifecycle_extracts_prev_selected_after_demote(
+    repo_db, lifecycle_dirs,
+):
+    """On a re-roll (a prior 'selected' candidate exists), cleanup_after_
+    generate demotes it to is_prev_selected=True, and the lifecycle
+    repo extracts that image_id into prev_selected_image_id on the
+    generation_jobs row."""
+    saved = lifecycle_dirs["saved"]
+    p_old = saved / "old.png"; _write_png(p_old)
+    p_new = saved / "new.png"; _write_png(p_new)
+
+    from modules.repositories import studio_host_repo
+
+    # Seed a prior selected candidate for step 1-host.
+    await studio_host_repo.record_batch(
+        "u1", "1-host", [str(p_old)], "old-batch",
+    )
+    await studio_host_repo.select("u1", "1-host", "old")
+    # Sanity: select promoted it.
+    pre_state = await studio_host_repo.get_state("u1", "1-host")
+    assert pre_state["selected"]["image_id"] == "old"
+
+    # Now run a re-roll lifecycle for a new batch.
+    job = await repo.create(user_id="u1", kind="host",
+                            input_hash="h_reroll", input_blob={})
+    db = repo_db
+    await db.generation_jobs.update_one(
+        {"_id": job["id"]},
+        {"$set": {
+            "state": "streaming",
+            "variants": [{"image_id": "new", "path": str(p_new)}],
+        }},
+    )
+
+    ok = await repo.mark_ready_with_lifecycle(
+        job["id"], user_id="u1", kind="host", batch_id="reroll-b",
+    )
+    assert ok is True
+
+    snap = await repo.get_by_id("u1", job["id"])
+    # cleanup_after_generate demoted 'old' to is_prev_selected=True; the
+    # lifecycle pulls that id into the generation_jobs row.
+    assert snap["prev_selected_image_id"] == "old"
+
+
+async def test_lifecycle_empty_variants_still_marks_ready(
+    repo_db, lifecycle_dirs,
+):
+    """No paths in variants → record_batch is skipped (no-op for empty
+    list). cleanup still runs (a no-op against empty studio_hosts).
+    The state transition still completes."""
+    job = await repo.create(user_id="u1", kind="host",
+                            input_hash="h1", input_blob={})
+    db = repo_db
+    await db.generation_jobs.update_one(
+        {"_id": job["id"]},
+        {"$set": {
+            "state": "streaming",
+            "variants": [{"image_id": "v1"}],  # no 'path' key
+        }},
+    )
+    ok = await repo.mark_ready_with_lifecycle(
+        job["id"], user_id="u1", kind="host",
+    )
+    assert ok is True
+    snap = await repo.get_by_id("u1", job["id"])
+    assert snap["state"] == "ready"
+    # batch_id defaults to job_id.
+    assert snap["batch_id"] == job["id"]
+
+
+async def test_lifecycle_blocked_by_concurrent_cancel(
+    repo_db, lifecycle_dirs,
+):
+    """If the row was cancelled before we run, the conditional state
+    update at the end returns 0 rows and we report False — without
+    overwriting the cancelled state."""
+    saved = lifecycle_dirs["saved"]
+    p1 = saved / "c.png"; _write_png(p1)
+    job = await repo.create(user_id="u1", kind="host",
+                            input_hash="h1", input_blob={})
+    await repo.mark_streaming(job["id"])
+    db = repo_db
+    await db.generation_jobs.update_one(
+        {"_id": job["id"]},
+        {"$set": {"variants": [{"image_id": "c", "path": str(p1)}]}},
+    )
+    # User cancels in between.
+    await repo.mark_cancelled(job["id"], owner_user_id="u1")
+
+    ok = await repo.mark_ready_with_lifecycle(
+        job["id"], user_id="u1", kind="host",
+    )
+    # Concurrent cancel won — lifecycle saw state != streaming early and
+    # returned False without writing.
+    assert ok is False
+    snap = await repo.get_by_id("u1", job["id"])
+    assert snap["state"] == "cancelled"
+
+
+async def test_lifecycle_unknown_kind_raises(repo_db, lifecycle_dirs):
+    job = await repo.create(user_id="u1", kind="host",
+                            input_hash="h1", input_blob={})
+    with pytest.raises(ValueError, match="kind must be"):
+        await repo.mark_ready_with_lifecycle(
+            job["id"], user_id="u1", kind="weird",
+        )
+
+
+async def test_lifecycle_kind_step_mapping(repo_db, lifecycle_dirs):
+    """host→1-host, composite→2-composite. Verified by checking which
+    step's studio_hosts rows the lifecycle wrote into."""
+    saved = lifecycle_dirs["saved"]
+    p1 = saved / "x.png"; _write_png(p1)
+
+    j_host = await repo.create(user_id="u1", kind="host",
+                               input_hash="h1", input_blob={})
+    db = repo_db
+    await db.generation_jobs.update_one(
+        {"_id": j_host["id"]},
+        {"$set": {"state": "streaming",
+                  "variants": [{"image_id": "x", "path": str(p1)}]}},
+    )
+    await repo.mark_ready_with_lifecycle(
+        j_host["id"], user_id="u1", kind="host", batch_id="bh",
+    )
+
+    p2 = saved / "y.png"; _write_png(p2)
+    j_comp = await repo.create(user_id="u1", kind="composite",
+                               input_hash="hc", input_blob={})
+    await db.generation_jobs.update_one(
+        {"_id": j_comp["id"]},
+        {"$set": {"state": "streaming",
+                  "variants": [{"image_id": "y", "path": str(p2)}]}},
+    )
+    await repo.mark_ready_with_lifecycle(
+        j_comp["id"], user_id="u1", kind="composite", batch_id="bc",
+    )
+
+    host_rows = [d async for d in db.studio_hosts.find(
+        {"user_id": "u1", "step": "1-host"})]
+    comp_rows = [d async for d in db.studio_hosts.find(
+        {"user_id": "u1", "step": "2-composite"})]
+    assert {r["image_id"] for r in host_rows} == {"x"}
+    assert {r["image_id"] for r in comp_rows} == {"y"}

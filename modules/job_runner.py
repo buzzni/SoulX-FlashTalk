@@ -244,10 +244,19 @@ class JobRunner:
             await self._safe_publish(job_id, evt)
             return True
         if etype == "done":
-            ok = await jobs_repo.mark_ready(
+            # Production path: lifecycle-aware ready transition. Reads
+            # variants, records the batch + runs cleanup in studio_hosts,
+            # then atomically flips state→ready (eng-spec §5). The handler
+            # may pass batch_id in the event; if absent, the repo defaults
+            # to job_id so each distinct job has a stable batch handle.
+            job = await jobs_repo.get_by_id_internal(job_id)
+            if job is None:
+                return False
+            ok = await jobs_repo.mark_ready_with_lifecycle(
                 job_id,
-                batch_id=evt.get("batch_id", job_id),
-                prev_selected_image_id=evt.get("prev_selected_image_id"),
+                user_id=job["user_id"],
+                kind=job["kind"],
+                batch_id=evt.get("batch_id"),
             )
             if ok:
                 await self._safe_publish(job_id, evt)

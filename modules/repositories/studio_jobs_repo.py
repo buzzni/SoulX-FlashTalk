@@ -320,13 +320,121 @@ async def mark_ready(
 ) -> bool:
     """streaming → ready. False if the job was cancelled mid-stream — caller
     has already cleaned up files via append_variant returning False, so the
-    final mark_ready dropping out is the expected race outcome."""
+    final mark_ready dropping out is the expected race outcome.
+
+    Plain transition without the host_repo lifecycle bookkeeping. JobRunner
+    uses mark_ready_with_lifecycle below for the production path; this
+    variant remains for tests and any caller that doesn't need the
+    candidates-collection coupling."""
     now = _now()
     updated = await _coll().find_one_and_update(
         {"_id": job_id, "state": "streaming"},
         {"$set": {
             "state": "ready",
             "batch_id": batch_id,
+            "prev_selected_image_id": prev_selected_image_id,
+            "updated_at": now,
+        }},
+        return_document=ReturnDocument.AFTER,
+    )
+    return updated is not None
+
+
+# Eng-spec §5: kind values map to wizard step identifiers used by
+# studio_host_repo. Both kinds funnel through the same record_batch /
+# cleanup_after_generate machinery; the step string just selects the
+# right candidates collection slice.
+_STEP_BY_KIND: dict[str, str] = {
+    "host": "1-host",
+    "composite": "2-composite",
+}
+
+
+async def mark_ready_with_lifecycle(
+    job_id: str,
+    *,
+    user_id: str,
+    kind: str,
+    batch_id: Optional[str] = None,
+) -> bool:
+    """The production 'done' path (eng-spec §5).
+
+    Sequence the same 4 steps the legacy /api/host/generate/stream did,
+    so the wizard's candidates collection stays in sync:
+
+      1. read variants[] from the generation_jobs row, extract paths
+      2. studio_host_repo.record_batch(user, step, paths, batch_id)
+         — tags fresh draft rows under the new batch_id
+      3. studio_host_repo.cleanup_after_generate(user, step, batch_id)
+         — demotes prior selected to is_prev_selected, prunes stale
+         drafts from older batches
+      4. read host_repo.get_state(...) and pull out prev_selected_image_id
+         (the id of whatever was demoted in step 3, if anything)
+      5. conditional update generation_jobs:
+           state='ready', batch_id=..., prev_selected_image_id=...
+           WHERE state='streaming'
+         The state guard makes a concurrent cancel win — if the row
+         already moved to 'cancelled', this update returns 0 rows and
+         we report False without overwriting the cancellation.
+
+    Failure handling: if record_batch / cleanup raise, we propagate the
+    exception WITHOUT touching generation_jobs.state. The row stays at
+    'streaming' and the heartbeat sweep (default 5min) reaps it as
+    failed, giving the user a retry. This is intentional — partially-
+    written candidates collection state is worse than a delayed failure.
+
+    batch_id defaults to job_id (string of the row's uuid) so each
+    distinct job lands its variants under a stable, recoverable batch
+    handle (eng-spec §6.5).
+    """
+    if kind not in _STEP_BY_KIND:
+        raise ValueError(
+            f"kind must be one of {tuple(_STEP_BY_KIND)}, got {kind!r}"
+        )
+    step = _STEP_BY_KIND[kind]
+    effective_batch_id = batch_id or job_id
+
+    # 1. Read variants for path extraction.
+    doc = await _coll().find_one(
+        {"_id": job_id}, projection={"variants": 1, "state": 1},
+    )
+    if doc is None:
+        return False
+    if doc.get("state") != "streaming":
+        # Already terminal — caller's race lost. Same semantic as
+        # mark_ready returning False.
+        return False
+    variants = list(doc.get("variants") or [])
+    saved_paths: list[str] = [
+        v["path"] for v in variants
+        if isinstance(v, dict) and v.get("path")
+    ]
+
+    # 2-3. Lifecycle bookkeeping. Imported lazily to keep module-load
+    # order independent of host_repo import side-effects (motor client
+    # init lives elsewhere).
+    from modules.repositories import studio_host_repo as host_repo
+
+    if saved_paths:
+        await host_repo.record_batch(
+            user_id, step, saved_paths, effective_batch_id,
+        )
+    await host_repo.cleanup_after_generate(
+        user_id, step, effective_batch_id,
+    )
+
+    # 4. Pull prev_selected from the post-cleanup wizard state.
+    state_after = await host_repo.get_state(user_id, step)
+    prev_selected = state_after.get("prev_selected") or {}
+    prev_selected_image_id = prev_selected.get("image_id") if prev_selected else None
+
+    # 5. Conditional state update.
+    now = _now()
+    updated = await _coll().find_one_and_update(
+        {"_id": job_id, "state": "streaming"},
+        {"$set": {
+            "state": "ready",
+            "batch_id": effective_batch_id,
             "prev_selected_image_id": prev_selected_image_id,
             "updated_at": now,
         }},

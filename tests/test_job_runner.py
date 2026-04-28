@@ -77,13 +77,18 @@ async def _wait_streaming(job_id: str, timeout: float = 5.0) -> dict:
 # ── handler dispatch ──────────────────────────────────────────────────
 
 async def test_run_one_happy_path(repo_db):
+    """Step 10 changed the 'done' path to mark_ready_with_lifecycle, which
+    reads prev_selected_image_id from host_repo.get_state instead of
+    accepting it from the handler. Without any studio_hosts state seeded
+    in this fixture, prev_selected is None — that's the correct
+    contract. The repo-level test in test_studio_jobs_repo covers the
+    full lifecycle with actual host_repo data."""
     runner = JobRunner(sweep_interval_s=3600)
 
     async def handler(job_id, blob):
         yield {"type": "candidate", "variant": {"image_id": "v1"}}
         yield {"type": "candidate", "variant": {"image_id": "v2"}}
-        yield {"type": "done", "batch_id": "batch-x",
-               "prev_selected_image_id": "v0"}
+        yield {"type": "done", "batch_id": "batch-x"}
 
     runner.register_handler("host", handler)
     await runner.start()
@@ -94,7 +99,8 @@ async def test_run_one_happy_path(repo_db):
         snap = await _wait_terminal(job["id"])
         assert snap["state"] == "ready"
         assert snap["batch_id"] == "batch-x"
-        assert snap["prev_selected_image_id"] == "v0"
+        # No studio_hosts seed → no prev_selected.
+        assert snap["prev_selected_image_id"] is None
         assert [v["image_id"] for v in snap["variants"]] == ["v1", "v2"]
     finally:
         await runner.stop()
