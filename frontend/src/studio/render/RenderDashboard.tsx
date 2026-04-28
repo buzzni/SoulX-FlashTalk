@@ -96,11 +96,11 @@ export default function RenderDashboard({
     (async () => {
       try {
         // Stale-state cleanup only — no gate. The snapshot/in-flight gates
-        // we tried earlier (commits 09ab582, 36a80d2) blocked dispatch
-        // outright when isTaskLive threw (auth, network, 5xx) and put the
-        // page into "큐 에러" with no POST ever firing. Race protection now
-        // lives in dispatchedRef alone (single-instance) — dupes from
-        // refresh / fast double-click are accepted as the lesser evil.
+        // we tried earlier (commits 09ab582, 36a80d2, and the v2 attempt
+        // that introduced dispatchPoll) all blocked the happy-path POST in
+        // some condition. dispatchedRef alone protects this single mount;
+        // refresh / fast double-click dupes are accepted as the lesser
+        // evil — it's a queue, not a payment.
         clearDispatchSnapshot();
         clearDispatchInflight();
 
@@ -136,18 +136,7 @@ export default function RenderDashboard({
         if (!id) {
           throw new Error('서버가 task_id를 돌려주지 않았어요');
         }
-        // Stamp this session as the dispatcher of `id` so a later
-        // completion event can auto-reset the wizard. Reset can't
-        // happen here yet — RenderDashboard still depends on the
-        // wizard state (resolution etc.) for display fallbacks until
-        // the queue snapshot lands.
         markDispatched(id);
-        // Promote the URL from /render → /render/:taskId so refresh
-        // survives and the task is permalink-able. `replace: true` so
-        // the back button skips the transient dispatch URL. No
-        // `setTaskId(id)` here — the URL change causes RenderAttachPage
-        // to own the route, and RenderLayout's `key=attachToTaskId ||
-        // 'fresh'` forces a full remount with the id as a prop.
         navigate(`/render/${id}`, { replace: true });
       } catch (err) {
         // AbortError = user navigated away mid-dispatch. Quiet exit.
@@ -162,6 +151,15 @@ export default function RenderDashboard({
     return () => {
       alive = false;
       controller.abort();
+      // StrictMode double-mount: the first mount sets dispatchedRef=true
+      // and starts the POST, then cleanup runs and aborts the fetch.
+      // Without this reset, the second mount early-returns at the
+      // dispatchedRef check and the cancelled POST is never retried —
+      // the user sits on /render with "대기열 등록 중" forever. Resetting
+      // makes the effect idempotent under StrictMode while keeping the
+      // single-instance race guard for non-StrictMode unmounts (the
+      // component is gone by the time anyone could re-fire).
+      dispatchedRef.current = false;
     };
     // `state` is deliberately excluded — see the comment block above.
     // eslint-disable-next-line react-hooks/exhaustive-deps
