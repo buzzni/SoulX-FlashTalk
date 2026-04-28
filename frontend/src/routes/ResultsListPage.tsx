@@ -9,11 +9,11 @@
 import { useCallback, useEffect, useMemo, useState, useRef } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { toast } from 'sonner';
-import { MoreHorizontal, Plus, Play, Info, RotateCw } from 'lucide-react';
+import { MoreHorizontal, Plus, Play, RotateCw } from 'lucide-react';
 import { AppLayout } from './AppLayout';
 import { EmptyState } from '../components/empty-state';
 import { Pagination } from '../components/pagination';
-import { videoTitle, formatCompactDate, formatDuration } from '../lib/format';
+import { videoTitle, formatCompactDate } from '../lib/format';
 import { startNewVideo } from '../lib/wizardNav';
 import { cn } from '@/lib/utils';
 import { humanizeError } from '../api/http';
@@ -40,13 +40,6 @@ import {
   DropdownMenuLabel,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from '@/components/ui/tooltip';
-
 interface HistoryItem {
   task_id: string;
   type?: 'generate' | 'conversation' | null;
@@ -823,7 +816,6 @@ function ResultCard({ item, playlists, onMoved }: ResultCardProps) {
   const videoUrl = item.video_url || `/api/videos/${item.task_id}`;
   const title = videoTitle(item);
   const ts = formatCompactDate(item.timestamp);
-  const dur = formatDuration(item.generation_time);
 
   return (
     <div className="relative group">
@@ -864,7 +856,7 @@ function ResultCard({ item, playlists, onMoved }: ResultCardProps) {
               isCancelled && 'pill-muted',
             )}
           >
-            {isCompleted ? '완료' : isError ? '실패' : '취소됨'}
+            {isCompleted ? '완료' : isError ? '실패' : '취소'}
           </span>
           {isCompleted && (
             <span className="absolute inset-0 grid place-items-center pointer-events-none opacity-0 group-hover:opacity-0 [&_.idle]:opacity-100 group-hover:[&_.idle]:opacity-0">
@@ -879,31 +871,8 @@ function ResultCard({ item, playlists, onMoved }: ResultCardProps) {
             {title}
           </div>
           <div className="text-2xs text-muted-foreground tabular-nums">
-            {ts}{ts && dur !== '—' && ' · '}{dur !== '—' ? dur : ''}
+            {ts}
           </div>
-          {isError && item.public_error && (
-            <div className="mt-2 flex items-start gap-1 text-2xs text-ink-3">
-              <span className="text-destructive shrink-0" aria-hidden>⚠</span>
-              <span className="line-clamp-1 min-w-0">{item.public_error}</span>
-              <TooltipProvider delayDuration={150}>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <button
-                      type="button"
-                      aria-label="자세한 실패 사유 보기"
-                      onClick={(e) => { e.preventDefault(); e.stopPropagation(); }}
-                      className="shrink-0 text-muted-foreground hover:text-foreground cursor-default"
-                    >
-                      <Info className="size-3" />
-                    </button>
-                  </TooltipTrigger>
-                  <TooltipContent className="max-w-[240px] text-2xs leading-relaxed">
-                    {item.public_error}
-                  </TooltipContent>
-                </Tooltip>
-              </TooltipProvider>
-            </div>
-          )}
         </div>
       </Link>
       <DropdownMenu>

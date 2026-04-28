@@ -58,17 +58,18 @@ export function formatBytes(bytes: number | null | undefined): string {
 
 /**
  * Format an ISO date for compact display (used in card meta rows).
- *   2026-04-26T05:32:11 → "04.26 · 05:32"
+ *   2026-04-26T05:32:11 → "2026.04.26 05:32"
  */
 export function formatCompactDate(iso: string | null | undefined): string {
   if (!iso) return '';
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return '';
+  const yyyy = d.getFullYear();
   const mm = String(d.getMonth() + 1).padStart(2, '0');
   const dd = String(d.getDate()).padStart(2, '0');
   const hh = String(d.getHours()).padStart(2, '0');
   const mn = String(d.getMinutes()).padStart(2, '0');
-  return `${mm}.${dd} · ${hh}:${mn}`;
+  return `${yyyy}.${mm}.${dd} ${hh}:${mn}`;
 }
 
 const DAY_MS = 86_400_000;
