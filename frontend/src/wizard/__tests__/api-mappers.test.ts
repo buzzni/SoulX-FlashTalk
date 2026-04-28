@@ -10,16 +10,19 @@ import {
 import type { Background, Composition, Host, Products, Voice } from '../schema';
 import { INITIAL_COMPOSITION, INITIAL_HOST } from '../schema';
 
+// v9 (streaming-resume Phase B): the schema's "ready + selected" was
+// the readiness signal in v8. v9 collapses generation to {idle | attached},
+// and the selected variant moves off-schema (step 17 will introduce a
+// host.selected field + jobCacheStore lookup). For the duration of step
+// 13's transitional phase, toCompositeRequest always returns
+// host.selectedPath: null — readiness is no longer schema-derivable.
+// Tests below assert that null contract; once step 17 lands they'll
+// migrate back to a "selected variant threads through" assertion.
 const READY_HOST: Host = {
   input: { kind: 'text', prompt: 'a'.repeat(20), builder: {}, negativePrompt: '', extraPrompt: '' },
   temperature: 0.7,
-  generation: {
-    state: 'ready',
-    batchId: 'b1',
-    variants: [{ seed: 1, imageId: 'h1', url: '/u/h1.png', path: '/srv/h1.png' }],
-    selected: { seed: 1, imageId: 'h1', url: '/u/h1.png', path: '/srv/h1.png' },
-    prevSelected: null,
-  },
+  generation: { state: 'attached', jobId: 'job-h1' },
+  selected: { imageId: 'h1', path: '/srv/h1.png', url: '/u/h1.png', seed: 1 },
 };
 
 const TWO_PRODUCTS: Products = [

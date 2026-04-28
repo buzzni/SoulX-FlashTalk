@@ -89,14 +89,11 @@ export function persistHost(host: Host): Host {
           outfitRef: persistAsset(host.input.outfitRef),
         };
 
-  // Variants survive (they live on the server). Selected survives.
-  // Streaming/failed states reset on reload — the SSE stream is gone.
-  const generation: HostGeneration =
-    host.generation.state === 'streaming' || host.generation.state === 'failed'
-      ? { state: 'idle' }
-      : host.generation;
-
-  return { ...host, input, generation };
+  // v9 — generation is either idle or attached(jobId). Both survive
+  // reload: idle is trivially fine, and attached jobIds are the server's
+  // canonical handle (the snapshot endpoint resolves the current state
+  // on rehydrate). No transient state to drop here.
+  return { ...host, input };
 }
 
 function persistProduct(p: Product): Product {
@@ -117,15 +114,11 @@ export function persistBackground(bg: Background): Background {
   return bg;
 }
 
-/** Drop transient generation states (streaming/failed → idle) on
- * persist. Exported for per-slice persisters in wizardStore — Phase
- * 2c.3. */
+/** v9: composition.generation is idle | attached(jobId), both
+ * reload-safe. No transient state to drop. Kept as a thin wrapper so
+ * the wizardStore call signature stays stable. */
 export function persistComposition(comp: Composition): Composition {
-  const generation: CompositionGeneration =
-    comp.generation.state === 'streaming' || comp.generation.state === 'failed'
-      ? { state: 'idle' }
-      : comp.generation;
-  return { ...comp, generation };
+  return comp;
 }
 
 /** Drop transient generation states (generating/failed → idle), pending
@@ -260,26 +253,26 @@ function migrateHost(raw: unknown): Host {
           outfitStrength: asNumber(r.outfitStrength, 0.5),
         };
 
-  const variants = migrateHostVariants(r.variants);
-  const generation: HostGeneration = (() => {
-    if (variants.length === 0) return { state: 'idle' };
-    // Legacy "user picked one" signal — `generated: true` OR
-    // `selectedSeed`/`selectedImageId`/`selectedPath` present.
-    const selectedImageId =
-      asString(r.selectedImageId) ||
-      (asString(r.selectedPath) ? imageIdFromPath(asString(r.selectedPath)) : '');
+  // v9: generation resets to idle (eng-spec §7 — server's candidates
+  // collection still has the row). selected may survive — if the legacy
+  // blob carried a selected variant snapshot, lift it onto the new
+  // host.selected field so the user's prior pick isn't lost on upgrade.
+  const selected = (() => {
+    const variants = migrateHostVariants(r.variants);
+    if (variants.length === 0) return null;
+    const selectedImageId = asString(r.selectedImageId);
     const selectedSeed = asNumber(r.selectedSeed, NaN);
-    const selected =
-      variants.find((v) => v.imageId === selectedImageId) ??
-      variants.find((v) => v.seed === selectedSeed) ??
+    const v =
+      variants.find((x) => x.imageId === selectedImageId) ??
+      variants.find((x) => x.seed === selectedSeed) ??
       null;
-    return { state: 'ready', batchId: null, variants, selected, prevSelected: null };
+    return v ? { imageId: v.imageId, path: v.path, url: v.url, seed: v.seed } : null;
   })();
-
   return {
     input,
     temperature: asNumber(r.temperature, 0.7),
-    generation,
+    generation: { state: 'idle' },
+    selected,
   };
 }
 
@@ -355,18 +348,16 @@ function migrateComposition(raw: unknown): Composition {
     temperature: asNumber(r.temperature, 0.7),
     rembg: r.rembg !== false, // default true
   };
-  const variants = migrateCompositionVariants(r.variants);
-  const generation: CompositionGeneration =
-    r.generated === true && variants.length > 0
-      ? (() => {
-          const selectedImageId = asString(r.selectedImageId);
-          const selected = variants.find((v) => v.imageId === selectedImageId) ?? null;
-          return { state: 'ready' as const, batchId: null, variants, selected, prevSelected: null };
-        })()
-      : variants.length > 0
-        ? { state: 'ready' as const, batchId: null, variants, selected: null, prevSelected: null }
-        : { state: 'idle' as const };
-  return { settings, generation };
+  // v9: same pattern as migrateHost — lift any legacy selected variant
+  // onto composition.selected.
+  const compSelected = (() => {
+    const variants = migrateCompositionVariants(r.variants);
+    if (variants.length === 0) return null;
+    const selectedImageId = asString(r.selectedImageId);
+    const v = variants.find((x) => x.imageId === selectedImageId) ?? null;
+    return v ? { imageId: v.imageId, path: v.path, url: v.url, seed: v.seed } : null;
+  })();
+  return { settings, generation: { state: 'idle' }, selected: compSelected };
 }
 
 function migrateVoiceAdvanced(raw: unknown): VoiceAdvanced {

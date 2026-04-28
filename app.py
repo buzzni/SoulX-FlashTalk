@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Optional, List
 from datetime import datetime
 
-from fastapi import FastAPI, File, UploadFile, Form, HTTPException, Request
+from fastapi import Body, FastAPI, File, UploadFile, Form, HTTPException, Request
 from fastapi.responses import FileResponse, StreamingResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -23,9 +23,15 @@ import uvicorn
 import config
 from modules import auth as auth_module
 from modules import db as db_module
+from modules.job_runner import assert_single_process_or_raise, job_runner
+from modules.jobs_pubsub import jobs_pubsub
+from modules.repositories import studio_jobs_repo as jobs_repo
 from modules.task_queue import task_queue
 from modules.schemas import (
     HistoryResponse,
+    JobCreateRequestPayload,
+    JobListResponse,
+    JobSnapshot,
     QueueSnapshot,
     ResultManifest,
     TaskStateSnapshot,
@@ -874,6 +880,12 @@ async def generate_video_task(
 
 @app.on_event("startup")
 async def startup_event():
+    # Refuse to boot under multi-worker. JobRunner's in-process pubsub
+    # cannot fan events across workers; a misconfigured deploy would
+    # silently break SSE for half the users (eng-spec §2.4). Run this
+    # FIRST so the failure surfaces before any DB / model init.
+    assert_single_process_or_raise()
+
     global pipeline_lock
     pipeline_lock = asyncio.Lock()
 
@@ -887,11 +899,25 @@ async def startup_event():
     task_queue.register_handler("conversation", _queue_conversation_handler)
     await task_queue.start()
 
+    # GenerationJob runner: recovers any orphaned pending/streaming rows
+    # from the prior process and starts the heartbeat sweep. Handlers
+    # adapt the existing host_generator / composite_generator streams
+    # into the runner's event protocol (modules/job_handlers.py).
+    from modules.job_handlers import composite_job_handler, host_job_handler
+
+    job_runner.set_publisher(jobs_pubsub.publish)
+    job_runner.register_handler("host", host_job_handler)
+    job_runner.register_handler("composite", composite_job_handler)
+    await job_runner.start()
+
     logger.info("SoulX-FlashTalk API server started (queue worker active)")
 
 
 @app.on_event("shutdown")
 async def shutdown_event():
+    # Stop the JobRunner BEFORE closing the DB so the final mark_failed
+    # writes for in-flight jobs land cleanly.
+    await job_runner.stop()
     await db_module.close()
 
 
@@ -2388,102 +2414,6 @@ async def host_generate(
     return result
 
 
-@app.post("/api/host/generate/stream")
-async def host_generate_stream(
-    request: Request,
-    mode: str = Form(...),
-    prompt: Optional[str] = Form(None),
-    extraPrompt: Optional[str] = Form(None),
-    negativePrompt: Optional[str] = Form(None),
-    builder: Optional[str] = Form(None),  # JSON dict
-    faceRefPath: Optional[str] = Form(None),
-    outfitRefPath: Optional[str] = Form(None),
-    styleRefPath: Optional[str] = Form(None),
-    faceStrength: float = Form(0.7),
-    outfitStrength: float = Form(0.7),
-    outfitText: Optional[str] = Form(None),
-    seeds: Optional[str] = Form(None),
-    # Gemini image_size — shared between Step 1 and Step 2 so the reference
-    # resolution matches the target. "1K" (default, fast) | "2K" (sharper,
-    # ~2-4× time). Rejected for any other value.
-    imageSize: str = Form("1K"),
-    n: int = Form(4),
-    temperature: Optional[float] = Form(None),
-):
-    """SSE variant of /api/host/generate — yields one event per completed
-    candidate instead of blocking on the slowest Gemini call.
-
-    Frontend consumes this via fetch + manual SSE parse (EventSource is GET-only)
-    and appends each 'candidate' event to the variants grid as it arrives.
-    """
-    from utils.security import safe_upload_path
-    from modules.host_generator import stream_host_candidates
-    from modules.repositories import studio_host_repo as host_repo
-
-    user = auth_module.get_request_user(request)
-    user_id = user["user_id"]
-    face = safe_upload_path(faceRefPath) if faceRefPath else None
-    outfit = safe_upload_path(outfitRefPath) if outfitRefPath else None
-    style = safe_upload_path(styleRefPath) if styleRefPath else None
-
-    builder_dict = None
-    if builder:
-        try:
-            builder_dict = json.loads(builder)
-            if not isinstance(builder_dict, dict):
-                raise ValueError
-        except (json.JSONDecodeError, ValueError):
-            raise HTTPException(status_code=400, detail="builder must be a JSON object")
-
-    if temperature is not None and not 0.0 <= temperature <= 2.0:
-        raise HTTPException(status_code=400, detail=f"temperature must be in [0.0, 2.0], got {temperature}")
-
-    async def events():
-        batch_id = f"batch_{uuid.uuid4().hex[:8]}"
-        saved_paths: list = []
-        try:
-            async for evt in stream_host_candidates(
-                mode=mode,
-                text_prompt=prompt,
-                face_ref_path=face,
-                outfit_ref_path=outfit,
-                style_ref_path=style,
-                extra_prompt=extraPrompt,
-                builder=builder_dict,
-                negative_prompt=negativePrompt,
-                face_strength=faceStrength,
-                outfit_strength=outfitStrength,
-                outfit_text=outfitText,
-                seeds=_parse_seeds_form(seeds),
-                image_size=_validate_image_size(imageSize),
-                n=n,
-                temperature=temperature,
-            ):
-                if evt.get("type") == "candidate" and evt.get("path"):
-                    saved_paths.append(evt["path"])
-                if evt.get("type") == "done" and saved_paths:
-                    try:
-                        await host_repo.record_batch(user_id, "1-host", saved_paths, batch_id)
-                        await host_repo.cleanup_after_generate(user_id, "1-host", batch_id)
-                        state = await host_repo.get_state(user_id, "1-host")
-                        evt["batch_id"] = batch_id
-                        evt["prev_selected"] = state["prev_selected"]
-                    except Exception as le:
-                        logger.error("host lifecycle bookkeeping failed: %s", le)
-                        evt["lifecycle_error"] = str(le)
-                yield f"data: {json.dumps(evt)}\n\n"
-        except ValueError as e:
-            yield f"data: {json.dumps({'type': 'fatal', 'error': str(e), 'status': 400})}\n\n"
-        except Exception as e:
-            logger.error("host stream failed: %s", e)
-            yield f"data: {json.dumps({'type': 'fatal', 'error': str(e), 'status': 500})}\n\n"
-
-    return StreamingResponse(
-        events(),
-        media_type="text/event-stream",
-        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
-    )
-
 
 # ========================================
 # HostStudio Phase 2 — POST /api/composite/generate
@@ -2577,97 +2507,6 @@ async def composite_generate(
     return result
 
 
-@app.post("/api/composite/generate/stream")
-async def composite_generate_stream(
-    request: Request,
-    hostImagePath: str = Form(...),
-    productImagePaths: str = Form("[]"),
-    backgroundType: str = Form(...),
-    backgroundPresetId: Optional[str] = Form(None),
-    backgroundPresetLabel: Optional[str] = Form(None),
-    backgroundUploadPath: Optional[str] = Form(None),
-    backgroundPrompt: Optional[str] = Form(None),
-    direction: str = Form(""),
-    shot: str = Form("bust"),
-    angle: str = Form("eye"),
-    n: int = Form(4),
-    rembg: bool = True,
-    temperature: Optional[float] = Form(None),
-    seeds: Optional[str] = Form(None),
-    imageSize: str = Form("1K"),
-):
-    """SSE variant of /api/composite/generate. Emits {type: "init"} with
-    translated direction immediately, then one frame per completed candidate,
-    then a terminal {type: "done"}.
-    """
-    from utils.security import safe_upload_path
-    from modules.composite_generator import stream_composite_candidates
-    from modules.repositories import studio_host_repo as host_repo
-
-    user = auth_module.get_request_user(request)
-    user_id = user["user_id"]
-    host_resolved = safe_upload_path(hostImagePath)
-
-    try:
-        products_raw = json.loads(productImagePaths)
-        if not isinstance(products_raw, list):
-            raise ValueError("productImagePaths must be a JSON array")
-    except (json.JSONDecodeError, ValueError) as e:
-        raise HTTPException(status_code=400, detail=f"Invalid productImagePaths: {e}")
-
-    products_resolved = [safe_upload_path(p) for p in products_raw]
-    bg_upload_resolved = (
-        safe_upload_path(backgroundUploadPath) if backgroundUploadPath else None
-    )
-
-    if temperature is not None and not 0.0 <= temperature <= 2.0:
-        raise HTTPException(status_code=400, detail=f"temperature must be in [0.0, 2.0], got {temperature}")
-
-    async def events():
-        batch_id = f"batch_{uuid.uuid4().hex[:8]}"
-        saved_paths: list = []
-        try:
-            async for evt in stream_composite_candidates(
-                host_image_path=host_resolved,
-                product_image_paths=products_resolved,
-                background_type=backgroundType,
-                background_preset_id=backgroundPresetId,
-                background_preset_label=backgroundPresetLabel,
-                background_upload_path=bg_upload_resolved,
-                background_prompt=backgroundPrompt,
-                direction_ko=direction,
-                shot=shot,
-                angle=angle,
-                n=n,
-                rembg_products=rembg,
-                temperature=temperature,
-                seeds=_parse_seeds_form(seeds),
-                image_size=_validate_image_size(imageSize),
-            ):
-                if evt.get("type") == "candidate" and evt.get("path"):
-                    saved_paths.append(evt["path"])
-                if evt.get("type") == "done" and saved_paths:
-                    try:
-                        await host_repo.record_batch(user_id, "2-composite", saved_paths, batch_id)
-                        await host_repo.cleanup_after_generate(user_id, "2-composite", batch_id)
-                        state = await host_repo.get_state(user_id, "2-composite")
-                        evt["batch_id"] = batch_id
-                        evt["prev_selected"] = state["prev_selected"]
-                    except Exception as le:
-                        logger.error("composite lifecycle bookkeeping failed: %s", le)
-                        evt["lifecycle_error"] = str(le)
-                yield f"data: {json.dumps(evt)}\n\n"
-        except ValueError as e:
-            yield f"data: {json.dumps({'type': 'fatal', 'error': str(e), 'status': 400})}\n\n"
-        except Exception as e:
-            logger.error("composite stream failed: %s", e)
-            yield f"data: {json.dumps({'type': 'fatal', 'error': str(e), 'status': 500})}\n\n"
-
-    return StreamingResponse(
-        events(),
-        media_type="text/event-stream",
-        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
-    )
 
 
 # ========================================
@@ -2964,6 +2803,264 @@ async def delete_video(task_id: str, request: Request):
         "video_deleted": deleted_video,
         "images_removed": removed_images,
     }
+
+
+# ========================================
+# Generation jobs (streaming-resume Phase A)
+# ========================================
+
+@app.post("/api/jobs", response_model=JobSnapshot)
+async def create_job(
+    request: Request,
+    body: JobCreateRequestPayload = Body(...),
+):
+    """Create a generation job and submit it to the runner.
+
+    Dedupe-by-reuse: if the same (user_id, kind, input_hash) already has
+    an active row (pending or streaming), the existing row is returned and
+    no new submit happens — the runner is already working on it
+    (eng-spec §6.5).
+
+    Body is a discriminated union over kind: 'host' uses HostJobInput,
+    'composite' uses CompositeJobInput. Pydantic surfaces 422 on any
+    field-level validation error before this handler runs.
+    """
+    user = auth_module.get_request_user(request)
+
+    # Pydantic has already validated shape + types. Now sanitize paths
+    # and compute the canonical blob.
+    from modules.job_input import (
+        compute_input_hash,
+        enforce_size_cap,
+        validate_and_sanitize,
+    )
+
+    raw_input = body.input.model_dump(exclude_none=True)
+    sanitized = validate_and_sanitize(body.kind, raw_input)
+    enforce_size_cap(sanitized)
+    input_hash = compute_input_hash(body.kind, sanitized)
+
+    job, was_created = await jobs_repo.create_or_get_active(
+        user_id=user["user_id"],
+        kind=body.kind,
+        input_hash=input_hash,
+        input_blob=sanitized,
+    )
+
+    # Only submit on a fresh insert. A dedupe-hit means an earlier POST
+    # already submitted this row; the runner is either still running it
+    # (in which case a second submit no-ops via _running) or it transitioned
+    # to terminal (in which case the next conditional update would no-op
+    # anyway). Skipping keeps the log noise clean.
+    if was_created:
+        try:
+            await job_runner.submit(job["id"])
+        except RuntimeError as e:
+            # Runner is stopping — surface to the client as 503 so the
+            # request can be retried after the next deploy.
+            raise HTTPException(status_code=503, detail=str(e))
+
+    return job
+
+
+@app.get("/api/jobs", response_model=JobListResponse)
+async def list_jobs(
+    request: Request,
+    kind: Optional[str] = None,
+    state: Optional[str] = None,
+    limit: int = 20,
+    cursor: Optional[str] = None,
+):
+    """Owner-scoped, cursor-paginated list of jobs.
+
+    Sort: created_at desc, _id desc (stable on same-microsecond ties).
+    `cursor` is the previous page's last item id; a stale or wrong-owner
+    cursor folds into a head-of-list reset (the repo silently ignores
+    the cursor rather than 400'ing — paginating clients shouldn't blow
+    up on a server restart that lost their bookmark).
+
+    Response shape: {items: [...], next_cursor: <id> | null}. next_cursor
+    is null when this page is the tail.
+    """
+    user = auth_module.get_request_user(request)
+    try:
+        page = await jobs_repo.list_by_user(
+            user["user_id"],
+            kind=kind, state=state, limit=limit, cursor=cursor,
+        )
+    except ValueError as e:
+        # Invalid kind/state strings — surface to client as 400.
+        raise HTTPException(status_code=400, detail=str(e))
+    return page
+
+
+@app.get("/api/jobs/{job_id}", response_model=JobSnapshot)
+async def get_job(job_id: str, request: Request):
+    """Owner-scoped snapshot of a generation job.
+
+    A miss returns 404 regardless of whether the row exists or belongs to
+    a different user — eng-spec §8 forbids leaking id existence across
+    user boundaries (the row id is a uuid, but a 403-vs-404 distinction
+    would still expose membership). The repository's get_by_id already
+    folds both cases into None.
+    """
+    user = auth_module.get_request_user(request)
+    snap = await jobs_repo.get_by_id(user["user_id"], job_id)
+    if snap is None:
+        raise HTTPException(status_code=404, detail="job not found")
+    return snap
+
+
+@app.get("/api/jobs/{job_id}/events")
+async def stream_job_events(job_id: str, request: Request):
+    """Race-free SSE stream of a job's events (eng-spec §3.2).
+
+    Handshake order — chosen to never lose data, accept rare duplicates:
+      1. subscribe() — register the queue. Every publish from this moment
+         on is buffered.
+      2. seq_at_subscribe = current_seq() — the floor. Anything earlier
+         is already reflected in the snapshot we're about to read.
+      3. snapshot fetch — DB state at this moment. May include events
+         later than seq_at_subscribe (because publish writes DB before
+         pubsub), in which case we'll emit some events the snapshot
+         already reflected. Client is expected to be idempotent.
+      4. emit snapshot frame with id=seq_at_subscribe (skipped if
+         Last-Event-ID >= seq_at_subscribe — client claims to be ahead).
+      5. drain queue: emit every evt with seq > effective_floor; break
+         on terminal (done/fatal/cancelled).
+
+    Rejecting reads:
+      - cap pre-check → 429 (eng-spec §8 per-user 10 cap)
+      - owner mismatch → 404 (id existence not leaked)
+
+    Headers: Cache-Control: no-cache to keep proxies from caching the
+    stream; X-Accel-Buffering: no to disable nginx response buffering
+    (otherwise nginx accumulates a few KB before flushing, killing the
+    incremental-update UX).
+    """
+    user = auth_module.get_request_user(request)
+
+    # Cap pre-check (eng-spec §8). Atomic claim happens in subscribe();
+    # this is just so we can emit 429 with a body before the
+    # StreamingResponse's status code locks in at 200.
+    if jobs_pubsub.is_user_at_cap(user["user_id"]):
+        raise HTTPException(
+            status_code=429,
+            detail="too many concurrent SSE subscriptions",
+        )
+
+    # Owner / existence check. Folds both miss cases into 404 the same
+    # way GET /api/jobs/:id does.
+    pre = await jobs_repo.get_by_id(user["user_id"], job_id)
+    if pre is None:
+        raise HTTPException(status_code=404, detail="job not found")
+
+    last_event_id_header = request.headers.get("Last-Event-ID")
+    try:
+        after_seq = (
+            int(last_event_id_header) if last_event_id_header else 0
+        )
+    except ValueError:
+        after_seq = 0
+
+    async def event_generator():
+        from modules.jobs_pubsub import sse_format, sse_format_event
+
+        async with jobs_pubsub.subscribe(job_id, user["user_id"]) as buffer:
+            seq_at_subscribe = jobs_pubsub.current_seq(job_id)
+            snap = await jobs_repo.get_by_id(user["user_id"], job_id)
+            if snap is None:
+                # Job was deleted between the pre-check and the subscribe;
+                # close the stream cleanly.
+                return
+
+            effective_floor = max(after_seq, seq_at_subscribe)
+
+            # Emit snapshot unless the client explicitly claims to be
+            # caught up. SSE convention: clients omit Last-Event-ID on
+            # the first connection (they haven't seen any event yet), so
+            # a missing header means "send me the snapshot." On reconnect
+            # the client passes their last-seen seq; we skip the snapshot
+            # only when after_seq >= seq_at_subscribe (their state is at
+            # least as fresh as our snap).
+            should_emit_snapshot = (
+                last_event_id_header is None
+                or after_seq < seq_at_subscribe
+            )
+            if should_emit_snapshot:
+                yield sse_format(
+                    "snapshot",
+                    json.dumps(snap, default=str, ensure_ascii=False),
+                    id=seq_at_subscribe,
+                )
+
+            # Snap already terminal — nothing to drain. The stream closes
+            # immediately after the snapshot frame.
+            if snap.get("state") in jobs_repo.TERMINAL_STATES:
+                return
+
+            async for evt in buffer:
+                if evt.seq > effective_floor:
+                    yield sse_format_event(evt)
+                if evt.type in ("done", "fatal", "cancelled"):
+                    break
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+@app.delete("/api/jobs/{job_id}", response_model=JobSnapshot)
+async def cancel_job(job_id: str, request: Request):
+    """Cancel an active generation job.
+
+    Conditional update at the data layer: pending|streaming → cancelled
+    (eng-spec §4). The repo's mark_cancelled is owner-scoped and atomic;
+    a 0-row response means either we don't own the row or it's already
+    terminal. We disambiguate with a follow-up read so 404 vs 409 land
+    on the right cases.
+
+    On success the cancelled event is published so any active SSE
+    subscriber's drain loop breaks instead of hanging — eng-spec §3.2
+    treats 'cancelled' as a stream-terminating event type. The cancel
+    is also visible to the worker on its next conditional update
+    (mark_streaming/append_variant/mark_ready return False), which is
+    how cancel-vs-append atomicity is preserved (eng-spec §4).
+    """
+    user = auth_module.get_request_user(request)
+
+    ok = await jobs_repo.mark_cancelled(
+        job_id, owner_user_id=user["user_id"]
+    )
+    if not ok:
+        # Either the row doesn't exist, isn't ours, or is already terminal.
+        # An owner-scoped follow-up read disambiguates without leaking
+        # existence to non-owners (None for both not-found and not-owner).
+        snap = await jobs_repo.get_by_id(user["user_id"], job_id)
+        if snap is None:
+            raise HTTPException(status_code=404, detail="job not found")
+        raise HTTPException(
+            status_code=409,
+            detail=f"job already {snap['state']}",
+        )
+
+    # Wake any SSE subscribers that are mid-drain so they exit cleanly
+    # instead of waiting for an event that will never arrive (eng-spec §3.2
+    # treats 'cancelled' as a terminal event).
+    await jobs_pubsub.publish(job_id, {"type": "cancelled"})
+
+    snap = await jobs_repo.get_by_id(user["user_id"], job_id)
+    if snap is None:
+        # The row was concurrently dropped — extremely rare, but fall back
+        # to a minimal acknowledgement so the client knows the cancel went
+        # through.
+        raise HTTPException(status_code=410, detail="job gone")
+    return snap
 
 
 # ========================================

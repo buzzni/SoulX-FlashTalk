@@ -105,8 +105,9 @@ export interface CompositeMapperInput {
  * discriminator, dropping everything that's UI-only.
  */
 export function toCompositeRequest(input: CompositeMapperInput): CompositeInput {
-  const hostSelected =
-    input.host.generation.state === 'ready' ? input.host.generation.selected : null;
+  // v9: host.selected carries a snapshot of the user-picked variant
+  // (imageId, path, url, seed). Pure mappers read it directly.
+  const hostSelected = input.host.selected;
 
   // CompositeInput's products only carries `path`; the wizard's
   // id/name are provenance-only, dropped on the wire.
@@ -214,10 +215,9 @@ export function toRenderRequest(args: {
   resolution: ResolutionKey;
   playlistId: string | null;
 }): RenderRequest | null {
-  const compositeSelected =
-    args.composition.generation.state === 'ready'
-      ? args.composition.generation.selected
-      : null;
+  // v9: composition.selected is the user's pick snapshot. Render only
+  // when something is picked.
+  const compositeSelected = args.composition.selected;
   if (!compositeSelected) return null;
 
   const audioPath = (() => {

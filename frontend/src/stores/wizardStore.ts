@@ -256,6 +256,50 @@ export function migrateWizardEnvelope(
     delete p.playlist_id;
     delete p.script;
   }
+  if (fromVersion < 9) {
+    // v9 generation discriminator: {idle|streaming|ready|failed} →
+    // {idle|attached(jobId)}. Reset to idle. Selected variants from
+    // a v8 'ready' generation are lifted onto the new selected field
+    // so the user's prior pick survives the upgrade.
+    const host = (p.host as Record<string, unknown> | undefined);
+    if (host && typeof host === 'object') {
+      const gen = host.generation as Record<string, unknown> | undefined;
+      const sel = gen?.selected as
+        | { imageId?: string; path?: string; url?: string; seed?: number }
+        | null
+        | undefined;
+      host.generation = { state: 'idle' };
+      if (sel && sel.imageId && sel.path && sel.url) {
+        host.selected = {
+          imageId: sel.imageId,
+          path: sel.path,
+          url: sel.url,
+          seed: typeof sel.seed === 'number' ? sel.seed : 0,
+        };
+      } else if (host.selected === undefined) {
+        host.selected = null;
+      }
+    }
+    const composition = (p.composition as Record<string, unknown> | undefined);
+    if (composition && typeof composition === 'object') {
+      const gen = composition.generation as Record<string, unknown> | undefined;
+      const sel = gen?.selected as
+        | { imageId?: string; path?: string; url?: string; seed?: number }
+        | null
+        | undefined;
+      composition.generation = { state: 'idle' };
+      if (sel && sel.imageId && sel.path && sel.url) {
+        composition.selected = {
+          imageId: sel.imageId,
+          path: sel.path,
+          url: sel.url,
+          seed: typeof sel.seed === 'number' ? sel.seed : 0,
+        };
+      } else if (composition.selected === undefined) {
+        composition.selected = null;
+      }
+    }
+  }
   // Lane C: validate the migrated blob against the canonical persisted
   // schema. If it fails, reset to INITIAL_WIZARD_STATE rather than
   // letting a half-migrated/legacy-corrupted shape reach React (which
@@ -369,7 +413,16 @@ export const useWizardStore = create<WizardStore>()(
       //       hoisted from a stray `playlist_id` written via the now-
       //       removed `[k:string]: unknown` escape hatch. Lane C adds
       //       `safeParse`-on-hydrate hardening on top.
-      version: 8,
+      //   v9: HostGeneration / CompositionGeneration discriminator
+      //       collapsed from {idle|streaming|ready|failed} to
+      //       {idle|attached(jobId)} (streaming-resume Phase B).
+      //       Migration resets every persisted host.generation and
+      //       composition.generation to {state:'idle'} since the old
+      //       shape's variants/selected/error fields are now owned by
+      //       the server's generation_jobs row. Ready results from v8
+      //       are NOT lost — they live in studio_hosts and resurface
+      //       via v2.1's history view.
+      version: 9,
       migrate: (persisted, fromVersion) => migrateWizardEnvelope(persisted, fromVersion),
       // Lane C — onRehydrateStorage scrub. After zustand merges the
       // hydrated blob into the live store, run the same transient-state

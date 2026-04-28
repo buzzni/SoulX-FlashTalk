@@ -1,24 +1,22 @@
 /**
- * useCompositeGeneration — SSE-driven composite candidate generation
- * with slot-aware state.
- *
- * Mirror of `useHostGeneration` (Phase 2b), now driving the schema's
- * `composition.generation` state machine (idle | streaming | ready |
- * failed). Local UI variant type with placeholder/error fields for
- * mid-stream rendering; schema's stable CompositionVariant lives in
- * the persisted slice.
+ * useCompositeGeneration — server-side job orchestrator (v9 mirror of
+ * useHostGeneration). See that file's header for the new flow; this
+ * one is identical except the kind is 'composite' and the input shape
+ * maps composition-specific fields.
  */
 
-import { useCallback, useState } from 'react';
-import { streamComposite, type CompositeInput } from '../api/composite';
+import { useCallback, useMemo, useState } from 'react';
 import { humanizeError } from '../api/http';
 import { imageIdFromPath } from '../api/mapping';
+import {
+  createJob,
+  deleteJob,
+  type CompositeJobInput,
+} from '../api/jobs';
+import type { JobCacheEntry } from '../stores/jobCacheStore';
 import { useWizardStore } from '../stores/wizardStore';
-import { useAbortableRequest } from './useAbortableRequest';
-import type { CompositionVariant as SchemaCompositionVariant } from '../wizard/schema';
+import { useJobSnapshot } from './useJobSnapshot';
 
-/** UI/transient streaming variant. Carries placeholder/error for
- * mid-stream rendering. */
 export interface CompositionVariant {
   seed: number;
   id: string;
@@ -27,12 +25,7 @@ export interface CompositionVariant {
   path?: string;
   placeholder: boolean;
   error?: string;
-  /** True for the 5th "이전 선택" tile carried over from a prior batch. */
   isPrev?: boolean;
-}
-
-export interface UseCompositeGenerationOptions {
-  rembg?: boolean;
 }
 
 export interface UseCompositeGenerationReturn {
@@ -42,242 +35,114 @@ export interface UseCompositeGenerationReturn {
   isLoading: boolean;
   error: string | null;
   regenerate: (
-    input: CompositeInput & { imageSize?: '1K' | '2K' | '4K'; _seeds?: number[] },
+    input: CompositeJobInput,
     seeds?: number[],
-    opts?: UseCompositeGenerationOptions,
+    opts?: { rembg?: boolean },
   ) => Promise<void>;
   abort: () => void;
 }
 
-function liftSchemaVariant(v: SchemaCompositionVariant): CompositionVariant {
-  return {
-    seed: v.seed,
-    id: `c${v.seed}`,
-    imageId: v.imageId,
-    url: v.url,
-    path: v.path,
-    placeholder: false,
-  };
-}
-
-function lowerToSchema(variants: CompositionVariant[]): SchemaCompositionVariant[] {
-  return variants
-    .filter((v) => !v.placeholder && !v.error && v.url && v.path && v.imageId)
-    .map((v) => ({
-      seed: v.seed,
-      imageId: v.imageId as string,
-      url: v.url as string,
-      path: v.path as string,
-    }));
-}
-
-function readInitialFromStore(): {
-  variants: CompositionVariant[];
-  prevSelected: CompositionVariant | null;
-  batchId: string | null;
-} {
-  const comp = useWizardStore.getState().composition;
-  if (comp.generation.state !== 'ready') {
-    return { variants: [], prevSelected: null, batchId: null };
-  }
-  return {
-    variants: comp.generation.variants.map(liftSchemaVariant),
-    prevSelected: comp.generation.prevSelected
-      ? {
-          ...liftSchemaVariant(comp.generation.prevSelected),
-          id: `prev-${comp.generation.prevSelected.imageId}`,
-          isPrev: true,
-        }
-      : null,
-    batchId: comp.generation.batchId,
-  };
-}
-
 export function useCompositeGeneration(): UseCompositeGenerationReturn {
-  const initial = readInitialFromStore();
-  const [variants, setVariants] = useState<CompositionVariant[]>(initial.variants);
-  const [prevSelected, setPrevSelected] = useState<CompositionVariant | null>(initial.prevSelected);
-  const [batchId, setBatchId] = useState<string | null>(initial.batchId);
-  const [isLoading, setIsLoading] = useState(false);
+  const setComposition = useWizardStore((s) => s.setComposition);
+  const generation = useWizardStore((s) => s.composition.generation);
+  const jobId =
+    generation.state === 'attached' ? generation.jobId : null;
+  const entry = useJobSnapshot(jobId);
   const [error, setError] = useState<string | null>(null);
-  const { run, abort } = useAbortableRequest();
 
   const regenerate = useCallback(
     async (
-      input: CompositeInput & { imageSize?: '1K' | '2K' | '4K'; _seeds?: number[] },
+      input: CompositeJobInput,
       seeds?: number[],
-      opts: UseCompositeGenerationOptions = {},
+      opts: { rembg?: boolean } = {},
     ): Promise<void> => {
-      const { signal, isCurrent } = run();
-
-      const comp = {
-        ...(input.composition ?? {}),
-        ...(input.imageSize ? { imageSize: input.imageSize } : {}),
-        ...(seeds ? { _seeds: seeds } : {}),
-      };
-      const req: CompositeInput = { ...input, composition: comp };
-
-      setIsLoading(true);
       setError(null);
-      setVariants([]);
-
-      // Carry over current selection (if any) as prev_selected.
-      const compBefore = useWizardStore.getState().composition;
-      const oldSelected =
-        compBefore.generation.state === 'ready' ? compBefore.generation.selected : null;
-      const seedPrev: CompositionVariant | null = oldSelected
-        ? { ...liftSchemaVariant(oldSelected), id: `prev-${oldSelected.imageId}`, isPrev: true }
-        : null;
-      setPrevSelected(seedPrev);
-
-      // Move generation into streaming state.
-      useWizardStore.getState().setComposition((prev) => ({
-        ...prev,
-        generation: {
-          state: 'streaming',
-          batchId: null,
-          variants: [],
-        },
-      }));
-
-      let currentVariants: CompositionVariant[] = [];
-      let currentPrev: CompositionVariant | null = seedPrev;
-      let currentBatchId: string | null = null;
-      let errorCount = 0;
-      const errs: string[] = [];
-
       try {
-        for await (const evt of streamComposite(req, { signal, rembg: opts.rembg ?? true })) {
-          if (!isCurrent()) return;
-
-          if (evt.type === 'init') {
-            const slotSeeds =
-              Array.isArray(evt.seeds) && evt.seeds.length > 0
-                ? (evt.seeds as number[])
-                : (seeds ?? []);
-            currentVariants = slotSeeds.map((s) => ({
-              seed: s,
-              id: `c${s}`,
-              placeholder: true,
-            }));
-            setVariants(currentVariants);
-            // direction_en (backend's English-translated direction) is
-            // a debug field — drop on persist; not modeled in schema.
-          } else if (evt.type === 'candidate') {
-            const path = evt.path as string;
-            currentVariants = currentVariants.map((v) =>
-              v.seed === evt.seed
-                ? {
-                    ...v,
-                    url: evt.url as string,
-                    path,
-                    imageId: imageIdFromPath(path),
-                    placeholder: false,
-                  }
-                : v,
-            );
-            setVariants(currentVariants);
-            useWizardStore.getState().setComposition((prev) => ({
-              ...prev,
-              generation: {
-                state: 'streaming',
-                batchId: currentBatchId,
-                variants: lowerToSchema(currentVariants),
-              },
-            }));
-          } else if (evt.type === 'error') {
-            errorCount += 1;
-            const detail = typeof evt.error === 'string' ? evt.error : 'unknown';
-            errs.push(`seed ${evt.seed}: ${detail}`);
-            currentVariants = currentVariants.map((v) =>
-              v.seed === evt.seed ? { ...v, error: detail, placeholder: false } : v,
-            );
-            setVariants(currentVariants);
-          } else if (evt.type === 'fatal') {
-            const err = new Error(
-              (typeof evt.error === 'string' && evt.error) || '알 수 없는 오류',
-            );
-            (err as { status?: number }).status = evt.status as number | undefined;
-            throw err;
-          } else if (evt.type === 'done') {
-            if (evt.min_success_met === false) {
-              const successCount = currentVariants.filter(
-                (v) => !v.placeholder && !v.error,
-              ).length;
-              const total = (evt.total as number | undefined) ?? currentVariants.length;
-              const err = new Error(`합성 후보가 부족해요 (${successCount}/${total})`);
-              (err as { status?: number }).status = 503;
-              throw err;
-            }
-            if (errorCount > 0) {
-              // eslint-disable-next-line no-console
-              console.warn('composite had partial errors:', errs);
-            }
-            if (typeof evt.batch_id === 'string') {
-              currentBatchId = evt.batch_id;
-              setBatchId(currentBatchId);
-            }
-            const prevRaw = evt.prev_selected as
-              | { image_id?: string; path?: string; url?: string; seed?: number; batch_id?: string }
-              | null
-              | undefined;
-            if (prevRaw && prevRaw.image_id && prevRaw.url) {
-              currentPrev = {
-                seed: typeof prevRaw.seed === 'number' ? prevRaw.seed : -1,
-                id: `prev-${prevRaw.image_id}`,
-                imageId: prevRaw.image_id,
-                url: prevRaw.url,
-                path: prevRaw.path,
-                placeholder: false,
-                isPrev: true,
-              };
-            } else {
-              currentPrev = null;
-            }
-            setPrevSelected(currentPrev);
-            const finalVariants = lowerToSchema(currentVariants);
-            const prevSchema: SchemaCompositionVariant | null =
-              currentPrev && currentPrev.imageId && currentPrev.url && currentPrev.path
-                ? {
-                    seed: currentPrev.seed,
-                    imageId: currentPrev.imageId,
-                    url: currentPrev.url,
-                    path: currentPrev.path,
-                  }
-                : null;
-            useWizardStore.getState().setComposition((prev) => ({
-              ...prev,
-              generation: {
-                state: 'ready',
-                batchId: currentBatchId,
-                variants: finalVariants,
-                selected: null,
-                prevSelected: prevSchema,
-              },
-            }));
-          }
-        }
-
-        if (!isCurrent()) return;
-        setIsLoading(false);
-      } catch (err) {
-        if (!isCurrent()) return;
-        const name = (err as { name?: string } | null)?.name;
-        if (name === 'AbortError') {
-          setIsLoading(false);
-          return;
-        }
-        setIsLoading(false);
-        const msg = humanizeError(err);
-        setError(msg);
-        useWizardStore.getState().setComposition((prev) => ({
+        const body: CompositeJobInput = {
+          ...input,
+          seeds: seeds ?? input.seeds ?? null,
+          rembg: opts.rembg ?? input.rembg ?? true,
+        };
+        const job = await createJob({ kind: 'composite', input: body });
+        setComposition((prev) => ({
           ...prev,
-          generation: { state: 'failed', error: msg },
+          generation: { state: 'attached', jobId: job.id },
+          selected: null,
         }));
+      } catch (e) {
+        setError(humanizeError(e));
       }
     },
-    [run],
+    [setComposition],
   );
 
-  return { variants, prevSelected, batchId, isLoading, error, regenerate, abort };
+  const abort = useCallback(() => {
+    if (!jobId) return;
+    deleteJob(jobId).catch((e) => {
+      const status = (e as { status?: number } | null)?.status;
+      if (status === 409 || status === 404) return;
+      setError(humanizeError(e));
+    });
+  }, [jobId]);
+
+  return useMemo(
+    () => deriveReturn(entry, error, regenerate, abort),
+    [entry, error, regenerate, abort],
+  );
+}
+
+function deriveReturn(
+  entry: JobCacheEntry,
+  error: string | null,
+  regenerate: UseCompositeGenerationReturn['regenerate'],
+  abort: UseCompositeGenerationReturn['abort'],
+): UseCompositeGenerationReturn {
+  const snap = entry.snapshot;
+  if (!snap) {
+    return {
+      variants: [],
+      prevSelected: null,
+      batchId: null,
+      isLoading: entry.isLoading,
+      error: error ?? entry.error,
+      regenerate,
+      abort,
+    };
+  }
+
+  const variants: CompositionVariant[] = snap.variants.map((v, i) => ({
+    seed: typeof v.seed === 'number' ? v.seed : i,
+    id: typeof v.image_id === 'string' ? v.image_id : `c${i}`,
+    imageId: typeof v.image_id === 'string'
+      ? v.image_id
+      : (typeof v.path === 'string' ? imageIdFromPath(v.path) : null),
+    url: typeof v.url === 'string' ? v.url : undefined,
+    path: typeof v.path === 'string' ? v.path : undefined,
+    placeholder: false,
+  }));
+
+  const prevSelected: CompositionVariant | null = snap.prev_selected_image_id
+    ? {
+        seed: -1,
+        id: `prev-${snap.prev_selected_image_id}`,
+        imageId: snap.prev_selected_image_id,
+        placeholder: false,
+        isPrev: true,
+      }
+    : null;
+
+  const isLoading =
+    entry.isLoading ||
+    snap.state === 'pending' ||
+    snap.state === 'streaming';
+
+  return {
+    variants,
+    prevSelected,
+    batchId: snap.batch_id,
+    isLoading,
+    error: error ?? entry.error ?? snap.error,
+    regenerate,
+    abort,
+  };
 }

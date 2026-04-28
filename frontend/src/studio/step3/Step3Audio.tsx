@@ -547,11 +547,12 @@ function RenderBooth({ state }: RenderBoothProps) {
   const valid = computeValidity(state);
   const allValid = isAllValid(valid);
 
+  // v9: read from schema-side selected snapshots.
   const composite = state.composition && isCompositionReady(state.composition)
-    ? state.composition.generation.state === 'ready' ? state.composition.generation.selected : null
+    ? state.composition.selected
     : null;
   const host = state.host && isHostReady(state.host)
-    ? state.host.generation.state === 'ready' ? state.host.generation.selected : null
+    ? state.host.selected
     : null;
   const compositeUrl = composite?.url ?? undefined;
   const hostUrl = host?.url ?? undefined;

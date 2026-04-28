@@ -105,33 +105,46 @@ export const HostVariantSchema = z.object({
 export type HostVariant = z.infer<typeof HostVariantSchema>;
 
 /**
- * Generation lifecycle. Discriminator `state` rules out invalid combos
- * (e.g. you can't have a `selected` variant in `idle`, can't be
- * `streaming` and have a `failed.error` simultaneously).
+ * Generation lifecycle (v9 — streaming-resume Phase B).
+ *
+ * The frontend treats generation as a thin handle: either nothing is
+ * happening (`idle`) or a server-side job is in flight (`attached`).
+ * Variants, batch_id, prev_selected, errors — all live on the server's
+ * generation_jobs row, not in the wizard state. Hooks resolve
+ * attached(jobId) → snapshot via jobCacheStore (step 14) and SSE.
+ *
+ * v8 used a 4-state discriminator (idle|streaming|ready|failed) that
+ * duplicated the server's authoritative state. v9 drops it: persisted
+ * v8 rows migrate to idle on first load. Ready results from v8 are NOT
+ * lost — they live in studio_hosts (the candidates collection); v2.1's
+ * history view will surface them.
  */
 export const HostGenerationSchema = z.discriminatedUnion('state', [
   z.object({ state: z.literal('idle') }),
-  z.object({
-    state: z.literal('streaming'),
-    batchId: z.string().nullable(),
-    variants: z.array(HostVariantSchema),
-  }),
-  z.object({
-    state: z.literal('ready'),
-    batchId: z.string().nullable(),
-    variants: z.array(HostVariantSchema),
-    selected: HostVariantSchema.nullable(),
-    prevSelected: HostVariantSchema.nullable(),
-  }),
-  z.object({ state: z.literal('failed'), error: z.string() }),
+  z.object({ state: z.literal('attached'), jobId: z.string() }),
 ]);
 export type HostGeneration = z.infer<typeof HostGenerationSchema>;
+
+/** v9: the user's chosen variant. Tracked separately from
+ * `generation` because `attached(jobId)` is the server's truth and
+ * a candidate pick is a UI-side decision. Stores a full snapshot of
+ * the variant (imageId/path/url/seed) so pure functions like
+ * api-mappers can render without consulting the cache — and so the
+ * pick survives even after the cache evicts the job entry. */
+export const HostSelectedSchema = z.object({
+  imageId: z.string(),
+  path: z.string(),
+  url: z.string(),
+  seed: z.number(),
+}).nullable();
+export type HostSelected = z.infer<typeof HostSelectedSchema>;
 
 export const HostSchema = z.object({
   input: HostInputSchema,
   /** 0..1 creativity dial. Shared across modes. */
   temperature: z.number(),
   generation: HostGenerationSchema,
+  selected: HostSelectedSchema,
 });
 export type Host = z.infer<typeof HostSchema>;
 
@@ -209,27 +222,28 @@ export const CompositionVariantSchema = z.object({
 });
 export type CompositionVariant = z.infer<typeof CompositionVariantSchema>;
 
+/** v9 — same idle | attached(jobId) shape as HostGeneration. The
+ * generation_jobs row carries kind='composite' so it dispatches to the
+ * right backend handler; the frontend doesn't need to differentiate. */
 export const CompositionGenerationSchema = z.discriminatedUnion('state', [
   z.object({ state: z.literal('idle') }),
-  z.object({
-    state: z.literal('streaming'),
-    batchId: z.string().nullable(),
-    variants: z.array(CompositionVariantSchema),
-  }),
-  z.object({
-    state: z.literal('ready'),
-    batchId: z.string().nullable(),
-    variants: z.array(CompositionVariantSchema),
-    selected: CompositionVariantSchema.nullable(),
-    prevSelected: CompositionVariantSchema.nullable(),
-  }),
-  z.object({ state: z.literal('failed'), error: z.string() }),
+  z.object({ state: z.literal('attached'), jobId: z.string() }),
 ]);
 export type CompositionGeneration = z.infer<typeof CompositionGenerationSchema>;
+
+/** v9: same pattern as HostSelectedSchema. */
+export const CompositionSelectedSchema = z.object({
+  imageId: z.string(),
+  path: z.string(),
+  url: z.string(),
+  seed: z.number(),
+}).nullable();
+export type CompositionSelected = z.infer<typeof CompositionSelectedSchema>;
 
 export const CompositionSchema = z.object({
   settings: CompositionSettingsSchema,
   generation: CompositionGenerationSchema,
+  selected: CompositionSelectedSchema,
 });
 export type Composition = z.infer<typeof CompositionSchema>;
 
@@ -374,6 +388,7 @@ const HostSerializedSchema = z.object({
   input: HostInputSerializedSchema,
   temperature: z.number(),
   generation: HostGenerationSchema,
+  selected: HostSelectedSchema,
 });
 
 const ProductSourceSerializedSchema = z.discriminatedUnion('kind', [
@@ -454,6 +469,7 @@ export const INITIAL_HOST: Host = {
   },
   temperature: 0.7,
   generation: { state: 'idle' },
+  selected: null,
 };
 
 export const INITIAL_BACKGROUND: Background = {
@@ -470,6 +486,7 @@ export const INITIAL_COMPOSITION: Composition = {
     rembg: true,
   },
   generation: { state: 'idle' },
+  selected: null,
 };
 
 export const INITIAL_VOICE: Voice = {
@@ -498,12 +515,18 @@ export const INITIAL_WIZARD_STATE: WizardState = {
 // Type guards (small, frequently-needed predicates)
 // ────────────────────────────────────────────────────────────────────
 
-export function isHostReady(host: Host): host is Host & { generation: { state: 'ready'; selected: HostVariant } } {
-  return host.generation.state === 'ready' && host.generation.selected !== null;
+// v9: readiness = a candidate has been picked. The picked variant's
+// jobId / variants live on jobCacheStore; the schema only carries
+// `selected.imageId` as the user's intent. This deliberately doesn't
+// gate on generation.state because the user's pick on a 'ready' job
+// survives a re-roll attempt, a Last-Event-ID drop, etc. — UI-side
+// truth.
+export function isHostReady(host: Host): host is Host & { selected: { imageId: string } } {
+  return host.selected !== null;
 }
 
-export function isCompositionReady(comp: Composition): comp is Composition & { generation: { state: 'ready'; selected: CompositionVariant } } {
-  return comp.generation.state === 'ready' && comp.generation.selected !== null;
+export function isCompositionReady(comp: Composition): comp is Composition & { selected: { imageId: string } } {
+  return comp.selected !== null;
 }
 
 export function isBackgroundReady(bg: Background): boolean {

@@ -91,7 +91,11 @@ export default function Step2Composite({ state }: Step2CompositeProps) {
   const regenerate = gen.regenerate;
   const productUpload = useUploadReferenceImage(uploadReferenceImage);
   const backgroundUpload = useUploadReferenceImage(uploadBackgroundImage);
-  const attemptsRef = useRef<number>(composition.generation.state === 'ready' ? 1 : 0);
+  // v9: 'attached' (in-flight or finished server-side) counts as a
+  // prior attempt; 'idle' = user hasn't started.
+  const attemptsRef = useRef<number>(
+    composition.generation.state === 'attached' ? 1 : 0,
+  );
   const [pickerFor, setPickerFor] = useState<'products' | 'bg' | null>(null);
 
   // Form-shaped projection. Memo keys on the three sub-slice refs
@@ -184,14 +188,40 @@ export default function Step2Composite({ state }: Step2CompositeProps) {
           form.setValue('background', uploadedBg, { shouldDirty: true });
         }
 
-        const apiInput = toCompositeRequest({
-          host: state.host,
-          products: uploadedProducts,
-          background: uploadedBg,
-          composition: { ...composition, settings: values.settings },
-          imageQuality,
-        });
-        await regenerate(apiInput, seeds, { rembg: values.settings.rembg });
+        // Build the v9 CompositeJobInput directly from the typed slices —
+        // simpler than threading through the legacy toCompositeRequest
+        // shape (which still emits the old /api/composite/generate body
+        // for the deprecated endpoint).
+        const productPaths: string[] = [];
+        for (const p of uploadedProducts) {
+          if (p.source.kind === 'uploaded') productPaths.push(p.source.asset.path);
+          else if (p.source.kind === 'url') productPaths.push(p.source.url);
+        }
+        const bgKind = uploadedBg.kind;
+        const jobInput: import('../../api/jobs').CompositeJobInput = {
+          hostImagePath: state.host.selected?.path ?? '',
+          productImagePaths: productPaths,
+          backgroundType:
+            bgKind === 'preset' || bgKind === 'upload' || bgKind === 'prompt'
+              ? bgKind
+              : 'prompt',
+          backgroundPresetId: bgKind === 'preset' ? uploadedBg.presetId ?? null : null,
+          backgroundPresetLabel: null,
+          backgroundUploadPath:
+            bgKind === 'upload' && uploadedBg.asset && 'path' in uploadedBg.asset
+              ? uploadedBg.asset.path
+              : null,
+          backgroundPrompt: bgKind === 'prompt' ? uploadedBg.prompt : null,
+          direction: values.settings.direction,
+          shot: values.settings.shot,
+          angle: values.settings.angle,
+          n: 4,
+          rembg: values.settings.rembg,
+          temperature: values.settings.temperature,
+          seeds,
+          imageSize: imageQuality,
+        };
+        await regenerate(jobInput, seeds, { rembg: values.settings.rembg });
       }),
     [
       form,
@@ -205,29 +235,12 @@ export default function Step2Composite({ state }: Step2CompositeProps) {
   );
 
   const selectComposite = (v: CompositionVariant) => {
-    if (!v.url || !v.path || !v.imageId) return;
+    if (!v.imageId || !v.path || !v.url) return;
     const imageId = v.imageId;
-    setComposition((prev) => {
-      if (prev.generation.state !== 'ready' && prev.generation.state !== 'streaming') return prev;
-      const variants = prev.generation.state === 'ready' ? prev.generation.variants : [];
-      const prevSelected = prev.generation.state === 'ready' ? prev.generation.prevSelected : null;
-      const selected: SchemaCompositionVariant = {
-        seed: v.seed,
-        imageId,
-        url: v.url as string,
-        path: v.path as string,
-      };
-      return {
-        ...prev,
-        generation: {
-          state: 'ready',
-          batchId: prev.generation.state === 'ready' ? prev.generation.batchId : null,
-          variants,
-          selected,
-          prevSelected,
-        },
-      };
-    });
+    setComposition((prev) => ({
+      ...prev,
+      selected: { imageId, path: v.path!, url: v.url!, seed: v.seed },
+    }));
     selectCompositeApi(imageId).catch((e) => {
       console.warn('composite select sync failed (non-fatal):', e);
     });
@@ -248,10 +261,7 @@ export default function Step2Composite({ state }: Step2CompositeProps) {
     setPickerFor(null);
   };
 
-  const selectedImageId =
-    composition.generation.state === 'ready' && composition.generation.selected
-      ? composition.generation.selected.imageId
-      : null;
+  const selectedImageId = composition.selected?.imageId ?? null;
 
   const addEmptyProduct = () => {
     const next: Products = [
@@ -352,8 +362,7 @@ function CompositeCanvas({
   onRegenerate,
   canRegenerate,
 }: CompositeCanvasProps) {
-  const selected =
-    composition.generation.state === 'ready' ? composition.generation.selected : null;
+  const selected = composition.selected;
   const hasSelection = selected !== null;
   const empty = !isLoading && variants.length === 0 && !hasSelection;
   const heroUrl = selected ? selected.url : null;

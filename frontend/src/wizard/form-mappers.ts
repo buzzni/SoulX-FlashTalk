@@ -43,11 +43,17 @@ import { z } from 'zod';
  * arbitrary values, so the LocalAsset.file (File handle) can sit in
  * form state during a session — only persistence layers strip it.
  */
-export const HostFormValuesSchema = HostSchema.omit({ generation: true });
-export type HostFormValues = Omit<Host, 'generation'>;
+// v9: also omit `selected` — it's the user's pick on a generated
+// candidate, not a form-edited field. handleSelectVariant writes it
+// directly via setHost.
+export const HostFormValuesSchema = HostSchema.omit({
+  generation: true,
+  selected: true,
+});
+export type HostFormValues = Omit<Host, 'generation' | 'selected'>;
 
 export function hostSliceToFormValues(host: Host): HostFormValues {
-  const { generation: _generation, ...rest } = host;
+  const { generation: _g, selected: _s, ...rest } = host;
   return rest;
 }
 

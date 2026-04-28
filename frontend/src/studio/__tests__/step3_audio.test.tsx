@@ -91,15 +91,12 @@ import {
   type Voice,
 } from '../../wizard/schema';
 
+// v9 (streaming-resume Phase B): generation is {idle | attached(jobId)}.
+// 'attached' is the closest analogue to v8's "ready with selected" for
+// the purpose of these UI tests — a job has been started server-side.
 const READY_HOST = {
   ...INITIAL_HOST,
-  generation: {
-    state: 'ready' as const,
-    batchId: 'b1',
-    variants: [{ seed: 1, imageId: 'h1', url: '/u/h1.png', path: '/p/h1.png' }],
-    selected: { seed: 1, imageId: 'h1', url: '/u/h1.png', path: '/p/h1.png' },
-    prevSelected: null,
-  },
+  generation: { state: 'attached' as const, jobId: 'job-h1' },
 };
 
 function seedStore(voiceOverride: Voice = INITIAL_VOICE) {

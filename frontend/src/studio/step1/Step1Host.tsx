@@ -89,7 +89,11 @@ export default function Step1Host({ state, update }: Step1HostProps) {
 
   // Counts every "쇼호스트 만들기" press (incl. 다시 만들기). Attempt 0
   // uses DEFAULT_SEEDS; attempt 1+ uses fresh randoms.
-  const attemptsRef = useRef<number>(host.generation.state === 'ready' ? 1 : 0);
+  // v9: 'attached' (a job in flight or already finished on the server)
+  // counts as a prior attempt; 'idle' means the user hasn't started.
+  const attemptsRef = useRef<number>(
+    host.generation.state === 'attached' ? 1 : 0,
+  );
 
   const form = useForm<HostFormValues>({
     resolver: zodResolver(HostFormValuesSchema),
@@ -139,45 +143,34 @@ export default function Step1Host({ state, update }: Step1HostProps) {
           formValuesToHostSlice(values, host),
           imageQuality,
         );
-        await regenerate(apiInput, attempt === 0 ? undefined : seeds);
+        // The mapper still emits the snake_case UI-side shape that the
+        // legacy /api/host/generate/stream endpoint expected. The new
+        // useHostGeneration hook accepts that shape and re-keys to the
+        // /api/jobs body internally — see toHostJobInput in the hook.
+        await regenerate(apiInput as unknown as Parameters<typeof regenerate>[0], attempt === 0 ? undefined : seeds);
       }),
     [form, host, imageQuality, regenerate],
   );
 
   const handleSelectVariant = (v: HostVariant) => {
-    if (!v.url || !v.path || !v.imageId) return;
-    setHost((prev) => {
-      if (prev.generation.state !== 'ready' && prev.generation.state !== 'streaming') return prev;
-      const variants = prev.generation.state === 'ready' ? prev.generation.variants : [];
-      const prevSelected = prev.generation.state === 'ready' ? prev.generation.prevSelected : null;
-      return {
-        ...prev,
-        generation: {
-          state: 'ready',
-          batchId: prev.generation.state === 'ready' ? prev.generation.batchId : null,
-          variants,
-          selected: {
-            seed: v.seed,
-            imageId: v.imageId as string,
-            url: v.url as string,
-            path: v.path as string,
-          },
-          prevSelected,
-        },
-      };
-    });
-    selectHost(v.imageId).catch((e) => {
+    if (!v.imageId || !v.path || !v.url) return;
+    const imageId = v.imageId;
+    // v9: persist a snapshot of the chosen variant. Pure functions
+    // like api-mappers + api/video read host.selected directly without
+    // the jobCacheStore.
+    setHost((prev) => ({
+      ...prev,
+      selected: { imageId, path: v.path!, url: v.url!, seed: v.seed },
+    }));
+    selectHost(imageId).catch((e) => {
       console.warn('host select sync failed (non-fatal):', e);
     });
   };
 
   const variants = gen.variants;
   const prevSelected = gen.prevSelected;
-  const selectedImageId =
-    host.generation.state === 'ready' && host.generation.selected
-      ? host.generation.selected.imageId
-      : null;
-  const generated = host.generation.state === 'ready' && host.generation.selected !== null;
+  const selectedImageId = host.selected?.imageId ?? null;
+  const generated = host.selected !== null;
 
   return (
     <FormProvider {...form}>

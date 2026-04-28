@@ -121,7 +121,7 @@ function PickableTile({
         isPrev && !selected && 'border-dashed border-rule-strong',
       )}
       onClick={() => onSelect(variant)}
-      style={variant._gradient && !variant.url ? { background: variant._gradient } : undefined}
+      style={undefined}
     >
       <div
         className="swatch relative overflow-hidden aspect-[9/16]"

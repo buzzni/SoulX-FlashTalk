@@ -27,80 +27,38 @@ function roundtrip(state) {
 }
 
 describe('wizardStore persistence', () => {
-  it('preserves finished host variants across reload (schema ready state)', () => {
-    // Phase 2b: host is schema-typed. Variants live on
-    // host.generation.variants when state === 'ready', not as a flat array.
-    const variants = [
-      { seed: 10, imageId: 'host_a', url: '/api/files/host_a.png', path: '/srv/host_a.png' },
-      { seed: 42, imageId: 'host_b', url: '/api/files/host_b.png', path: '/srv/host_b.png' },
-      { seed: 77, imageId: 'host_c', url: '/api/files/host_c.png', path: '/srv/host_c.png' },
-      { seed: 128, imageId: 'host_d', url: '/api/files/host_d.png', path: '/srv/host_d.png' },
-    ];
+  it('preserves attached(jobId) host generation across reload (v9)', () => {
+    // v9 (streaming-resume Phase B): host.generation collapsed to
+    // {idle | attached(jobId)}. The jobId is the server-side handle —
+    // reload survives because the snapshot endpoint resolves it back to
+    // current state. Variants/selected/batchId no longer live on the
+    // schema (eng-spec §7); they're sourced via jobCacheStore once
+    // step 17 wires it.
     const state = {
       ...INITIAL_WIZARD_STATE,
       host: {
         ...INITIAL_WIZARD_STATE.host,
-        generation: {
-          state: 'ready',
-          batchId: null,
-          variants,
-          selected: variants[1],
-          prevSelected: null,
-        },
+        generation: { state: 'attached', jobId: 'job-h1' },
       },
     };
     const restored = roundtrip(state);
-    expect(restored.host.generation.state).toBe('ready');
-    expect(restored.host.generation.variants).toHaveLength(4);
-    expect(restored.host.generation.variants.map((v) => v.seed)).toEqual([10, 42, 77, 128]);
-    expect(restored.host.generation.selected.seed).toBe(42);
+    expect(restored.host.generation.state).toBe('attached');
+    expect(restored.host.generation.jobId).toBe('job-h1');
   });
 
-  it('collapses streaming/failed host generation to idle on persist', () => {
-    // Phase 2b: mid-stream state cannot survive a reload — the SSE
-    // stream is gone. persistHost transitions streaming/failed → idle.
-    const state = {
-      ...INITIAL_WIZARD_STATE,
-      host: {
-        ...INITIAL_WIZARD_STATE.host,
-        generation: { state: 'streaming', batchId: null, variants: [] },
-      },
-    };
-    expect(roundtrip(state).host.generation.state).toBe('idle');
-
-    const failed = {
-      ...INITIAL_WIZARD_STATE,
-      host: {
-        ...INITIAL_WIZARD_STATE.host,
-        generation: { state: 'failed', error: 'oops' },
-      },
-    };
-    expect(roundtrip(failed).host.generation.state).toBe('idle');
-  });
-
-  it('preserves finished composition variants (Step 2) symmetrically', () => {
-    // Phase 2c.3: composition is schema-typed (settings + generation).
-    const variants = [
-      { seed: 10, imageId: 'c_a', url: '/api/files/c_a.png', path: '/srv/c_a.png' },
-      { seed: 42, imageId: 'c_b', url: '/api/files/c_b.png', path: '/srv/c_b.png' },
-    ];
+  it('preserves attached(jobId) composition generation across reload (v9)', () => {
+    // Same shape as the host case above — composition.generation
+    // collapsed to {idle | attached(jobId)} in v9.
     const state = {
       ...INITIAL_WIZARD_STATE,
       composition: {
         ...INITIAL_WIZARD_STATE.composition,
-        generation: {
-          state: 'ready',
-          batchId: null,
-          variants,
-          selected: variants[0],
-          prevSelected: null,
-        },
+        generation: { state: 'attached', jobId: 'job-c1' },
       },
     };
     const restored = roundtrip(state);
-    expect(restored.composition.generation.state).toBe('ready');
-    expect(restored.composition.generation.variants).toHaveLength(2);
-    expect(restored.composition.generation.variants[0].path).toBe('/srv/c_a.png');
+    expect(restored.composition.generation.state).toBe('attached');
+    expect(restored.composition.generation.jobId).toBe('job-c1');
   });
 
   it('preserves image-mode host face/outfit ServerAsset refs across reload', () => {

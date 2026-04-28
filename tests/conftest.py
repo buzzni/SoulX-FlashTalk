@@ -44,7 +44,8 @@ def _bypass_studio_auth(monkeypatch, request):
         return
     # Repo tests do their own DB setup against per-worker test DBs.
     if mod_name in ("test_studio_host_repo", "test_studio_saved_host_repo",
-                    "test_studio_result_repo",
+                    "test_studio_result_repo", "test_studio_jobs_repo",
+                    "test_job_runner",
                     "test_db_connection", "test_user_repo",
                     "test_studio_006_add_subscriptions", "test_storage_local",
                     "test_studio_007_local_import"):
@@ -61,7 +62,7 @@ def _bypass_studio_auth(monkeypatch, request):
     pre = MongoClient("mongodb://localhost:27017", serverSelectionTimeoutMS=2000)
     test_db = pre[_test_db_name()]
     for coll in test_db.list_collection_names():
-        if coll.startswith("studio_") or coll == "users":
+        if coll.startswith("studio_") or coll in ("users", "generation_jobs"):
             test_db[coll].drop()
     pre.close()
 

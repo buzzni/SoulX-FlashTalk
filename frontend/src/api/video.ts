@@ -47,16 +47,10 @@ export async function generateVideo(
   // host_image_path here is the FINAL composite frame (Step 2 selection) — that's
   // the single frame FlashTalk animates. The Step 1 host-only image is not sent.
   const body = new FormData();
-  // Selected path lives on `generation.selected` for both host and
-  // composition when state === 'ready'.
-  const hostSelectedPath =
-    state.host?.generation?.state === 'ready'
-      ? state.host.generation.selected?.path ?? null
-      : null;
-  const compositeSelectedPath =
-    state.composition?.generation?.state === 'ready'
-      ? state.composition.generation.selected?.path ?? null
-      : null;
+  // v9: selected path comes from the schema's host.selected /
+  // composition.selected snapshot.
+  const hostSelectedPath = state.host?.selected?.path ?? null;
+  const compositeSelectedPath = state.composition?.selected?.path ?? null;
   const composite = compositeSelectedPath || hostSelectedPath;
   if (composite) body.append('host_image_path', composite);
   body.append('audio_path', audio.audio_path);
@@ -135,8 +129,8 @@ function hostProvenance(h: unknown): {
       outfitText: '', faceStrength: null, outfitStrength: null, temperature: null,
     };
   }
-  const selected =
-    host.generation.state === 'ready' ? host.generation.selected : null;
+  // v9: read from host.selected snapshot.
+  const selected = host.selected;
   const text = host.input.kind === 'text' ? host.input : null;
   const image = host.input.kind === 'image' ? host.input : null;
   return {
@@ -172,8 +166,8 @@ function compositionProvenance(c: unknown): {
       direction: '', shot: null, angle: null, temperature: null,
     };
   }
-  const selected =
-    comp.generation.state === 'ready' ? comp.generation.selected : null;
+  // v9: read from composition.selected snapshot.
+  const selected = comp.selected;
   return {
     selectedSeed: selected?.seed ?? null,
     selectedPath: selected?.path ?? null,

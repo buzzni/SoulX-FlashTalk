@@ -209,3 +209,76 @@ Deferred work captured during plan reviews. Each entry includes context for futu
 **Completed:** feat/step2-rhf (2026-04-27)
 
 `Step2Composite.tsx` is now a `FormProvider` container with `useForm({resolver: zodResolver(Step2FormValuesSchema), mode:'onBlur'})`. The form spans three store slices — `products`, `background`, `composition.settings`. The container subscribes to `composition.settings` (NOT the full `composition`) via a narrow zustand selector so SSE candidate events during composite streaming can't trigger `form.reset` and wipe in-progress edits. CRITICAL bug caught during /simplify pre-landing review (formSlice memo originally depended on the full composition); fixed and committed with a Playwright regression guard (`step2-rhf.spec.ts` "typed direction survives a simulated composition.generation mutation"). `BackgroundPicker` swaps the 4-way `background.kind` tagged union via `setValue`, `ProductList` uses `useFieldArray` for drag/add/remove with per-row source-kind swaps via `update(idx, ...)`, and `CompositionControls` uses `Controller` for shot/angle/temperature plus `register` for the direction textarea (with merged-ref pattern to keep the N번 caret-insert chip working). Submit runs through `form.handleSubmit` and parallelizes product + background uploads via `Promise.all`, then reuses `toCompositeRequest` from `wizard/api-mappers.ts`. `onChange` writes via a single `updateState` call (atomic 3-slice batch — one render, one selector run per subscriber). Dropped dead surface: `update?` prop, `Step2Slice`/`step2SliceToFormValues`/`Step2WriteTargets`/`formValuesToStep2WriteTargets`, `_props: ProductListProps`. Reused: `uploadFileFromAsset` + `localAssetFromUploadFile` (upload-tile-bridge), `isProductReady` (schema), `productPreviewUrl` (now exported from ProductList for CompositionControls). Final test counts: 216 → 225 vitest (+9 new api-mapper tests, +2 schema tests, -4 stale step2 mapper tests), 3/3 step2-rhf e2e PASS (preset→prompt swap, prompt→preset reverse, streaming-during-typing regression).
+
+---
+
+## streaming-resume Phase D follow-ups
+
+**What**: Phase A-C of the streaming-resume feature (RFC #20, eng-spec
+docs/plans/streaming-resume-eng-spec.md) shipped on feat/generation-jobs-phase-a
+in 24 commits across two days. Phase D tail items deferred:
+
+1. **E2E browser tests** (3 scenarios — eng-spec §9):
+   - `streaming-resume-reload.spec.ts`: start host generation → reload mid-stream →
+     verify variants reappear from snapshot + SSE drain.
+   - `streaming-resume-cross-tab.spec.ts`: same job in two tabs, both render
+     variants in lockstep.
+   - `streaming-resume-cancel-race.spec.ts`: user cancels just as a variant
+     lands; assert no ghost variant in studio_hosts.
+
+2. **Frontend polish** (eng-spec design-spec §2-3):
+   - TopBar pill: 220ms scale-in transition, conic-gradient ring spinner,
+     pulsing red dot vs grey, ETA sub-text. Current `ActiveJobsIndicator` is
+     a minimal pill (data-correct, visual-minimal).
+   - Multi-job dropdown panel: list of active jobs, [열기]/[취소]/[재시도]/[숨기기]
+     actions, focus on first [열기] when opened.
+   - Re-roll confirm dialog (design-spec §3.1): warn before discarding an
+     in-flight stream.
+   - Cancel undo toast (design-spec §3.2): 5s window to revert via PATCH.
+
+3. **a11y** (eng-spec design-spec §6):
+   - `aria-live="polite"` region on the variant grid for screen readers.
+   - Radiogroup keyboard navigation for variant tile selection (Tab into
+     grid → Arrow keys move, Enter selects).
+   - sr-only labels on the TopBar pill (color-only signaling fails WCAG
+     1.4.1).
+
+4. **Dead-code cleanup**:
+   - Delete `streamHost` / `streamComposite` / `parseSSEStream` from
+     `frontend/src/api/host.ts`, `composite.ts` and the legacy SSE tests
+     (`api_abort.test.js`, `step2_composite.test.jsx` mock paths). They
+     became dead in Phase C when `useHost/CompositeGeneration` swapped
+     to `/api/jobs`. Left in place to keep step 25-26 commits small.
+   - Audit `wizard/normalizers.ts` for `migrateHostVariants` /
+     `migrateCompositionVariants` / internal `imageIdFromPath` — also
+     dead since v9 schema dropped `variants`.
+
+5. **Backend follow-ups**:
+   - Heartbeat sweep observability: today the JobRunner sweep logs a
+     warning per stuck job. Add a metric so ops can alert on sweep
+     volume (sustained "5 jobs reaped per hour" → upstream worker hang).
+   - TTL archive: eng-spec §7 calls for `generation_jobs` rows in a
+     terminal state to archive after 7 days. Currently they accumulate.
+     Cron job + `generation_jobs_archive` collection.
+
+6. **v2.1 capabilities** (RFC §11 — separate PR scope):
+   - Redis pubsub to support multi-worker (current single-process
+     fail-fast is the blocker on horizontal scaling).
+   - HistoryView: `GET /api/jobs?kind=host&state=ready` + a thumbnail
+     grid in a dedicated route, surfacing the candidates collection
+     that v9's migrate drops on upgrade.
+   - Cross-tab BroadcastChannel coordination so two open tabs share
+     job state without re-fetching.
+
+**Effort**: E2E ~1 day CC, polish ~1 day CC, a11y ~half-day, cleanup
+~half-day, backend follow-ups ~1 day each, v2.1 multi-week.
+
+**Priority**: E2E P1 (regression safety on a feature this load-bearing).
+Polish + a11y P2. Cleanup P3. Backend follow-ups P2 once first ops
+incident hits. v2.1 P3 (waiting on actual user need).
+
+**Context**: streaming-resume is the bigger refactor that turned host
++ composite generation into first-class server-side entities. RFC #20
++ Phase A (12 backend commits) + Phase B (frontend swap, 8 commits)
++ Phase C (cutover, 1 commit) all landed. Phase D's tail = the polish
+that makes it feel finished.

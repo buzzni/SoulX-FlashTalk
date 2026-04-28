@@ -26,18 +26,11 @@ export interface WizardValidity {
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export function computeValidity(state: any): WizardValidity {
   const v: WizardValidity = { 1: false, 2: false, 3: false };
-  // Step 1 is satisfied iff a candidate has been picked
-  // (generation.state === 'ready' && selected !== null).
-  v[1] =
-    state?.host?.generation?.state === 'ready' &&
-    state?.host?.generation?.selected != null;
-  // Step 2 done iff a composite has been picked.
-  v[2] =
-    v[1] &&
-    state?.composition?.generation?.state === 'ready' &&
-    state?.composition?.generation?.selected != null;
-  // `isVoiceReady` covers all three source modes — tts/clone need a
-  // generated audio + voice_id; upload needs a server-side audio asset.
+  // v9 (streaming-resume Phase B): host.selected and composition.selected
+  // are the user-side picks. Both gate step progression — having an
+  // attached job alone isn't enough; the user must commit a candidate.
+  v[1] = state?.host?.selected != null;
+  v[2] = v[1] && state?.composition?.selected != null;
   const voice = state?.voice as Voice | undefined;
   v[3] =
     v[2] &&

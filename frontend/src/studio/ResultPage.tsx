@@ -187,13 +187,20 @@ export default function ResultPage() {
                 extraPrompt: '',
               },
         temperature: num(metaHost.temperature, 0.7),
-        generation: {
-          state: 'ready',
-          batchId: null,
-          variants: [variant],
-          selected: variant,
-          prevSelected: null,
-        },
+        generation: { state: 'idle' },
+        // v9: result manifest carries the selected path/url/seed; rebuild
+        // host.selected so a re-entry into the wizard from the result
+        // page restores the user's pick. The job itself isn't resumed
+        // (it's already terminal); the user can re-roll if they want
+        // fresh candidates.
+        selected: variant
+          ? {
+              imageId: variant.imageId,
+              path: variant.path,
+              url: variant.url,
+              seed: variant.seed,
+            }
+          : null,
       };
     }
 
@@ -252,13 +259,15 @@ export default function ResultPage() {
           temperature: num(metaComposition.temperature, 0.7),
           rembg: true,
         },
-        generation: {
-          state: 'ready',
-          batchId: null,
-          variants: [compVariant],
-          selected: compVariant,
-          prevSelected: null,
-        },
+        generation: { state: 'idle' },
+        selected: compVariant
+          ? {
+              imageId: compVariant.imageId,
+              path: compVariant.path,
+              url: compVariant.url,
+              seed: compVariant.seed,
+            }
+          : null,
       };
     }
 
