@@ -18,8 +18,8 @@ import { Spinner } from '../components/spinner';
 import { EmptyState } from '../components/empty-state';
 import { Sparkline } from '../components/sparkline';
 import {
-  formatDuration,
-  formatRelativeDateTime,
+  formatCompactDate,
+  outputsPathToUrl,
   videoTitle,
 } from '../lib/format';
 import { startNewVideo } from '../lib/wizardNav';
@@ -30,7 +30,9 @@ interface HistoryItem {
   task_id: string;
   type?: 'generate' | 'conversation' | null;
   status?: 'completed' | 'error' | 'cancelled' | null;
+  public_error?: string | null;
   timestamp?: string | null;
+  host_image?: string | null;
   output_path?: string | null;
   video_url?: string;
   generation_time?: number | null;
@@ -45,7 +47,6 @@ export function HomePage() {
   const navigate = useNavigate();
   const user = useSyncExternalStore(subscribe, getUser, getUser);
   const display = user?.display_name || user?.user_id || '';
-  const clock = useClock();
 
   const [history, setHistory] = useState<HistoryItem[] | null>(null);
   const [historyTotal, setHistoryTotal] = useState<number | null>(null);
@@ -104,17 +105,13 @@ export function HomePage() {
       <div className="px-6 md:px-12 pt-12 md:pt-16 pb-16 max-w-[960px] animate-rise">
         {/* Greeting */}
         <div className="mb-9">
-          <div className="text-sm-tight text-muted-foreground mb-2 inline-flex items-center gap-2">
-            <span className="signal-dot" aria-hidden />
-            지금 {clock} · 모든 작업 저장됨
-          </div>
           <h1 className="headline-hero m-0">
             {display ? `${display} 님,` : '안녕하세요,'}
             <br />
             오늘은 어떤 영상 만들어볼까요?
           </h1>
           <p className="m-0 mt-2 text-sm text-ink-2">
-            호스트와 제품을 정하면 3단계로 영상이 완성돼요.
+            쇼호스트와 제품을 정하면 3단계로 영상이 완성돼요.
           </p>
         </div>
 
@@ -132,7 +129,7 @@ export function HomePage() {
             </span>
             <h3 className="headline-card m-0">새 영상 만들기</h3>
             <p className="m-0 mt-1.5 mb-4 text-sm-tight text-white/75 leading-[1.55]">
-              마음에 드는 호스트를 만들고 — 제품·배경을 합성하고 — 목소리·대본까지 한 자리에서.
+              쇼호스트부터 대본까지, 한 번에 완성하세요.
             </p>
             <div className="flex items-center justify-end mt-auto">
               <span className="grid place-items-center w-8 h-8 rounded-full bg-primary text-primary-foreground transition-colors group-hover:bg-[var(--primary-hover)]">
@@ -278,11 +275,15 @@ function Stat({ label, value, unit, trend, trendOk, sparkData, sparkKind, icon }
 }
 
 function RecentRow({ item }: { item: HistoryItem }) {
+  const status = item.status ?? 'completed';
+  const isCompleted = status === 'completed';
+  const isError = status === 'error';
+  const isCancelled = status === 'cancelled';
+
   const videoUrl = item.video_url || `/api/videos/${item.task_id}`;
+  const compositeUrl = outputsPathToUrl(item.host_image);
   const title = videoTitle(item);
-  const ts = formatRelativeDateTime(item.timestamp);
-  const [playSec, setPlaySec] = useState<number | null>(null);
-  const dur = formatDuration(playSec);
+  const ts = formatCompactDate(item.timestamp);
 
   return (
     <Link
@@ -290,40 +291,54 @@ function RecentRow({ item }: { item: HistoryItem }) {
       className="group surface-card p-3.5 grid grid-cols-[80px_1fr] gap-3.5 no-underline text-foreground transition-colors hover:border-rule-strong relative"
     >
       <div className="relative w-20 h-[60px] rounded-md overflow-hidden bg-foreground">
-        <video
-          src={videoUrl}
-          preload="metadata"
-          muted
-          className="block w-full h-full object-cover"
-          onLoadedMetadata={(e) => {
-            const d = e.currentTarget.duration;
-            if (Number.isFinite(d) && d > 0) setPlaySec(d);
-          }}
-        />
-        <span className="absolute inset-0 grid place-items-center bg-foreground/0 group-hover:bg-foreground/30 transition-colors">
-          <Play className="size-4 text-background opacity-0 group-hover:opacity-100 transition-opacity" fill="currentColor" />
-        </span>
+        {isCompleted ? (
+          <video
+            src={videoUrl}
+            poster={compositeUrl ?? undefined}
+            preload="metadata"
+            muted
+            playsInline
+            className="block w-full h-full object-contain"
+          />
+        ) : compositeUrl ? (
+          <img
+            src={compositeUrl}
+            alt=""
+            aria-hidden
+            loading="lazy"
+            className="block w-full h-full object-contain opacity-65"
+          />
+        ) : (
+          <div
+            aria-hidden
+            className="block w-full h-full bg-gradient-to-br from-surface-2 to-bg-sunken opacity-70"
+          />
+        )}
+        {isCompleted && (
+          <span className="absolute inset-0 grid place-items-center bg-foreground/0 group-hover:bg-foreground/30 transition-colors">
+            <Play className="size-4 text-background opacity-0 group-hover:opacity-100 transition-opacity" fill="currentColor" />
+          </span>
+        )}
       </div>
       <div className="flex flex-col gap-1 min-w-0">
         <div className="font-semibold text-sm tracking-tight truncate" title={title}>
           {title}
         </div>
-        <span className="pill-success self-start">완료</span>
+        <span
+          className={cn(
+            'self-start',
+            isCompleted && 'pill-success',
+            isError && 'pill-error',
+            isCancelled && 'pill-muted',
+          )}
+        >
+          {isCompleted ? '완료' : isError ? '실패' : '취소'}
+        </span>
         <div className="text-2xs text-muted-foreground tabular-nums">
-          {ts}{ts && dur !== '—' && ` · ${dur}`}
+          {ts}
         </div>
       </div>
     </Link>
   );
 }
 
-function useClock(): string {
-  const [now, setNow] = useState(() => new Date());
-  useEffect(() => {
-    const id = setInterval(() => setNow(new Date()), 30_000);
-    return () => clearInterval(id);
-  }, []);
-  const hh = String(now.getHours()).padStart(2, '0');
-  const mm = String(now.getMinutes()).padStart(2, '0');
-  return `${hh}:${mm}`;
-}
