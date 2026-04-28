@@ -17,24 +17,6 @@ import type { z } from 'zod';
 
 export const API_BASE: string = (import.meta as { env?: { VITE_API_BASE_URL?: string } }).env?.VITE_API_BASE_URL ?? '';
 
-/**
- * Streaming-resume Phase B step 23 — feature flag for the /api/jobs
- * cutover. Currently a marker: hooks (useHost/CompositeGeneration)
- * already use the new path unconditionally; the legacy SSE endpoints
- * stay live (deprecated headers + Sunset 2026-06-30) for any external
- * caller. Phase C step 25 deletes the legacy endpoints.
- *
- * Defaults true. Set VITE_USE_JOBS_API=false to opt out (the hooks
- * don't yet honor the false branch — that's a deliberate Phase C
- * decision: the cutover is forward-only).
- */
-export const USE_JOBS_API: boolean = (() => {
-  const raw = (import.meta as { env?: { VITE_USE_JOBS_API?: string } })
-    .env?.VITE_USE_JOBS_API;
-  if (raw === undefined) return true;
-  return raw !== 'false' && raw !== '0';
-})();
-
 // ────────────────────────────────────────────────────────────────────
 // E2 — Auth header provider (swapped in when the real authStore lands)
 // ────────────────────────────────────────────────────────────────────
