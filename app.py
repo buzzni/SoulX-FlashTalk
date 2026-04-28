@@ -3159,6 +3159,54 @@ async def stream_job_events(job_id: str, request: Request):
     )
 
 
+@app.delete("/api/jobs/{job_id}", response_model=JobSnapshot)
+async def cancel_job(job_id: str, request: Request):
+    """Cancel an active generation job.
+
+    Conditional update at the data layer: pending|streaming → cancelled
+    (eng-spec §4). The repo's mark_cancelled is owner-scoped and atomic;
+    a 0-row response means either we don't own the row or it's already
+    terminal. We disambiguate with a follow-up read so 404 vs 409 land
+    on the right cases.
+
+    On success the cancelled event is published so any active SSE
+    subscriber's drain loop breaks instead of hanging — eng-spec §3.2
+    treats 'cancelled' as a stream-terminating event type. The cancel
+    is also visible to the worker on its next conditional update
+    (mark_streaming/append_variant/mark_ready return False), which is
+    how cancel-vs-append atomicity is preserved (eng-spec §4).
+    """
+    user = auth_module.get_request_user(request)
+
+    ok = await jobs_repo.mark_cancelled(
+        job_id, owner_user_id=user["user_id"]
+    )
+    if not ok:
+        # Either the row doesn't exist, isn't ours, or is already terminal.
+        # An owner-scoped follow-up read disambiguates without leaking
+        # existence to non-owners (None for both not-found and not-owner).
+        snap = await jobs_repo.get_by_id(user["user_id"], job_id)
+        if snap is None:
+            raise HTTPException(status_code=404, detail="job not found")
+        raise HTTPException(
+            status_code=409,
+            detail=f"job already {snap['state']}",
+        )
+
+    # Wake any SSE subscribers that are mid-drain so they exit cleanly
+    # instead of waiting for an event that will never arrive (eng-spec §3.2
+    # treats 'cancelled' as a terminal event).
+    await jobs_pubsub.publish(job_id, {"type": "cancelled"})
+
+    snap = await jobs_repo.get_by_id(user["user_id"], job_id)
+    if snap is None:
+        # The row was concurrently dropped — extremely rare, but fall back
+        # to a minimal acknowledgement so the client knows the cancel went
+        # through.
+        raise HTTPException(status_code=410, detail="job gone")
+    return snap
+
+
 # ========================================
 # Main
 # ========================================

@@ -643,3 +643,124 @@ def test_sse_snapshot_seq_id_present(client):
     # seq_at_subscribe is 0 since no publishes have happened in this test;
     # the wire id is the literal "0".
     assert frames[0]["id"] == "0"
+
+
+# ── DELETE /api/jobs/:id (step 8) ─────────────────────────────────────
+
+def test_delete_pending_job_returns_cancelled_snapshot(client):
+    tc, uploads = client
+    face = _seed_image(uploads)
+    created = tc.post("/api/jobs", json=_host_payload(face)).json()
+    assert created["state"] == "pending"
+
+    r = tc.delete(f"/api/jobs/{created['id']}")
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["id"] == created["id"]
+    assert body["state"] == "cancelled"
+
+
+def test_delete_streaming_job_succeeds(client):
+    tc, uploads = client
+    face = _seed_image(uploads)
+    created = tc.post("/api/jobs", json=_host_payload(face)).json()
+    _set_db_state(created["id"], state="streaming")
+
+    r = tc.delete(f"/api/jobs/{created['id']}")
+    assert r.status_code == 200
+    assert r.json()["state"] == "cancelled"
+
+
+def test_delete_already_terminal_returns_409(client):
+    tc, uploads = client
+    face = _seed_image(uploads)
+    created = tc.post("/api/jobs", json=_host_payload(face)).json()
+    _set_db_state(created["id"], state="ready", batch_id="b1")
+
+    r = tc.delete(f"/api/jobs/{created['id']}")
+    assert r.status_code == 409
+    assert "already" in r.text.lower()
+
+
+def test_delete_already_cancelled_returns_409(client):
+    """Idempotent cancel is NOT supported — a second cancel is 409.
+    eng-spec §8: DELETE returns 409 (already terminal) on a row that has
+    moved out of {pending, streaming}."""
+    tc, uploads = client
+    face = _seed_image(uploads)
+    created = tc.post("/api/jobs", json=_host_payload(face)).json()
+    assert tc.delete(f"/api/jobs/{created['id']}").status_code == 200
+    r = tc.delete(f"/api/jobs/{created['id']}")
+    assert r.status_code == 409
+
+
+def test_delete_other_user_returns_404(client, monkeypatch):
+    """Owner mismatch must not leak existence — both not-found and
+    not-owner fold into 404."""
+    tc, uploads = client
+    face = _seed_image(uploads)
+    a = tc.post("/api/jobs", json=_host_payload(face)).json()
+
+    other = {
+        "user_id": "otheruser", "display_name": "Other",
+        "role": "member", "is_active": True,
+        "approval_status": "approved",
+        "subscriptions": ["platform", "studio"],
+        "studio_token_version": 0, "hashed_password": "",
+    }
+
+    async def _bypass_other(req, call_next):
+        req.state.user = dict(other)
+        return await call_next(req)
+
+    monkeypatch.setattr("modules.auth.auth_middleware", _bypass_other)
+    r = tc.delete(f"/api/jobs/{a['id']}")
+    assert r.status_code == 404
+
+
+def test_delete_nonexistent_returns_404(client):
+    tc, _ = client
+    r = tc.delete("/api/jobs/00000000-0000-0000-0000-000000000000")
+    assert r.status_code == 404
+
+
+def test_delete_publishes_cancelled_event(client, monkeypatch):
+    """SSE subscribers must be told their stream is over. The endpoint
+    publishes a 'cancelled' event after mark_cancelled succeeds."""
+    tc, uploads = client
+    face = _seed_image(uploads)
+    created = tc.post("/api/jobs", json=_host_payload(face)).json()
+
+    captured: list[tuple[str, dict]] = []
+    real_publish = None
+
+    async def _record(job_id: str, payload: dict) -> None:
+        captured.append((job_id, payload))
+        # Still call the real one so internal seq advances correctly.
+        if real_publish is not None:
+            await real_publish(job_id, payload)
+
+    from modules.jobs_pubsub import jobs_pubsub
+    real_publish = jobs_pubsub.publish
+    monkeypatch.setattr(jobs_pubsub, "publish", _record)
+
+    r = tc.delete(f"/api/jobs/{created['id']}")
+    assert r.status_code == 200
+    types = [evt["type"] for jid, evt in captured if jid == created["id"]]
+    assert "cancelled" in types
+
+
+def test_delete_then_sse_emits_cancelled_state(client):
+    """A subscriber connecting AFTER the delete sees state=cancelled in
+    the snapshot and the stream closes immediately (terminal-state path)."""
+    tc, uploads = client
+    face = _seed_image(uploads)
+    created = tc.post("/api/jobs", json=_host_payload(face)).json()
+    assert tc.delete(f"/api/jobs/{created['id']}").status_code == 200
+
+    r = tc.get(f"/api/jobs/{created['id']}/events")
+    assert r.status_code == 200
+    frames = _parse_sse_frames(r.text)
+    assert len(frames) == 1
+    snap = json.loads(frames[0]["data"])
+    assert snap["state"] == "cancelled"
