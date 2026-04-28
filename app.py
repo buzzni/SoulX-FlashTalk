@@ -30,6 +30,7 @@ from modules.task_queue import task_queue
 from modules.schemas import (
     HistoryResponse,
     JobCreateRequestPayload,
+    JobListResponse,
     JobSnapshot,
     QueueSnapshot,
     ResultManifest,
@@ -3036,6 +3037,37 @@ async def create_job(
             raise HTTPException(status_code=503, detail=str(e))
 
     return job
+
+
+@app.get("/api/jobs", response_model=JobListResponse)
+async def list_jobs(
+    request: Request,
+    kind: Optional[str] = None,
+    state: Optional[str] = None,
+    limit: int = 20,
+    cursor: Optional[str] = None,
+):
+    """Owner-scoped, cursor-paginated list of jobs.
+
+    Sort: created_at desc, _id desc (stable on same-microsecond ties).
+    `cursor` is the previous page's last item id; a stale or wrong-owner
+    cursor folds into a head-of-list reset (the repo silently ignores
+    the cursor rather than 400'ing — paginating clients shouldn't blow
+    up on a server restart that lost their bookmark).
+
+    Response shape: {items: [...], next_cursor: <id> | null}. next_cursor
+    is null when this page is the tail.
+    """
+    user = auth_module.get_request_user(request)
+    try:
+        page = await jobs_repo.list_by_user(
+            user["user_id"],
+            kind=kind, state=state, limit=limit, cursor=cursor,
+        )
+    except ValueError as e:
+        # Invalid kind/state strings — surface to client as 400.
+        raise HTTPException(status_code=400, detail=str(e))
+    return page
 
 
 @app.get("/api/jobs/{job_id}", response_model=JobSnapshot)

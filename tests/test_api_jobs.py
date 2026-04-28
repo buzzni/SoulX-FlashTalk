@@ -764,3 +764,167 @@ def test_delete_then_sse_emits_cancelled_state(client):
     assert len(frames) == 1
     snap = json.loads(frames[0]["data"])
     assert snap["state"] == "cancelled"
+
+
+# ── GET /api/jobs cursor pagination (step 9) ──────────────────────────
+
+def test_list_empty(client):
+    tc, _ = client
+    r = tc.get("/api/jobs")
+    assert r.status_code == 200
+    assert r.json() == {"items": [], "next_cursor": None}
+
+
+def test_list_returns_user_jobs_newest_first(client):
+    tc, uploads = client
+    face = _seed_image(uploads)
+    ids = []
+    for i in range(3):
+        body = _host_payload(face, seeds=[i, i + 1, i + 2, i + 3])
+        ids.append(tc.post("/api/jobs", json=body).json()["id"])
+        # Tiny gap so created_at orders deterministically.
+        import time
+        time.sleep(0.005)
+
+    r = tc.get("/api/jobs")
+    assert r.status_code == 200
+    items = r.json()["items"]
+    assert [it["id"] for it in items] == list(reversed(ids))
+
+
+def test_list_kind_filter(client):
+    tc, uploads = client
+    face = _seed_image(uploads, "face.png")
+    p1 = _seed_image(uploads, "p1.png")
+    h = tc.post("/api/jobs", json=_host_payload(face)).json()
+    c = tc.post("/api/jobs", json=_composite_payload(face, [p1])).json()
+
+    only_host = tc.get("/api/jobs?kind=host").json()
+    assert {it["id"] for it in only_host["items"]} == {h["id"]}
+
+    only_comp = tc.get("/api/jobs?kind=composite").json()
+    assert {it["id"] for it in only_comp["items"]} == {c["id"]}
+
+
+def test_list_state_filter(client):
+    tc, uploads = client
+    face = _seed_image(uploads)
+    a = tc.post("/api/jobs", json=_host_payload(face, seeds=[1])).json()
+    b = tc.post("/api/jobs", json=_host_payload(face, seeds=[2])).json()
+    _set_db_state(a["id"], state="ready", batch_id="b1")
+    # b stays pending.
+
+    only_ready = tc.get("/api/jobs?state=ready").json()
+    assert {it["id"] for it in only_ready["items"]} == {a["id"]}
+
+    only_pending = tc.get("/api/jobs?state=pending").json()
+    assert {it["id"] for it in only_pending["items"]} == {b["id"]}
+
+
+def test_list_pagination(client):
+    tc, uploads = client
+    face = _seed_image(uploads)
+    ids = []
+    for i in range(5):
+        ids.append(tc.post(
+            "/api/jobs", json=_host_payload(face, seeds=[i, i, i, i]),
+        ).json()["id"])
+        import time
+        time.sleep(0.005)
+
+    p1 = tc.get("/api/jobs?limit=2").json()
+    assert len(p1["items"]) == 2
+    assert p1["next_cursor"] is not None
+
+    p2 = tc.get(f"/api/jobs?limit=2&cursor={p1['next_cursor']}").json()
+    assert len(p2["items"]) == 2
+    assert p2["next_cursor"] is not None
+
+    p3 = tc.get(f"/api/jobs?limit=2&cursor={p2['next_cursor']}").json()
+    assert len(p3["items"]) == 1
+    assert p3["next_cursor"] is None
+
+    seen = {it["id"] for p in (p1, p2, p3) for it in p["items"]}
+    assert seen == set(ids)
+
+
+def test_list_owner_scope(client, monkeypatch):
+    """user A's jobs are invisible to user B even when B passes A's
+    cursor (the repo's owner-scoped cursor lookup folds into a head reset
+    for B's view, exposing only B's rows)."""
+    tc, uploads = client
+    face = _seed_image(uploads)
+    a_job = tc.post("/api/jobs", json=_host_payload(face)).json()
+
+    other = {
+        "user_id": "otheruser", "display_name": "Other",
+        "role": "member", "is_active": True,
+        "approval_status": "approved",
+        "subscriptions": ["platform", "studio"],
+        "studio_token_version": 0, "hashed_password": "",
+    }
+
+    async def _bypass_other(req, call_next):
+        req.state.user = dict(other)
+        return await call_next(req)
+
+    monkeypatch.setattr("modules.auth.auth_middleware", _bypass_other)
+    # B's listing is empty, even though A has a job.
+    other_list = tc.get("/api/jobs").json()
+    assert other_list["items"] == []
+    # Even passing A's job_id as cursor (not B's) doesn't leak A's rows —
+    # cursor lookup is owner-scoped, stale cursor folds into head reset.
+    other_with_cursor = tc.get(f"/api/jobs?cursor={a_job['id']}").json()
+    assert other_with_cursor["items"] == []
+
+
+def test_list_invalid_kind_returns_400(client):
+    tc, _ = client
+    r = tc.get("/api/jobs?kind=weird")
+    assert r.status_code == 400
+    assert "kind" in r.text.lower()
+
+
+def test_list_invalid_state_returns_400(client):
+    tc, _ = client
+    r = tc.get("/api/jobs?state=garbage")
+    assert r.status_code == 400
+
+
+def test_list_limit_clamped_by_repo(client):
+    """Very large limits clamp at 50, very small at 1. The endpoint
+    inherits this from the repo — eng-spec §8 default 20, max 50."""
+    tc, uploads = client
+    face = _seed_image(uploads)
+    for i in range(3):
+        tc.post("/api/jobs", json=_host_payload(face, seeds=[i, i, i, i]))
+
+    huge = tc.get("/api/jobs?limit=10000").json()
+    assert len(huge["items"]) == 3  # only 3 exist; cap not stressed
+
+    tiny = tc.get("/api/jobs?limit=0").json()
+    # Repo clamps to 1 minimum.
+    assert len(tiny["items"]) == 1
+
+
+def test_list_includes_cancelled_jobs(client):
+    """Integration check with step 8: a cancelled row appears in listings
+    under state=cancelled, and not under state=pending."""
+    tc, uploads = client
+    face = _seed_image(uploads)
+    j = tc.post("/api/jobs", json=_host_payload(face)).json()
+    assert tc.delete(f"/api/jobs/{j['id']}").status_code == 200
+
+    pending = tc.get("/api/jobs?state=pending").json()
+    assert pending["items"] == []
+
+    cancelled = tc.get("/api/jobs?state=cancelled").json()
+    assert {it["id"] for it in cancelled["items"]} == {j["id"]}
+
+
+def test_list_does_not_leak_input_blob(client):
+    tc, uploads = client
+    face = _seed_image(uploads)
+    tc.post("/api/jobs", json=_host_payload(face))
+    listing = tc.get("/api/jobs").json()
+    assert all("input_blob" not in it for it in listing["items"])

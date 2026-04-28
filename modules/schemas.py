@@ -316,3 +316,11 @@ class JobSnapshot(_ExtraAllowBase):
     created_at: Optional[Any] = None
     updated_at: Optional[Any] = None
     heartbeat_at: Optional[Any] = None
+
+
+class JobListResponse(_ExtraAllowBase):
+    """GET /api/jobs result. next_cursor is the last item's id when more
+    rows exist past the current page; null when the page is the tail."""
+
+    items: list[JobSnapshot] = Field(default_factory=list)
+    next_cursor: Optional[str] = None
