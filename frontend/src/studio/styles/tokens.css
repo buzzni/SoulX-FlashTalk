@@ -1,16 +1,38 @@
 /* ============ HostStudio (wizard) design tokens ============
  *
- * Bridges to the global Korean Productivity system in `index.css`. The wizard's
- * app.css consumes tokens by name (`--bg`, `--accent`, `--r-sm`, …) so we re-
- * expose the new palette under the wizard's vocabulary without touching a
- * single component class.
+ * Bridges the global Korean Productivity palette (index.css) into the wizard
+ * vocabulary that `app.css` already references (`--bg`, `--text-secondary`,
+ * `--r-sm`, …). The aliases below fall into two buckets:
  *
- * Three flattenings vs. the prior file:
- *   1. Radii: `--r-xs/sm/md/lg/xl` collapse to one consistent ladder
- *      (4 / 6 / 6 / 10 / 12) — no mid-radius slop, no graduated chaos.
- *   2. Shadows: 4 tiers map onto the new soft layered drop (hairline + diffuse).
- *   3. Wizard `--accent` = global primary, `--accent-soft` = primary-soft etc.
- *      Aligned with the productivity palette (warm cream + signal blue).
+ *   A) Pure renames of global tokens (e.g. `--bg: var(--background)`,
+ *      `--text: var(--ink)`). Same value, different name — mirrors of the
+ *      global cascade.
+ *
+ *   B) Studio-only aliases that have NO global counterpart:
+ *        --accent-soft, --accent-soft-border, --accent-text,
+ *        --accent-hover, --accent-strong
+ *      These exist *only* inside `.studio-root`. Tailwind utilities like
+ *      `bg-accent-soft` / `text-accent-text` are emitted globally via
+ *      `@theme inline` in index.css, but they only resolve to a real color
+ *      when the rendering context is inside `.studio-root`. Outside studio
+ *      they fall back to transparent. Treat these as studio-private.
+ *
+ * Hard convention (added 2026-04 after the BackgroundPicker incident):
+ *
+ *   - studio scope MAY redefine *values* of global tokens, but MUST NOT
+ *     redefine *names* with different meaning. The previous
+ *     `--accent: var(--primary)` mapped the same name to a different color
+ *     (deep blue vs. global light tint), making `bg-accent` resolve to two
+ *     different colors depending on selector context. That's gone.
+ *
+ *   - new "studio needs deep blue" intent → reference `var(--primary)`
+ *     directly in CSS, or use `bg-primary` / `text-primary` Tailwind
+ *     utilities. Do NOT add a new alias.
+ *
+ *   - eslint.config.js bans `bg-accent` / `text-accent-foreground` /
+ *     `border-accent` inside src/studio/* to keep this from slipping back
+ *     in (the global utility resolves to light tint there, which is
+ *     usually NOT what someone reaching for "accent" intends).
  */
 .studio-root {
   --bg: var(--background);

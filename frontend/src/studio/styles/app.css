@@ -33,7 +33,6 @@
   content: ""; width: 6px; height: 6px; border-radius: 99px;
   background: var(--success);
 }
-.step-pill-label { white-space: nowrap; }
 .skeleton-shimmer {
   background: linear-gradient(90deg, var(--bg-sunken) 0%, var(--bg-subtle) 50%, var(--bg-sunken) 100%);
   background-size: 200% 100%;
@@ -87,57 +86,9 @@
   position: relative;
 }
 
-/* Stepper — pill steps with circular numbered dot */
-.stepper { display: flex; align-items: center; gap: 0; padding: 14px 0 10px; border-bottom: 1px solid var(--border); margin-bottom: 8px; }
-.step-pill {
-  display: flex; align-items: center; gap: 8px; white-space: nowrap;
-  padding: 6px 12px 6px 8px; border-radius: 99px; cursor: pointer;
-  background: transparent; border: none;
-  color: var(--text-tertiary); font-size: 13px; font-weight: 500;
-  transition: color .12s, background .12s;
-}
-.step-pill:hover { color: var(--text); background: var(--bg-sunken); }
-.step-pill:disabled,
-.step-pill[aria-disabled="true"] {
-  cursor: not-allowed;
-}
-.step-pill:disabled:hover,
-.step-pill[aria-disabled="true"]:hover {
-  background: transparent;
-  color: var(--text-tertiary);
-}
-.step-pill .dot {
-  width: 22px; height: 22px;
-  border-radius: 99px;
-  background: transparent;
-  border: 1.5px solid var(--border-strong);
-  display: grid; place-items: center;
-  font-size: 11px; font-weight: 700;
-  color: var(--text-tertiary);
-  transition: all .12s;
-  font-family: var(--font-sans);
-  letter-spacing: -0.01em;
-}
-.step-pill .step-pill-label {
-  font-size: 13px; font-weight: 500; letter-spacing: -0.014em;
-}
-.step-pill.active { color: var(--text); background: var(--accent-soft); }
-.step-pill.active .dot {
-  background: var(--primary); border-color: var(--primary); color: #fff;
-}
-.step-pill.active .step-pill-label { font-weight: 700; }
-.step-pill.done { color: var(--text-secondary); }
-.step-pill.done .dot {
-  background: var(--accent-soft);
-  border-color: var(--primary);
-  color: var(--primary);
-}
-.step-arrow {
-  width: 16px; height: 1px;
-  background: var(--border);
-  margin: 0 4px;
-  align-self: center;
-}
+/* Stepper — `.step-pill` and `.step-arrow` migrated to inline Tailwind
+ * utilities in routes/TopBar.tsx (2026-04). The legacy `.stepper`
+ * wrapper class isn't used anywhere — keeping the rule out for clarity. */
 
 /* Card / section */
 /* Step pages — Pretendard 700 heading + ink-2 caption.

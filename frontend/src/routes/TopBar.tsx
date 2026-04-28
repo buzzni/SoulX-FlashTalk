@@ -2,9 +2,11 @@
  * TopBar — wizard + render header.
  *
  * Brand lockup + Korean step pills (1 / 2 / 3 with circular numbered
- * dots, Korean labels). Visual styling lives in studio/styles/app.css
- * under `.topbar` / `.step-pill`; the brand mark is the shared
- * `<Brand>` component.
+ * dots, Korean labels). The shell (`.topbar`) still lives in
+ * studio/styles/app.css; the per-pill visual is now React-state-driven
+ * Tailwind utilities rather than `.step-pill.active` / `.step-pill.done`
+ * BEM, which makes the active/done/disabled states obvious from the
+ * component instead of from a global stylesheet.
  */
 import { Fragment, type ReactNode } from 'react';
 import { Check } from 'lucide-react';
@@ -52,19 +54,47 @@ export function TopBar({ step, valid, onStepClick, onReset, queueSlot }: TopBarP
                 <Fragment key={s.key}>
                   <button
                     type="button"
-                    className={cn('step-pill', active && 'active', done && 'done')}
                     onClick={() => onStepClick?.(s.key)}
                     title={s.full}
                     aria-current={active ? 'step' : undefined}
                     aria-disabled={disabled || undefined}
                     disabled={disabled}
+                    className={cn(
+                      'flex items-center gap-2 whitespace-nowrap py-1.5 pr-3 pl-2 rounded-full bg-transparent border-0 text-[13px] font-medium transition-colors',
+                      'enabled:hover:text-foreground enabled:hover:bg-secondary',
+                      'disabled:cursor-not-allowed',
+                      active
+                        ? 'text-foreground bg-primary-soft'
+                        : done
+                          ? 'text-ink-2'
+                          : 'text-muted-foreground',
+                    )}
                   >
-                    <span className="dot" aria-hidden>
+                    <span
+                      aria-hidden
+                      className={cn(
+                        'w-[22px] h-[22px] rounded-full grid place-items-center text-[11px] font-bold transition-all border-[1.5px] tracking-tight font-sans',
+                        active
+                          ? 'bg-primary border-primary text-white'
+                          : done
+                            ? 'bg-primary-soft border-primary text-primary'
+                            : 'bg-transparent border-rule-strong text-muted-foreground',
+                      )}
+                    >
                       {done ? <Check className="size-3" /> : s.short}
                     </span>
-                    <span className="step-pill-label">{s.name}</span>
+                    <span
+                      className={cn(
+                        'text-[13px] tracking-tight',
+                        active ? 'font-bold' : 'font-medium',
+                      )}
+                    >
+                      {s.name}
+                    </span>
                   </button>
-                  {i < STEPS.length - 1 && <span className="step-arrow" aria-hidden />}
+                  {i < STEPS.length - 1 && (
+                    <span aria-hidden className="w-4 h-px bg-border mx-1 self-center" />
+                  )}
                 </Fragment>
               );
             })}
