@@ -768,6 +768,23 @@ async def generate_video_task(
 
                 await loop.run_in_executor(None, save_video)
 
+            # Stage 4.5: Korean lip-sync hybrid post-process. SoulX's
+            # chinese-wav2vec2 audio encoder mishandles Korean phonemes
+            # (ㅁ/ㅂ/ㅍ closure, lateral mouth stretching, ㄹ받침). MuseTalk's
+            # Whisper-tiny encoder handles them correctly; we run it as a
+            # post-process to inpaint lip+jaw using Whisper's interpretation
+            # of the same audio. Failure is non-fatal — we keep the SoulX
+            # raw output if the subprocess errors / times out.
+            try:
+                from modules.musetalk_hybrid import apply_hybrid
+
+                def hybrid_step():
+                    return apply_hybrid(output_path, audio_path)
+
+                await loop.run_in_executor(None, hybrid_step)
+            except Exception as he:
+                logger.warning(f"Task {task_id}: MuseTalk hybrid stage errored: {he}")
+
             # Record
             task_states[task_id]["output_path"] = output_path
             generation_time = time.time() - start_time
