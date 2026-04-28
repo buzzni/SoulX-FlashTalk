@@ -2409,6 +2409,34 @@ async def host_generate(
     return result
 
 
+# ── Legacy SSE endpoints — deprecated since 2026-04-28 ────────────────
+# Replaced by POST /api/jobs + GET /api/jobs/:id/events (streaming-resume
+# Phase A). These remain active until the Phase C cutover (target sunset
+# 2026-06-30) so the frontend can switch behind a feature flag without a
+# coordinated deploy. Phase D step 25 deletes them.
+
+_LEGACY_STREAM_DEPRECATION_HEADERS = {
+    # RFC 8594 (draft) — clients honoring these can show a console warning
+    # and proxies/CDNs can surface them in dashboards.
+    "Deprecation": "true",
+    "Sunset": "Tue, 30 Jun 2026 00:00:00 GMT",
+    "Link": '</api/jobs>; rel="successor-version"',
+}
+
+
+def _warn_deprecated_stream(endpoint: str, request: Request) -> None:
+    """Log every call to a deprecated stream endpoint so we can monitor
+    frontend traffic and confirm the cutover is safe to ship."""
+    user_id = getattr(getattr(request, "state", None), "user", {}).get(
+        "user_id", "<unknown>"
+    )
+    logger.warning(
+        "DEPRECATED endpoint called: %s (user=%s) — migrate to "
+        "POST /api/jobs + GET /api/jobs/:id/events. Sunset: 2026-06-30.",
+        endpoint, user_id,
+    )
+
+
 @app.post("/api/host/generate/stream")
 async def host_generate_stream(
     request: Request,
@@ -2431,12 +2459,18 @@ async def host_generate_stream(
     n: int = Form(4),
     temperature: Optional[float] = Form(None),
 ):
-    """SSE variant of /api/host/generate — yields one event per completed
-    candidate instead of blocking on the slowest Gemini call.
+    """DEPRECATED — use POST /api/jobs (kind='host') + GET /api/jobs/:id/events.
 
-    Frontend consumes this via fetch + manual SSE parse (EventSource is GET-only)
-    and appends each 'candidate' event to the variants grid as it arrives.
+    SSE variant of /api/host/generate. Kept active behind a feature flag
+    until the streaming-resume Phase C cutover (sunset 2026-06-30). The
+    new endpoint adds reload-survive, cross-device, and dedupe; this one
+    has none of those guarantees.
+
+    Frontend consumes this via fetch + manual SSE parse (EventSource is
+    GET-only) and appends each 'candidate' event to the variants grid as
+    it arrives.
     """
+    _warn_deprecated_stream("/api/host/generate/stream", request)
     from utils.security import safe_upload_path
     from modules.host_generator import stream_host_candidates
     from modules.repositories import studio_host_repo as host_repo
@@ -2502,7 +2536,11 @@ async def host_generate_stream(
     return StreamingResponse(
         events(),
         media_type="text/event-stream",
-        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+            **_LEGACY_STREAM_DEPRECATION_HEADERS,
+        },
     )
 
 
@@ -2617,10 +2655,17 @@ async def composite_generate_stream(
     seeds: Optional[str] = Form(None),
     imageSize: str = Form("1K"),
 ):
-    """SSE variant of /api/composite/generate. Emits {type: "init"} with
-    translated direction immediately, then one frame per completed candidate,
-    then a terminal {type: "done"}.
+    """DEPRECATED — use POST /api/jobs (kind='composite') + GET /api/jobs/:id/events.
+
+    SSE variant of /api/composite/generate. Kept active behind a feature
+    flag until the streaming-resume Phase C cutover (sunset 2026-06-30).
+    The new endpoint adds reload-survive, cross-device, and dedupe; this
+    one has none of those guarantees.
+
+    Emits {type: "init"} with translated direction immediately, then one
+    frame per completed candidate, then a terminal {type: "done"}.
     """
+    _warn_deprecated_stream("/api/composite/generate/stream", request)
     from utils.security import safe_upload_path
     from modules.composite_generator import stream_composite_candidates
     from modules.repositories import studio_host_repo as host_repo
@@ -2687,7 +2732,11 @@ async def composite_generate_stream(
     return StreamingResponse(
         events(),
         media_type="text/event-stream",
-        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+            **_LEGACY_STREAM_DEPRECATION_HEADERS,
+        },
     )
 
 
