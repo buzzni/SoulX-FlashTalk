@@ -1,9 +1,8 @@
 """Single-process orchestrator for generation_jobs.
 
-Phase A step 2 of streaming-resume (eng-spec §2). Owns the worker side of
-the GenerationJob lifecycle: pulls input_blob from the repo, drives the
-registered handler async generator, applies events to the row, and pumps
-them through a publisher (no-op until JobsPubSub lands in step 6).
+Owns the worker side of the GenerationJob lifecycle (eng-spec §2): pulls
+input_blob from the repo, drives the registered handler async generator,
+applies events to the row, and pumps them through a publisher.
 
 Mirrors `modules.task_queue.TaskQueue` ownership:
 - a strong-ref `_running` map prevents GC of fire-and-forget asyncio tasks
@@ -40,7 +39,8 @@ logger = logging.getLogger(__name__)
 # The handler may raise — the runner catches and marks the job failed.
 HandlerFactory = Callable[[str, dict], AsyncIterator[dict]]
 
-# Publisher contract — step 6 (JobsPubSub) will provide the real impl.
+# Publisher contract — JobsPubSub provides the production impl; tests
+# can swap in a no-op or recorder.
 Publisher = Callable[[str, dict], Awaitable[None]]
 
 
@@ -125,7 +125,7 @@ class JobRunner:
         self._handlers[kind] = factory
 
     def set_publisher(self, publisher: Publisher) -> None:
-        """Step 6 swaps the no-op publisher for JobsPubSub at runtime."""
+        """Swap the publisher (app startup binds JobsPubSub.publish here)."""
         self._publish = publisher
 
     # ── Lifecycle ─────────────────────────────────────────────────────

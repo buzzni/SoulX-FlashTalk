@@ -2,12 +2,6 @@
  * jobSubscription — manages the SSE connection to /api/jobs/:id/events
  * for one or more interested components.
  *
- * Step 14 of streaming-resume Phase B. This module owns the connection
- * lifecycle (open / close / refcount); the actual fetch + SSE parsing
- * lands in step 15. Right now `_open` is a stub that immediately
- * resolves so step 14 commits as a buildable, testable surface without
- * wiring real network traffic.
- *
  * Contract:
  *   - subscribeToJob(jobId) returns a handle. Multiple subscribers to
  *     the same jobId share one underlying connection (refcount).

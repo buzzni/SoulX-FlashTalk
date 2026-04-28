@@ -1,17 +1,12 @@
-"""In-process pub/sub for generation_jobs SSE events.
+"""In-process pub/sub for generation_jobs SSE events (eng-spec §3).
 
-Phase A step 6 of streaming-resume (eng-spec §3). Owns the worker → SSE
-fan-out: JobRunner.publish writes here, the SSE endpoint (step 7)
-subscribes via the async context manager.
+Owns the worker → SSE fan-out: JobRunner.publish writes here, the SSE
+endpoint subscribes via the async context manager.
 
 Single-process only. Per-job sequence numbers are in-memory; if the
 process restarts, seqs reset and any client mid-resume falls back to a
 full snapshot fetch (eng-spec §3.3 trade-off). v2.1 will swap this for a
 Redis-backed pubsub to support multi-worker.
-
-Eng-spec §3.2 race-free SSE handshake (subscribe FIRST, then snapshot,
-then drain buffered events with seq > snap.seq) is implemented in step 7.
-This module just exposes the primitives.
 
 Per-user connection cap (eng-spec §8): each user can have at most 10
 concurrent SSE subscriptions. The 11th raises CapExceededError so the
@@ -71,8 +66,8 @@ class JobsPubSub:
         async iterator of JobEvents. Cleans up the subscriber on exit.
       - publish(job_id, payload): seq++, fans out to every subscriber.
       - current_seq(job_id): the seq of the most recent publish (0 if
-        the job has never published). Step 7 pairs this with the snapshot
-        fetch to make the SSE handshake race-free.
+        the job has never published). The SSE endpoint pairs this with
+        the snapshot fetch to make the handshake race-free (eng-spec §3.2).
     """
 
     def __init__(self) -> None:
@@ -145,7 +140,7 @@ class JobsPubSub:
     def current_seq(self, job_id: str) -> int:
         """The seq of the last publish for `job_id`, or 0 if none yet.
 
-        Step 7's SSE handshake reads this immediately after the snapshot
+        The SSE handshake reads this immediately after the snapshot
         fetch. Any event with seq <= snap.seq is already reflected in the
         snapshot; subscribers replay only events with strictly greater
         seq (eng-spec §3.2)."""
@@ -205,9 +200,8 @@ def sse_format(
 
 
 def sse_format_event(event: JobEvent) -> str:
-    """Convenience: format a JobEvent (seq + type + dict payload) into the
-    on-the-wire frame the SSE endpoint will yield. Pulled out so step 7
-    can reuse it without re-importing json."""
+    """Format a JobEvent (seq + type + dict payload) into the on-the-wire
+    frame the SSE endpoint yields."""
     return sse_format(
         event.type, json.dumps(event.payload, ensure_ascii=False),
         id=event.seq,

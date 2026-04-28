@@ -2,10 +2,9 @@
  * jobCacheStore — client-side cache of /api/jobs/:id snapshots, kept
  * fresh by the SSE subscription module (frontend/src/api/jobSubscription.ts).
  *
- * Step 14 of streaming-resume Phase B (eng-spec §3 + §6). The wizard's
- * v9 schema treats generation as `attached(jobId)` — a thin handle. Any
- * UI that wants the actual variants/state for that job reads from this
- * cache. The cache is hydrated by:
+ * The wizard's v9 schema treats generation as `attached(jobId)` — a thin
+ * handle (eng-spec §3 + §6). Any UI that wants the actual variants/state
+ * for that job reads from this cache. The cache is hydrated by:
  *   1. The SSE 'snapshot' frame on subscribe (eng-spec §3.2 race-free
  *      handshake).
  *   2. Subsequent 'candidate' / 'done' / 'fatal' / 'cancelled' frames

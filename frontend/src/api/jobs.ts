@@ -1,7 +1,6 @@
 /**
  * /api/jobs/* HTTP client.
  *
- * Step 15 of streaming-resume Phase B. Backend surface (Phase A):
  *   POST   /api/jobs                   create + dedupe
  *   GET    /api/jobs/:id               snapshot
  *   GET    /api/jobs                   cursor list
@@ -9,8 +8,7 @@
  *   DELETE /api/jobs/:id               cancel
  *
  * Functions return parsed JSON bodies; non-2xx responses raise ApiError
- * with the backend's `detail` propagated (matches the rest of frontend
- * api/* convention).
+ * with the backend's `detail` propagated.
  */
 
 import { API_BASE, getAuthHeaders, parseResponse } from './http';

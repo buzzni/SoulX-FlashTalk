@@ -2,10 +2,8 @@
  * useJobSnapshot — React hook that returns the cached snapshot for a
  * given jobId, auto-subscribing to its SSE stream while mounted.
  *
- * Step 14 of streaming-resume Phase B. The wizard's v9 schema carries
- * only `attached(jobId)`; UI components that need the variants/state
- * use this hook to resolve the handle. Step 16-17 will rewire
- * useHostGeneration / useCompositeGeneration to compose this.
+ * The wizard's v9 schema carries only `attached(jobId)`; UI components
+ * that need the variants/state use this hook to resolve the handle.
  *
  * Subscription lifecycle:
  *   - mount with non-null jobId → subscribeToJob (refcount up)

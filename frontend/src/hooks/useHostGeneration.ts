@@ -112,12 +112,11 @@ export function useHostGeneration(): UseHostGenerationReturn {
             ? toHostJobInput(input as HostGenerateUIInput, seeds)
             : { ...(input as HostJobInput), seeds: seeds ?? (input as HostJobInput).seeds };
         const job = await createJob({ kind: 'host', input: body });
-        // step 18 (UI gate fix): keep host.selected as-is during the
-        // re-roll. The deriveReturn path uses it as a fallback prev
-        // tile until the snapshot's prev_selected_image_id lands on
-        // 'done', so the user never sees an empty 5th tile during
-        // streaming. handleSelectVariant overwrites selected when the
-        // user picks from the new batch.
+        // Keep host.selected as-is during the re-roll. deriveReturn uses
+        // it as a fallback prev tile until the snapshot's
+        // prev_selected_image_id lands on 'done' — without this the user
+        // sees an empty 5th tile during streaming. handleSelectVariant
+        // overwrites selected when the user picks from the new batch.
         setHost((prev) => ({
           ...prev,
           generation: { state: 'attached', jobId: job.id },
