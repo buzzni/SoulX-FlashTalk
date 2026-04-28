@@ -17,7 +17,6 @@ const READY_TEXT_HOST: Host = {
   input: {
     kind: 'text',
     prompt: '30대 여성, 따뜻한 분위기',
-    builder: { 성별: 'female' },
     negativePrompt: '',
     extraPrompt: '',
   },

@@ -51,7 +51,6 @@ describe('migrateLegacy', () => {
     expect(out.host.input.kind).toBe('text');
     if (out.host.input.kind !== 'text') throw new Error('narrowing');
     expect(out.host.input.prompt).toBe('30대 여성, 밝게 웃고 있음');
-    expect(out.host.input.builder['성별']).toBe('female');
     expect(out.host.temperature).toBe(0.65);
     expect(out.host.generation.state).toBe('ready');
     if (out.host.generation.state === 'ready') {
@@ -349,21 +348,21 @@ describe('readiness predicates', () => {
     const v = { seed: 1, imageId: 'a', url: 'https://x', path: 'h/a' };
     expect(
       isHostReady({
-        input: { kind: 'text', prompt: '', builder: {}, negativePrompt: '', extraPrompt: '' },
+        input: { kind: 'text', prompt: '', negativePrompt: '', extraPrompt: '' },
         temperature: 0.7,
         generation: { state: 'idle' },
       }),
     ).toBe(false);
     expect(
       isHostReady({
-        input: { kind: 'text', prompt: '', builder: {}, negativePrompt: '', extraPrompt: '' },
+        input: { kind: 'text', prompt: '', negativePrompt: '', extraPrompt: '' },
         temperature: 0.7,
         generation: { state: 'ready', batchId: null, variants: [v], selected: null, prevSelected: null },
       }),
     ).toBe(false);
     expect(
       isHostReady({
-        input: { kind: 'text', prompt: '', builder: {}, negativePrompt: '', extraPrompt: '' },
+        input: { kind: 'text', prompt: '', negativePrompt: '', extraPrompt: '' },
         temperature: 0.7,
         generation: { state: 'ready', batchId: null, variants: [v], selected: v, prevSelected: null },
       }),

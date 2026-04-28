@@ -6,7 +6,6 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import {
-  builderToPromptSuffix,
   negativeToSystemSuffix,
   strengthToClause,
   stringifyResolution,
@@ -19,22 +18,6 @@ import {
   listServerFiles,
   makeRandomSeeds,
 } from '../api.js';
-
-describe('api.js — builder ko→en suffix', () => {
-  it('returns "" when builder empty', () => {
-    expect(builderToPromptSuffix({})).toBe('');
-    expect(builderToPromptSuffix(null)).toBe('');
-  });
-  it('maps 성별/연령대/분위기/옷차림 in fixed order', () => {
-    const s = builderToPromptSuffix({
-      옷차림: 'formal', 성별: 'female', 연령대: '30s', 분위기: 'bright',
-    });
-    expect(s).toBe(', female, in her/his 30s, bright and energetic, formal attire');
-  });
-  it('skips unknown preset values silently', () => {
-    expect(builderToPromptSuffix({ 성별: 'unknown' })).toBe('');
-  });
-});
 
 describe('api.js — negativeToSystemSuffix §5.1.1', () => {
   it('empty or whitespace → ""', () => {
@@ -162,16 +145,15 @@ describe('api.js — buildHostGenerateBody', () => {
     return o;
   };
 
-  it('mode=text → body.mode="text", builder appended to prompt', () => {
+  it('mode=text → body.mode="text" with prompt sent verbatim', () => {
     const body = buildHostGenerateBody({
       mode: 'text',
       prompt: '밝고 친근한 쇼호스트',
-      builder: { 성별: 'female', 연령대: '30s' },
     });
     const o = formToObject(body);
     expect(o.mode).toBe('text');
-    expect(o.prompt).toBe('밝고 친근한 쇼호스트, female, in her/his 30s');
-    expect(o.builder).toBe(JSON.stringify({ 성별: 'female', 연령대: '30s' }));
+    expect(o.prompt).toBe('밝고 친근한 쇼호스트');
+    expect(o.builder).toBeUndefined();
   });
 
   it('faceRef + outfitRef → mode=face-outfit, strength clauses fold into extraPrompt', () => {

@@ -19,7 +19,6 @@ import {
   type Background,
   type Composition,
   type Host,
-  type HostBuilder,
   type ImageQuality,
   type Products,
   type ResolutionKey,
@@ -53,7 +52,6 @@ export function toHostGenerateRequest(
       ...base,
       mode: 'text',
       prompt: host.input.prompt,
-      builder: emptyToNull(host.input.builder),
       negativePrompt: host.input.negativePrompt,
       extraPrompt: host.input.extraPrompt,
     };
@@ -79,10 +77,6 @@ export function toHostGenerateRequest(
     faceRef: host.input.faceRef ? {} : undefined,
     outfitRef: host.input.outfitRef ? {} : undefined,
   };
-}
-
-function emptyToNull(b: HostBuilder): HostBuilder | null {
-  return Object.keys(b).length === 0 ? null : b;
 }
 
 // ────────────────────────────────────────────────────────────────────

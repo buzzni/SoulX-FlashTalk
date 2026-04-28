@@ -61,15 +61,6 @@ export type LocalAsset = z.infer<typeof LocalAssetSchema>;
 // Step 1 — Host (쇼호스트)
 // ────────────────────────────────────────────────────────────────────
 
-/** Categorical chips for text mode — gender / age / mood / outfit. */
-export const HostBuilderSchema = z.object({
-  성별: z.string().optional(),
-  연령대: z.string().optional(),
-  분위기: z.string().optional(),
-  옷차림: z.string().optional(),
-});
-export type HostBuilder = z.infer<typeof HostBuilderSchema>;
-
 /**
  * Host generation has two fundamentally different input modes — text
  * description vs reference photos. Tagged so consumers can't read
@@ -80,7 +71,6 @@ export const HostInputSchema = z.discriminatedUnion('kind', [
   z.object({
     kind: z.literal('text'),
     prompt: z.string(),
-    builder: HostBuilderSchema,
     negativePrompt: z.string(),
     extraPrompt: z.string(),
   }),
@@ -355,7 +345,6 @@ const HostInputSerializedSchema = z.discriminatedUnion('kind', [
   z.object({
     kind: z.literal('text'),
     prompt: z.string(),
-    builder: HostBuilderSchema,
     negativePrompt: z.string(),
     extraPrompt: z.string(),
   }),
@@ -448,7 +437,6 @@ export const INITIAL_HOST: Host = {
   input: {
     kind: 'text',
     prompt: '',
-    builder: {},
     negativePrompt: '',
     extraPrompt: '',
   },

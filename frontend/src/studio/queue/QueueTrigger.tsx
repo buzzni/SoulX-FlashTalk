@@ -41,14 +41,11 @@ export const QueueTrigger = forwardRef<HTMLButtonElement, QueueTriggerProps & Re
       <Icon name="settings" size={12} />
       작업
       {active && (
-        // Pulse animation is disabled globally under prefers-reduced-motion
-        // (index.css). role/aria-live announces state changes to screen
-        // readers since the dot is a color-only visual signal.
         <span
           role="status"
           aria-live="polite"
           aria-label="작업 진행 중"
-          className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-destructive shadow-[0_0_0_3px_var(--destructive-soft)] animate-pulse-slow"
+          className="absolute -top-0.5 -right-0.5 w-1.5 h-1.5 rounded-full bg-destructive"
         />
       )}
     </button>

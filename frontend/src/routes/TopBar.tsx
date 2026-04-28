@@ -38,6 +38,16 @@ export function TopBar({ step, valid, onStepClick, onReset, queueSlot }: TopBarP
             {STEPS.map((s, i) => {
               const active = step === s.key;
               const done = valid?.[s.key] && step > s.key;
+              // Match WizardLayout.handleStepClick reachability: step 1
+              // is always reachable, step 2 needs valid[1], step 3 needs
+              // valid[2]. Active step is treated as reachable so the
+              // current pill never looks blocked.
+              const reachable =
+                active ||
+                s.key === 1 ||
+                (s.key === 2 && !!valid?.[1]) ||
+                (s.key === 3 && !!valid?.[2]);
+              const disabled = !reachable;
               return (
                 <Fragment key={s.key}>
                   <button
@@ -46,6 +56,8 @@ export function TopBar({ step, valid, onStepClick, onReset, queueSlot }: TopBarP
                     onClick={() => onStepClick?.(s.key)}
                     title={s.full}
                     aria-current={active ? 'step' : undefined}
+                    aria-disabled={disabled || undefined}
+                    disabled={disabled}
                   >
                     <span className="dot" aria-hidden>
                       {done ? <Check className="size-3" /> : s.short}
@@ -60,7 +72,6 @@ export function TopBar({ step, valid, onStepClick, onReset, queueSlot }: TopBarP
         )}
       </div>
       <div className="topbar-right">
-        <span className="meta">자동 저장됨</span>
         {queueSlot}
         <Button size="sm" icon="refresh" onClick={onReset}>
           처음부터

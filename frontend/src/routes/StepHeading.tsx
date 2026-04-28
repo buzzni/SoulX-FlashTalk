@@ -1,17 +1,14 @@
 /**
  * StepHeading — visual hero for each wizard step.
  *
- * Big "01"/"02"/"03" badge on left + headline + caption on right + small
- * "3단계 중 N" indicator. Replaces the plain `<div className="step-heading">
- * <h1>1단계 · 쇼호스트 만들기</h1></div>` pattern that gave the wizard pages
- * weak visual entry points. Comes with optional `eyebrow` for status pills
- * (e.g. "수정 모드", "초안") and `aside` for top-right info pills.
+ * Big "01"/"02"/"03" badge on left + headline + caption on right.
+ * Optional `eyebrow` for status pills ("수정 모드", "초안") and `aside`
+ * for top-right info pills.
  */
 import * as React from 'react';
 
 export interface StepHeadingProps {
   step: 1 | 2 | 3;
-  total?: number;
   title: string;
   description?: string;
   eyebrow?: React.ReactNode;
@@ -20,7 +17,6 @@ export interface StepHeadingProps {
 
 export function StepHeading({
   step,
-  total = 3,
   title,
   description,
   eyebrow,
@@ -48,12 +44,7 @@ export function StepHeading({
             <p className="m-0 mt-1 text-sm-tight text-muted-foreground">{description}</p>
           )}
         </div>
-        <div className="hidden md:flex items-center gap-2">
-          <div className="text-2xs text-muted-foreground tabular-nums whitespace-nowrap">
-            {total}단계 중 {step}
-          </div>
-          {aside}
-        </div>
+        {aside && <div className="hidden md:flex items-center gap-2">{aside}</div>}
       </div>
     </div>
   );

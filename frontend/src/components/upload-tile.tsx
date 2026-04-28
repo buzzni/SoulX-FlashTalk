@@ -1,6 +1,5 @@
 import { useState, useRef } from 'react';
 import { Upload, RefreshCcw, Trash2 } from 'lucide-react';
-import { Button } from '@/components/ui/button';
 
 /**
  * UploadTile — file dropzone with click / drag / paste. Custom because
@@ -71,16 +70,6 @@ export function UploadTile({
     } catch {
       onFile({ name: f.name, size: f.size, type: f.type, url: null, _fake: false, _file: f });
     }
-  };
-
-  const fakeUpload = () => {
-    onFile({
-      name: `reference_${Date.now().toString(36)}.jpg`,
-      size: Math.floor(Math.random() * 2e6 + 1e5),
-      type: 'image/jpeg',
-      url: null,
-      _fake: true,
-    });
   };
 
   if (file) {
@@ -183,24 +172,6 @@ export function UploadTile({
       <Upload className={compact ? 'size-4' : 'size-5'} />
       <div className="label">{label}</div>
       <div className="sub">{sub}</div>
-      <div className="sub mt-1 text-2xs">
-        또는 이미지 복사 후 이 영역에{' '}
-        <kbd className="font-mono px-1 border border-border rounded text-2xs">Ctrl+V</kbd>
-        {' / '}
-        <kbd className="font-mono px-1 border border-border rounded text-2xs">Cmd+V</kbd>
-      </div>
-      <Button
-        variant="outline"
-        size="sm"
-        className="mt-1"
-        onClick={(e) => {
-          e.stopPropagation();
-          fakeUpload();
-        }}
-        type="button"
-      >
-        샘플 사용
-      </Button>
     </div>
   );
 }

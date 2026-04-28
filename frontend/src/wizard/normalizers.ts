@@ -24,7 +24,6 @@ import {
   type CompositionShot,
   type CompositionVariant,
   type Host,
-  type HostBuilder,
   type HostGeneration,
   type HostInput,
   type HostVariant,
@@ -202,15 +201,6 @@ function migrateServerAsset(raw: unknown): ServerAsset | null {
   return { path, url, name };
 }
 
-function migrateHostBuilder(raw: unknown): HostBuilder {
-  const r = asObject(raw);
-  const out: HostBuilder = {};
-  for (const k of ['성별', '연령대', '분위기', '옷차림'] as const) {
-    if (typeof r[k] === 'string') out[k] = r[k] as string;
-  }
-  return out;
-}
-
 function migrateHostVariants(raw: unknown): HostVariant[] {
   return asArray(raw)
     .map((v) => {
@@ -246,7 +236,6 @@ function migrateHost(raw: unknown): Host {
       ? {
           kind: 'text',
           prompt: asString(r.prompt),
-          builder: migrateHostBuilder(r.builder),
           negativePrompt: asString(r.negativePrompt),
           extraPrompt: asString(r.extraPrompt),
         }

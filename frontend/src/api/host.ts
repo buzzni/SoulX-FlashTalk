@@ -11,12 +11,11 @@
  */
 
 import { API_BASE, ApiError, getAuthHeaders, parseResponse } from './http';
-import { builderToPromptSuffix, negativeToSystemSuffix, strengthToClause } from './mapping';
+import { negativeToSystemSuffix, strengthToClause } from './mapping';
 
 export interface HostGenerateInput {
   mode?: 'text' | 'face-outfit' | 'style-ref';
   prompt?: string;
-  builder?: Record<string, string> | null;
   extraPrompt?: string;
   negativePrompt?: string;
   faceRef?: unknown;
@@ -47,8 +46,6 @@ export function buildHostGenerateBody(host: HostGenerateInput): FormData {
         ? 'style-ref'
         : 'text';
 
-  const promptSuffix = host.mode === 'text' ? builderToPromptSuffix(host.builder) : '';
-
   // §5.1.2 + §5.1.1 — strength + negative prompt collapse into extraPrompt
   // until backend exposes a first-class system_instruction override.
   const extraBits: string[] = [];
@@ -64,12 +61,9 @@ export function buildHostGenerateBody(host: HostGenerateInput): FormData {
 
   const body = new FormData();
   body.append('mode', mode);
-  if (host.prompt) body.append('prompt', (host.prompt || '') + promptSuffix);
+  if (host.prompt) body.append('prompt', host.prompt);
   if (extraPrompt) body.append('extraPrompt', extraPrompt);
   if (host.negativePrompt) body.append('negativePrompt', host.negativePrompt);
-  if (host.builder && Object.keys(host.builder).length) {
-    body.append('builder', JSON.stringify(host.builder));
-  }
   if (host.faceRefPath) body.append('faceRefPath', host.faceRefPath);
   if (host.outfitRefPath) body.append('outfitRefPath', host.outfitRefPath);
   if (host.styleRefPath) body.append('styleRefPath', host.styleRefPath);

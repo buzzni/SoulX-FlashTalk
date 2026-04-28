@@ -21,7 +21,6 @@ export {
 } from '../api/http';
 
 export {
-  builderToPromptSuffix,
   makeRandomSeeds,
   negativeToSystemSuffix,
   paragraphsToScript,

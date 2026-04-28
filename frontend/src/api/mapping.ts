@@ -6,47 +6,6 @@
  * manipulation.
  */
 
-// ────────────────────────────────────────────────────────────────────
-// Host prompt builder (§5.1 — ko→en suffix for text-mode host prompts)
-// ────────────────────────────────────────────────────────────────────
-
-const BUILDER_KO_EN = {
-  성별: { female: 'female', male: 'male' },
-  연령대: {
-    '20s': 'in her/his 20s',
-    '30s': 'in her/his 30s',
-    '40s': 'in her/his 40s',
-    '50plus': 'age 50+',
-  },
-  분위기: {
-    bright: 'bright and energetic',
-    calm: 'calm and trustworthy',
-    friendly: 'friendly and approachable',
-    pro: 'professional and refined',
-  },
-  옷차림: {
-    formal: 'formal attire',
-    casual: 'casual outfit',
-    chic: 'chic modern style',
-    cozy: 'cozy homewear',
-  },
-} as const;
-
-type BuilderKey = keyof typeof BUILDER_KO_EN;
-
-export function builderToPromptSuffix(builder?: Record<string, string> | null): string {
-  if (!builder) return '';
-  const parts: string[] = [];
-  for (const key of ['성별', '연령대', '분위기', '옷차림'] as BuilderKey[]) {
-    const v = builder[key];
-    if (!v) continue;
-    const table = BUILDER_KO_EN[key] as Record<string, string>;
-    const mapped = table[v];
-    if (mapped) parts.push(mapped);
-  }
-  return parts.length ? ', ' + parts.join(', ') : '';
-}
-
 // §5.1.1 — free-form negative prompt → system_instruction suffix (no
 // translation; backend embeds verbatim with a lead-in phrase).
 export function negativeToSystemSuffix(negativePrompt?: string | null): string {

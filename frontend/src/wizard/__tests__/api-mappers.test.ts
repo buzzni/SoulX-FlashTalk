@@ -11,7 +11,7 @@ import type { Background, Composition, Host, Products, Voice } from '../schema';
 import { INITIAL_COMPOSITION, INITIAL_HOST } from '../schema';
 
 const READY_HOST: Host = {
-  input: { kind: 'text', prompt: 'a'.repeat(20), builder: {}, negativePrompt: '', extraPrompt: '' },
+  input: { kind: 'text', prompt: 'a'.repeat(20), negativePrompt: '', extraPrompt: '' },
   temperature: 0.7,
   generation: {
     state: 'ready',
@@ -152,10 +152,9 @@ describe('toCompositeRequest', () => {
 });
 
 describe('toHostGenerateRequest', () => {
-  it('emits text-mode payload with builder dropped when empty', () => {
+  it('emits text-mode payload with prompt + extraPrompt + negativePrompt', () => {
     const req = toHostGenerateRequest(INITIAL_HOST, '1K');
     expect(req.mode).toBe('text');
-    expect(req.builder).toBeNull();
     expect(req.imageSize).toBe('1K');
   });
 

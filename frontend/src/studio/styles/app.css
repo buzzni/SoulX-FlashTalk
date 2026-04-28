@@ -97,6 +97,15 @@
   transition: color .12s, background .12s;
 }
 .step-pill:hover { color: var(--text); background: var(--bg-sunken); }
+.step-pill:disabled,
+.step-pill[aria-disabled="true"] {
+  cursor: not-allowed;
+}
+.step-pill:disabled:hover,
+.step-pill[aria-disabled="true"]:hover {
+  background: transparent;
+  color: var(--text-tertiary);
+}
 .step-pill .dot {
   width: 22px; height: 22px;
   border-radius: 99px;

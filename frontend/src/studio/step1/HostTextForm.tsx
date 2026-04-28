@@ -1,51 +1,52 @@
 /**
  * HostTextForm — text-mode inputs for Step 1.
  *
- * Free-text prompt + category-builder chips + optional negative
- * prompt. Reads/writes through `useFormContext` — the parent
- * Step1Host owns the form via `<FormProvider>`. No prop threading
- * for values; every editor binds directly to a `input.*` field.
+ * Single-flow design: preset cards seed the textarea, user edits freely
+ * from there. Cards are one-way inserts (no toggle, no sync) — prompt
+ * is the only source of truth that reaches the backend.
+ *
+ * Reads/writes through `useFormContext` — Step1Host owns the form via
+ * `<FormProvider>`.
  */
 
-import { Controller, useFormContext } from 'react-hook-form';
-import { Chip } from '@/components/chip';
-import { Field } from '@/components/field';
+import { useFormContext } from 'react-hook-form';
 import { cn } from '@/lib/utils';
 import type { HostFormValues } from '@/wizard/form-mappers';
 
-const HOST_PRESETS: Record<string, { value: string; label: string }[]> = {
-  성별: [
-    { value: 'female', label: '여성' },
-    { value: 'male', label: '남성' },
-  ],
-  연령대: [
-    { value: '20s', label: '20대 · 젊고 밝은' },
-    { value: '30s', label: '30대 · 친근한' },
-    { value: '40s', label: '40대 · 신뢰감 있는' },
-    { value: '50plus', label: '50대+ · 따뜻한' },
-  ],
-  분위기: [
-    { value: 'bright', label: '밝고 활기찬' },
-    { value: 'calm', label: '차분하고 신뢰감' },
-    { value: 'friendly', label: '친근하고 편안' },
-    { value: 'pro', label: '전문적이고 세련' },
-  ],
-  옷차림: [
-    { value: 'formal', label: '정장' },
-    { value: 'casual', label: '캐주얼' },
-    { value: 'chic', label: '세련된 모던' },
-    { value: 'cozy', label: '편안한 홈웨어' },
-  ],
-};
+interface Preset {
+  title: string;
+  prompt: string;
+}
 
-const EXAMPLE_PROMPTS = [
-  '30대 여성, 밝게 웃고 있음, 베이지 니트, 따뜻한 분위기',
-  '20대 여성, 활기찬 표정, 화이트 블라우스, 깔끔한 스튜디오',
-  '40대 남성, 차분하고 신뢰감 있는 표정, 네이비 셔츠',
+const PRESETS: Preset[] = [
+  {
+    title: '30대 친근한 여성',
+    prompt: '30대 여성, 밝게 웃고 있음, 베이지 니트, 따뜻하고 친근한 분위기',
+  },
+  {
+    title: '20대 활기찬 여성',
+    prompt: '20대 여성, 활기찬 표정, 화이트 블라우스, 깔끔한 스튜디오',
+  },
+  {
+    title: '40대 신뢰감 남성',
+    prompt: '40대 남성, 차분하고 신뢰감 있는 표정, 네이비 셔츠',
+  },
+  {
+    title: '30대 세련 여성',
+    prompt: '30대 여성, 세련된 모던 스타일, 블랙 재킷, 전문적인 분위기',
+  },
+  {
+    title: '50대 따뜻한 남성',
+    prompt: '50대 남성, 따뜻한 미소, 그레이 카디건, 편안한 분위기',
+  },
+  {
+    title: '20대 캐주얼 남성',
+    prompt: '20대 남성, 자연스러운 미소, 캐주얼 셔츠, 밝은 톤',
+  },
 ];
 
 export function HostTextForm() {
-  const { register, control, setValue, watch } = useFormContext<HostFormValues>();
+  const { register, setValue, watch } = useFormContext<HostFormValues>();
 
   // `watch('input.prompt')` re-renders this component on every keystroke
   // so the live-validity hint can light up at 15 chars without waiting
@@ -53,59 +54,46 @@ export function HostTextForm() {
   // `register`) so typing stays cheap.
   const prompt = watch('input.prompt') ?? '';
 
+  const applyPreset = (p: Preset) => {
+    setValue('input.prompt', p.prompt, { shouldDirty: true, shouldTouch: true });
+  };
+
   return (
-    <div className="flex-col gap-3">
-      <Field label="어떤 모습의 쇼호스트를 원하세요?" hint="자유롭게 15자 이상">
+    <div className="flex-col gap-4">
+      <div>
+        <div className="text-sm font-semibold text-foreground mb-2">
+          어떤 쇼호스트로 시작할까요?
+        </div>
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+          {PRESETS.map((p) => (
+            <button
+              key={p.title}
+              type="button"
+              onClick={() => applyPreset(p)}
+              className="text-left p-2.5 rounded-md border border-border bg-card hover:border-primary hover:bg-accent-soft transition-colors text-xs leading-snug"
+            >
+              <div className="font-semibold text-foreground">{p.title}</div>
+              <div className="mt-1 text-tertiary line-clamp-2">{p.prompt}</div>
+            </button>
+          ))}
+        </div>
+        <div className="mt-1.5 text-2xs text-tertiary">
+          카드를 누르면 아래 입력칸이 채워져요. 자유롭게 다듬어 주세요.
+        </div>
+      </div>
+
+      <div>
+        <div className="text-sm font-semibold text-foreground mb-1.5">
+          쇼호스트 설명 <span className="text-tertiary font-normal">· 15자 이상</span>
+        </div>
         <textarea
           className={cn('textarea', prompt && prompt.length < 15 && 'invalid')}
           placeholder="예) 30대 여성, 밝게 웃고 있음, 베이지 니트, 따뜻한 분위기"
           {...register('input.prompt')}
         />
-        <div className="flex flex-wrap gap-1.5 mt-1.5">
-          <span className="text-xs text-tertiary self-center">예시 클릭 →</span>
-          {EXAMPLE_PROMPTS.map((ex) => (
-            <Chip
-              key={ex}
-              onClick={() => setValue('input.prompt', ex, { shouldDirty: true, shouldTouch: true })}
-            >
-              {ex.split(',')[0]}
-            </Chip>
-          ))}
-        </div>
-      </Field>
-
-      <div>
-        <div className="field-label mt-1.5 mb-2.5">또는 조건으로 선택해요</div>
-        <Controller
-          control={control}
-          name="input.builder"
-          render={({ field }) => {
-            const builder = (field.value ?? {}) as Record<string, string>;
-            return (
-              <div className="flex-col gap-3">
-                {Object.keys(HOST_PRESETS).map((key) => (
-                  <div key={key}>
-                    <div className="text-xs text-tertiary mb-1.5">{key}</div>
-                    <div className="flex flex-wrap gap-1.5">
-                      {HOST_PRESETS[key]!.map((o) => (
-                        <Chip
-                          key={o.value}
-                          on={builder[key] === o.value}
-                          onClick={() => field.onChange({ ...builder, [key]: o.value })}
-                        >
-                          {o.label}
-                        </Chip>
-                      ))}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            );
-          }}
-        />
       </div>
 
-      <details className="text-xs text-tertiary mt-1">
+      <details className="text-xs text-tertiary">
         <summary className="cursor-pointer select-none">피하고 싶은 표현이 있나요? (선택)</summary>
         <input
           className="input mt-2"

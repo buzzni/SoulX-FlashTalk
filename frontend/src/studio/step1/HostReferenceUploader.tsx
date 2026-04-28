@@ -83,7 +83,7 @@ export function HostReferenceUploader() {
 
   return (
     <div className="flex-col gap-3">
-      <WizardInfoBanner>
+      <WizardInfoBanner className="bg-transparent">
         얼굴 사진이 필요해요. 의상은 비워둬도 됩니다. 원하는 느낌을 더 적으려면 아래
         <b> 추가로 바라는 점</b> 필드를 쓰세요.
       </WizardInfoBanner>
@@ -98,7 +98,7 @@ export function HostReferenceUploader() {
             sub="정면·밝은 사진 추천"
           />
         </Field>
-        <Field label="의상" hint="사진이나 글, 둘 다 가능 · 없어도 돼요">
+        <Field label="의상" hint="사진 또는 글 · 비워둬도 돼요">
           <UploadTile
             file={uploadFileFromAsset(outfitRef)}
             onFile={handleOutfitPick}
@@ -106,9 +106,14 @@ export function HostReferenceUploader() {
             label="입힐 옷 사진 올리기"
             sub="원하는 옷차림이 있을 때"
           />
+          <div className="flex items-center gap-2 my-2 text-2xs font-semibold text-tertiary uppercase tracking-wider">
+            <span className="flex-1 h-px bg-border" />
+            <span>또는 글로 설명</span>
+            <span className="flex-1 h-px bg-border" />
+          </div>
           <input
-            className="input mt-2"
-            placeholder="또는 글로 설명: 예) 베이지 니트, 청바지"
+            className="input"
+            placeholder="예) 베이지 니트, 청바지"
             {...register('input.outfitText')}
           />
         </Field>

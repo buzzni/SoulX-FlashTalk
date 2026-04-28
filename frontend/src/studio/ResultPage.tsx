@@ -186,7 +186,6 @@ export default function ResultPage() {
             : {
                 kind: 'text',
                 prompt: strOr(metaHost.prompt, ''),
-                builder: {},
                 negativePrompt: strOr(metaHost.negativePrompt, ''),
                 extraPrompt: '',
               },
@@ -511,7 +510,6 @@ export default function ResultPage() {
             <Brand size="md" to="/" title="홈으로" />
           </div>
           <div className="topbar-right">
-            <span className="meta">자동 저장됨</span>
             <QueueStatus />
             <Button icon="home" size="sm" onClick={() => navigate('/')}>
               처음으로
