@@ -1,6 +1,7 @@
 """Tests for POST /api/jobs (kind='host') — eng-spec §8 + §6.5 dedupe."""
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -496,3 +497,149 @@ def test_get_job_reflects_state_transition(client):
     assert body["state"] == "ready"
     assert body["batch_id"] == "b1"
     assert [v["image_id"] for v in body["variants"]] == ["v1"]
+
+
+# ── SSE GET /api/jobs/:id/events (step 7) ─────────────────────────────
+
+def _set_db_state(job_id: str, **fields) -> None:
+    import config
+    from pymongo import MongoClient
+    sync = MongoClient(config.MONGO_URL, serverSelectionTimeoutMS=2000)
+    sync[config.DB_NAME].generation_jobs.update_one(
+        {"_id": job_id}, {"$set": fields},
+    )
+    sync.close()
+
+
+def _parse_sse_frames(body: str) -> list[dict]:
+    """Parse SSE wire format into a list of {id, event, data} dicts.
+
+    Frames are separated by blank lines. Each frame's lines are
+    `<field>: <value>` with id/event/data being the fields we care
+    about."""
+    frames: list[dict] = []
+    for raw in body.split("\n\n"):
+        if not raw.strip():
+            continue
+        frame: dict = {}
+        for line in raw.splitlines():
+            if ": " in line:
+                k, v = line.split(": ", 1)
+                frame[k] = v
+        if frame:
+            frames.append(frame)
+    return frames
+
+
+def test_sse_terminal_state_emits_snapshot_and_closes(client):
+    """A snap that's already in a terminal state means there's nothing to
+    drain — the endpoint emits the snapshot frame and closes the stream
+    so the client doesn't hang waiting for events that will never come."""
+    tc, uploads = client
+    face = _seed_image(uploads)
+    created = tc.post("/api/jobs", json=_host_payload(face)).json()
+    _set_db_state(
+        created["id"],
+        state="ready",
+        batch_id="b1",
+        variants=[{"image_id": "v1"}, {"image_id": "v2"}],
+    )
+
+    r = tc.get(f"/api/jobs/{created['id']}/events")
+    assert r.status_code == 200
+    assert r.headers["content-type"].startswith("text/event-stream")
+    assert r.headers["cache-control"] == "no-cache"
+    assert r.headers["x-accel-buffering"] == "no"
+
+    frames = _parse_sse_frames(r.text)
+    assert len(frames) == 1
+    assert frames[0]["event"] == "snapshot"
+    snap = json.loads(frames[0]["data"])
+    assert snap["state"] == "ready"
+    assert snap["batch_id"] == "b1"
+    assert [v["image_id"] for v in snap["variants"]] == ["v1", "v2"]
+    # input_blob never leaks into the SSE wire either.
+    assert "input_blob" not in snap
+
+
+def test_sse_owner_scope_returns_404(client, monkeypatch):
+    tc, uploads = client
+    face = _seed_image(uploads)
+    a = tc.post("/api/jobs", json=_host_payload(face)).json()
+
+    other = {
+        "user_id": "otheruser", "display_name": "Other",
+        "role": "member", "is_active": True,
+        "approval_status": "approved",
+        "subscriptions": ["platform", "studio"],
+        "studio_token_version": 0, "hashed_password": "",
+    }
+
+    async def _bypass_other(req, call_next):
+        req.state.user = dict(other)
+        return await call_next(req)
+
+    monkeypatch.setattr("modules.auth.auth_middleware", _bypass_other)
+    r = tc.get(f"/api/jobs/{a['id']}/events")
+    assert r.status_code == 404
+
+
+def test_sse_nonexistent_returns_404(client):
+    tc, _ = client
+    r = tc.get("/api/jobs/00000000-0000-0000-0000-000000000000/events")
+    assert r.status_code == 404
+
+
+def test_sse_cap_exceeded_returns_429(client, monkeypatch):
+    """Simulate the cap by stubbing is_user_at_cap → True. The endpoint
+    must reject before it returns the StreamingResponse (status code is
+    locked once the body starts streaming)."""
+    tc, uploads = client
+    face = _seed_image(uploads)
+    created = tc.post("/api/jobs", json=_host_payload(face)).json()
+
+    monkeypatch.setattr(
+        "modules.jobs_pubsub.jobs_pubsub.is_user_at_cap",
+        lambda uid: True,
+    )
+    r = tc.get(f"/api/jobs/{created['id']}/events")
+    assert r.status_code == 429
+    assert "too many" in r.text.lower()
+
+
+def test_sse_last_event_id_skips_snapshot_when_caught_up(client):
+    """Client claims they have everything up to seq=999 via Last-Event-ID.
+    Since seq_at_subscribe is 0 (no publishes have happened in this test),
+    after_seq >= seq_at_subscribe → skip the snapshot. Stream closes
+    immediately because the snap is in a terminal state."""
+    tc, uploads = client
+    face = _seed_image(uploads)
+    created = tc.post("/api/jobs", json=_host_payload(face)).json()
+    _set_db_state(created["id"], state="ready", batch_id="b1")
+
+    r = tc.get(
+        f"/api/jobs/{created['id']}/events",
+        headers={"Last-Event-ID": "999"},
+    )
+    assert r.status_code == 200
+    frames = _parse_sse_frames(r.text)
+    # No snapshot frame emitted — client is "ahead" of seq_at_subscribe.
+    assert frames == []
+
+
+def test_sse_snapshot_seq_id_present(client):
+    """The snapshot frame carries an `id:` line equal to seq_at_subscribe.
+    Even with no events yet, the frame must be tagged so the client can
+    set Last-Event-ID for a future reconnect."""
+    tc, uploads = client
+    face = _seed_image(uploads)
+    created = tc.post("/api/jobs", json=_host_payload(face)).json()
+    _set_db_state(created["id"], state="ready", batch_id="b1")
+
+    r = tc.get(f"/api/jobs/{created['id']}/events")
+    frames = _parse_sse_frames(r.text)
+    assert len(frames) == 1
+    assert "id" in frames[0]
+    # seq_at_subscribe is 0 since no publishes have happened in this test;
+    # the wire id is the literal "0".
+    assert frames[0]["id"] == "0"

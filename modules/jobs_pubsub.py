@@ -154,6 +154,14 @@ class JobsPubSub:
         seq (eng-spec §3.2)."""
         return self._seqs.get(job_id, 0)
 
+    def is_user_at_cap(self, user_id: str) -> bool:
+        """Non-atomic peek for the SSE endpoint to translate cap exhaustion
+        into a 429 BEFORE returning a StreamingResponse. The atomic claim
+        still happens in subscribe(); this is purely for status-code
+        accuracy. A small race between this read and the subscribe call is
+        acceptable — at worst the cap is overshot by a request or two."""
+        return self._user_conns.get(user_id, 0) >= USER_CONN_CAP
+
     # ── Internals ─────────────────────────────────────────────────────
 
     async def _stream(self, q: asyncio.Queue) -> AsyncIterator[JobEvent]:

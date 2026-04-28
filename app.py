@@ -3055,6 +3055,110 @@ async def get_job(job_id: str, request: Request):
     return snap
 
 
+@app.get("/api/jobs/{job_id}/events")
+async def stream_job_events(job_id: str, request: Request):
+    """Race-free SSE stream of a job's events (eng-spec §3.2).
+
+    Handshake order — chosen to never lose data, accept rare duplicates:
+      1. subscribe() — register the queue. Every publish from this moment
+         on is buffered.
+      2. seq_at_subscribe = current_seq() — the floor. Anything earlier
+         is already reflected in the snapshot we're about to read.
+      3. snapshot fetch — DB state at this moment. May include events
+         later than seq_at_subscribe (because publish writes DB before
+         pubsub), in which case we'll emit some events the snapshot
+         already reflected. Client is expected to be idempotent.
+      4. emit snapshot frame with id=seq_at_subscribe (skipped if
+         Last-Event-ID >= seq_at_subscribe — client claims to be ahead).
+      5. drain queue: emit every evt with seq > effective_floor; break
+         on terminal (done/fatal/cancelled).
+
+    Rejecting reads:
+      - cap pre-check → 429 (eng-spec §8 per-user 10 cap)
+      - owner mismatch → 404 (id existence not leaked)
+
+    Headers: Cache-Control: no-cache to keep proxies from caching the
+    stream; X-Accel-Buffering: no to disable nginx response buffering
+    (otherwise nginx accumulates a few KB before flushing, killing the
+    incremental-update UX).
+    """
+    user = auth_module.get_request_user(request)
+
+    # Cap pre-check (eng-spec §8). Atomic claim happens in subscribe();
+    # this is just so we can emit 429 with a body before the
+    # StreamingResponse's status code locks in at 200.
+    if jobs_pubsub.is_user_at_cap(user["user_id"]):
+        raise HTTPException(
+            status_code=429,
+            detail="too many concurrent SSE subscriptions",
+        )
+
+    # Owner / existence check. Folds both miss cases into 404 the same
+    # way GET /api/jobs/:id does.
+    pre = await jobs_repo.get_by_id(user["user_id"], job_id)
+    if pre is None:
+        raise HTTPException(status_code=404, detail="job not found")
+
+    last_event_id_header = request.headers.get("Last-Event-ID")
+    try:
+        after_seq = (
+            int(last_event_id_header) if last_event_id_header else 0
+        )
+    except ValueError:
+        after_seq = 0
+
+    async def event_generator():
+        from modules.jobs_pubsub import sse_format, sse_format_event
+
+        async with jobs_pubsub.subscribe(job_id, user["user_id"]) as buffer:
+            seq_at_subscribe = jobs_pubsub.current_seq(job_id)
+            snap = await jobs_repo.get_by_id(user["user_id"], job_id)
+            if snap is None:
+                # Job was deleted between the pre-check and the subscribe;
+                # close the stream cleanly.
+                return
+
+            effective_floor = max(after_seq, seq_at_subscribe)
+
+            # Emit snapshot unless the client explicitly claims to be
+            # caught up. SSE convention: clients omit Last-Event-ID on
+            # the first connection (they haven't seen any event yet), so
+            # a missing header means "send me the snapshot." On reconnect
+            # the client passes their last-seen seq; we skip the snapshot
+            # only when after_seq >= seq_at_subscribe (their state is at
+            # least as fresh as our snap).
+            should_emit_snapshot = (
+                last_event_id_header is None
+                or after_seq < seq_at_subscribe
+            )
+            if should_emit_snapshot:
+                yield sse_format(
+                    "snapshot",
+                    json.dumps(snap, default=str, ensure_ascii=False),
+                    id=seq_at_subscribe,
+                )
+
+            # Snap already terminal — nothing to drain. The stream closes
+            # immediately after the snapshot frame.
+            if snap.get("state") in ("ready", "failed", "cancelled"):
+                return
+
+            async for evt in buffer:
+                if evt.seq > effective_floor:
+                    yield sse_format_event(evt)
+                if evt.type in ("done", "fatal", "cancelled"):
+                    break
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
 # ========================================
 # Main
 # ========================================
