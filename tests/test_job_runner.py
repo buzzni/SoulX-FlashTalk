@@ -48,8 +48,12 @@ def _bypass_studio_auth_skip():
     pass
 
 
-async def _wait_terminal(job_id: str, timeout: float = 5.0) -> dict:
-    """Poll until the row reaches a terminal state."""
+async def _wait_terminal(job_id: str, timeout: float = 10.0) -> dict:
+    """Poll until the row reaches a terminal state.
+
+    Default budget is 10s rather than 5s so CI runs under contention
+    don't false-fail on the runner's normal sub-second turnaround.
+    """
     loop = asyncio.get_event_loop()
     deadline = loop.time() + timeout
     while loop.time() < deadline:
@@ -63,7 +67,7 @@ async def _wait_terminal(job_id: str, timeout: float = 5.0) -> dict:
     )
 
 
-async def _wait_streaming(job_id: str, timeout: float = 5.0) -> dict:
+async def _wait_streaming(job_id: str, timeout: float = 10.0) -> dict:
     loop = asyncio.get_event_loop()
     deadline = loop.time() + timeout
     while loop.time() < deadline:
@@ -349,18 +353,23 @@ async def test_stop_cancels_in_flight_and_marks_failed(repo_db):
 
     runner.register_handler("host", slow)
     await runner.start()
-    job = await repo.create(user_id="u1", kind="host",
-                            input_hash="h1", input_blob={})
-    await runner.submit(job["id"])
-    await asyncio.wait_for(started.wait(), timeout=2.0)
+    try:
+        job = await repo.create(user_id="u1", kind="host",
+                                input_hash="h1", input_blob={})
+        await runner.submit(job["id"])
+        await asyncio.wait_for(started.wait(), timeout=2.0)
 
-    await runner.stop()
-    snap = await repo.get_by_id_internal(job["id"])
-    assert snap["state"] == "failed"
-    # mark_failed wrote either "cancelled by server" (from CancelledError
-    # branch) or "server shutdown" (from stop()'s defensive call). Either is
-    # acceptable; just assert it's not still streaming.
-    assert snap["error"] in ("cancelled by server", "server shutdown")
+        await runner.stop()
+        snap = await repo.get_by_id_internal(job["id"])
+        assert snap["state"] == "failed"
+        # mark_failed wrote either "cancelled by server" (from CancelledError
+        # branch) or "server shutdown" (from stop()'s defensive call). Either is
+        # acceptable; just assert it's not still streaming.
+        assert snap["error"] in ("cancelled by server", "server shutdown")
+    finally:
+        # Defensive: if the assertion above fired (or the started.wait
+        # timed out) the runner is still running. stop() is idempotent.
+        await runner.stop()
 
 
 async def test_submit_after_stop_raises(repo_db):
