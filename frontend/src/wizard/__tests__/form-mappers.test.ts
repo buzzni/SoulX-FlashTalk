@@ -13,6 +13,8 @@ import {
 import type { Host, Voice } from '../schema';
 import { INITIAL_HOST } from '../schema';
 
+// v9 (streaming-resume Phase B): generation is {idle | attached(jobId)}.
+// "Ready" state with variants/selected lives off-schema until step 17.
 const READY_TEXT_HOST: Host = {
   input: {
     kind: 'text',
@@ -22,13 +24,7 @@ const READY_TEXT_HOST: Host = {
     extraPrompt: '',
   },
   temperature: 0.7,
-  generation: {
-    state: 'ready',
-    batchId: 'b-1',
-    variants: [{ seed: 1, imageId: 'h1', url: '/u/h1.png', path: '/p/h1.png' }],
-    selected: { seed: 1, imageId: 'h1', url: '/u/h1.png', path: '/p/h1.png' },
-    prevSelected: null,
-  },
+  generation: { state: 'attached', jobId: 'job-h1' },
 };
 
 describe('hostSliceToFormValues', () => {

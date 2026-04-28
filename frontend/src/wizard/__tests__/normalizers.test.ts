@@ -53,11 +53,10 @@ describe('migrateLegacy', () => {
     expect(out.host.input.prompt).toBe('30대 여성, 밝게 웃고 있음');
     expect(out.host.input.builder['성별']).toBe('female');
     expect(out.host.temperature).toBe(0.65);
-    expect(out.host.generation.state).toBe('ready');
-    if (out.host.generation.state === 'ready') {
-      expect(out.host.generation.variants).toHaveLength(2);
-      expect(out.host.generation.selected?.imageId).toBe('host_abc_s42');
-    }
+    // v9 (streaming-resume Phase B): legacy variants/selected drop on
+    // migrate — they live in studio_hosts on the server, surfaced via
+    // v2.1's history view. Migrated state is always idle.
+    expect(out.host.generation.state).toBe('idle');
   });
 
   it('migrates background by source discriminator', () => {
@@ -227,15 +226,21 @@ describe('toPersistable', () => {
     expect(out.products[1]?.source.kind).toBe('uploaded');
   });
 
-  it('strips streaming/failed generation states to idle', () => {
+  it('preserves attached(jobId) generation state on persist (v9)', () => {
+    // v9 collapsed the lifecycle into {idle | attached(jobId)}. Both
+    // round-trip through persist unchanged — there's no transient state
+    // to scrub anymore. Server-side jobs survive reload via their jobId.
     const out = toPersistable({
       ...migrateLegacy({}),
       host: {
         ...migrateLegacy({}).host,
-        generation: { state: 'streaming', batchId: null, variants: [] },
+        generation: { state: 'attached', jobId: 'job-abc' },
       },
     });
-    expect(out.host.generation.state).toBe('idle');
+    expect(out.host.generation.state).toBe('attached');
+    if (out.host.generation.state === 'attached') {
+      expect(out.host.generation.jobId).toBe('job-abc');
+    }
   });
 
   it('drops generating/failed voice generation states to idle (tts)', () => {
@@ -303,27 +308,18 @@ describe('toPersistable', () => {
     expect(out.audio).toBeNull();
   });
 
-  it('keeps ready generation state', () => {
-    const ready = {
-      seed: 1,
-      imageId: 'host_x_s1',
-      url: 'https://x/1.png',
-      path: 'h/1.png',
-    };
+  it('keeps idle generation state on persist (v9)', () => {
+    // v9 collapsed 'ready' into the server-side generation_jobs row.
+    // The schema only sees idle | attached(jobId); both round-trip
+    // unchanged through toPersistable.
     const out = toPersistable({
       ...migrateLegacy({}),
       host: {
         ...migrateLegacy({}).host,
-        generation: {
-          state: 'ready',
-          batchId: null,
-          variants: [ready],
-          selected: ready,
-          prevSelected: null,
-        },
+        generation: { state: 'idle' },
       },
     });
-    expect(out.host.generation.state).toBe('ready');
+    expect(out.host.generation.state).toBe('idle');
   });
 });
 
@@ -345,8 +341,12 @@ describe('readiness predicates', () => {
     expect(isProductReady({ id: 'a', source: { kind: 'url', url: 'https://x', urlInput: 'x' } })).toBe(true);
   });
 
-  it('isHostReady requires ready state with non-null selected', () => {
-    const v = { seed: 1, imageId: 'a', url: 'https://x', path: 'h/a' };
+  it('isHostReady returns false during the v9 transitional phase', () => {
+    // v9 (streaming-resume Phase B): readiness has moved to the
+    // server-side generation_jobs row + a yet-to-be-introduced
+    // host.selected field. Until step 17 wires those, isHostReady
+    // returns false for every input — test the placeholder so a
+    // future regression to "always returns true" is loud.
     expect(
       isHostReady({
         input: { kind: 'text', prompt: '', builder: {}, negativePrompt: '', extraPrompt: '' },
@@ -358,16 +358,9 @@ describe('readiness predicates', () => {
       isHostReady({
         input: { kind: 'text', prompt: '', builder: {}, negativePrompt: '', extraPrompt: '' },
         temperature: 0.7,
-        generation: { state: 'ready', batchId: null, variants: [v], selected: null, prevSelected: null },
+        generation: { state: 'attached', jobId: 'job-x' },
       }),
     ).toBe(false);
-    expect(
-      isHostReady({
-        input: { kind: 'text', prompt: '', builder: {}, negativePrompt: '', extraPrompt: '' },
-        temperature: 0.7,
-        generation: { state: 'ready', batchId: null, variants: [v], selected: v, prevSelected: null },
-      }),
-    ).toBe(true);
   });
 
   it('isVoiceReady tts requires voiceId + script + ready generation', () => {

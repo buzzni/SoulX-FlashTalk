@@ -76,21 +76,11 @@ function readInitialFromStore(): {
   prevSelected: CompositionVariant | null;
   batchId: string | null;
 } {
-  const comp = useWizardStore.getState().composition;
-  if (comp.generation.state !== 'ready') {
-    return { variants: [], prevSelected: null, batchId: null };
-  }
-  return {
-    variants: comp.generation.variants.map(liftSchemaVariant),
-    prevSelected: comp.generation.prevSelected
-      ? {
-          ...liftSchemaVariant(comp.generation.prevSelected),
-          id: `prev-${comp.generation.prevSelected.imageId}`,
-          isPrev: true,
-        }
-      : null,
-    batchId: comp.generation.batchId,
-  };
+  // v9 (streaming-resume Phase B): mirrors useHostGeneration's
+  // readInitialFromStore — the schema no longer carries variants/
+  // selected/batchId, those resolve via jobCacheStore (step 14) once
+  // step 17 swaps this hook to a store selector.
+  return { variants: [], prevSelected: null, batchId: null };
 }
 
 export function useCompositeGeneration(): UseCompositeGenerationReturn {
@@ -121,24 +111,11 @@ export function useCompositeGeneration(): UseCompositeGenerationReturn {
       setError(null);
       setVariants([]);
 
-      // Carry over current selection (if any) as prev_selected.
-      const compBefore = useWizardStore.getState().composition;
-      const oldSelected =
-        compBefore.generation.state === 'ready' ? compBefore.generation.selected : null;
-      const seedPrev: CompositionVariant | null = oldSelected
-        ? { ...liftSchemaVariant(oldSelected), id: `prev-${oldSelected.imageId}`, isPrev: true }
-        : null;
+      // v9: schema-side prev_selected and store transitions are gone
+      // (step 17 sources them from jobCacheStore instead). Hook-local
+      // state carries the SSE progression for the current session.
+      const seedPrev: CompositionVariant | null = null;
       setPrevSelected(seedPrev);
-
-      // Move generation into streaming state.
-      useWizardStore.getState().setComposition((prev) => ({
-        ...prev,
-        generation: {
-          state: 'streaming',
-          batchId: null,
-          variants: [],
-        },
-      }));
 
       let currentVariants: CompositionVariant[] = [];
       let currentPrev: CompositionVariant | null = seedPrev;
@@ -177,14 +154,8 @@ export function useCompositeGeneration(): UseCompositeGenerationReturn {
                 : v,
             );
             setVariants(currentVariants);
-            useWizardStore.getState().setComposition((prev) => ({
-              ...prev,
-              generation: {
-                state: 'streaming',
-                batchId: currentBatchId,
-                variants: lowerToSchema(currentVariants),
-              },
-            }));
+            // v9: per-candidate progress stays hook-local — see
+            // useHostGeneration for the rationale.
           } else if (evt.type === 'error') {
             errorCount += 1;
             const detail = typeof evt.error === 'string' ? evt.error : 'unknown';
@@ -235,26 +206,8 @@ export function useCompositeGeneration(): UseCompositeGenerationReturn {
               currentPrev = null;
             }
             setPrevSelected(currentPrev);
-            const finalVariants = lowerToSchema(currentVariants);
-            const prevSchema: SchemaCompositionVariant | null =
-              currentPrev && currentPrev.imageId && currentPrev.url && currentPrev.path
-                ? {
-                    seed: currentPrev.seed,
-                    imageId: currentPrev.imageId,
-                    url: currentPrev.url,
-                    path: currentPrev.path,
-                  }
-                : null;
-            useWizardStore.getState().setComposition((prev) => ({
-              ...prev,
-              generation: {
-                state: 'ready',
-                batchId: currentBatchId,
-                variants: finalVariants,
-                selected: null,
-                prevSelected: prevSchema,
-              },
-            }));
+            // v9: terminal state lives server-side. Step 17 sources
+            // variants/selected/prevSelected via jobCacheStore.
           }
         }
 
@@ -270,10 +223,8 @@ export function useCompositeGeneration(): UseCompositeGenerationReturn {
         setIsLoading(false);
         const msg = humanizeError(err);
         setError(msg);
-        useWizardStore.getState().setComposition((prev) => ({
-          ...prev,
-          generation: { state: 'failed', error: msg },
-        }));
+        // v9: failure persists on the server's generation_jobs row;
+        // schema's composition.generation stays idle.
       }
     },
     [run],

@@ -26,18 +26,18 @@ export interface WizardValidity {
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export function computeValidity(state: any): WizardValidity {
   const v: WizardValidity = { 1: false, 2: false, 3: false };
-  // Step 1 is satisfied iff a candidate has been picked
-  // (generation.state === 'ready' && selected !== null).
-  v[1] =
-    state?.host?.generation?.state === 'ready' &&
-    state?.host?.generation?.selected != null;
-  // Step 2 done iff a composite has been picked.
-  v[2] =
-    v[1] &&
-    state?.composition?.generation?.state === 'ready' &&
-    state?.composition?.generation?.selected != null;
-  // `isVoiceReady` covers all three source modes — tts/clone need a
-  // generated audio + voice_id; upload needs a server-side audio asset.
+  // v9 (streaming-resume Phase B): host.generation collapsed to
+  // {idle | attached(jobId)}. The "ready + selected" predicate that
+  // gated step progression in v8 now lives behind the jobCacheStore
+  // snapshot (step 14) and a yet-to-be-introduced 'selected' field
+  // tracked separately on the host slice. Until step 17 wires those,
+  // validation is intentionally false so route guards keep users on
+  // step 1 — better than letting them advance past stale data.
+  v[1] = false;
+  v[2] = false;
+  // Voice/resolution don't depend on generation state — keep their
+  // checks honest so step 3 can still verify its own prerequisites
+  // once steps 1 and 2 are unlocked.
   const voice = state?.voice as Voice | undefined;
   v[3] =
     v[2] &&

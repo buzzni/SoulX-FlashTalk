@@ -89,7 +89,11 @@ export default function Step1Host({ state, update }: Step1HostProps) {
 
   // Counts every "쇼호스트 만들기" press (incl. 다시 만들기). Attempt 0
   // uses DEFAULT_SEEDS; attempt 1+ uses fresh randoms.
-  const attemptsRef = useRef<number>(host.generation.state === 'ready' ? 1 : 0);
+  // v9: 'attached' (a job in flight or already finished on the server)
+  // counts as a prior attempt; 'idle' means the user hasn't started.
+  const attemptsRef = useRef<number>(
+    host.generation.state === 'attached' ? 1 : 0,
+  );
 
   const form = useForm<HostFormValues>({
     resolver: zodResolver(HostFormValuesSchema),
@@ -146,26 +150,10 @@ export default function Step1Host({ state, update }: Step1HostProps) {
 
   const handleSelectVariant = (v: HostVariant) => {
     if (!v.url || !v.path || !v.imageId) return;
-    setHost((prev) => {
-      if (prev.generation.state !== 'ready' && prev.generation.state !== 'streaming') return prev;
-      const variants = prev.generation.state === 'ready' ? prev.generation.variants : [];
-      const prevSelected = prev.generation.state === 'ready' ? prev.generation.prevSelected : null;
-      return {
-        ...prev,
-        generation: {
-          state: 'ready',
-          batchId: prev.generation.state === 'ready' ? prev.generation.batchId : null,
-          variants,
-          selected: {
-            seed: v.seed,
-            imageId: v.imageId as string,
-            url: v.url as string,
-            path: v.path as string,
-          },
-          prevSelected,
-        },
-      };
-    });
+    // v9 (streaming-resume Phase B): selected variants live off-schema.
+    // Step 17 will introduce a dedicated host.selected field + sync via
+    // jobCacheStore. Until then, only the server-side select call goes
+    // out — the in-memory zustand state can't track the choice.
     selectHost(v.imageId).catch((e) => {
       console.warn('host select sync failed (non-fatal):', e);
     });
@@ -173,11 +161,10 @@ export default function Step1Host({ state, update }: Step1HostProps) {
 
   const variants = gen.variants;
   const prevSelected = gen.prevSelected;
-  const selectedImageId =
-    host.generation.state === 'ready' && host.generation.selected
-      ? host.generation.selected.imageId
-      : null;
-  const generated = host.generation.state === 'ready' && host.generation.selected !== null;
+  // v9: selected lives on jobCacheStore (step 14) once step 17 wires it.
+  // Both fall through to "no selection" so the UI stays in pre-pick mode.
+  const selectedImageId: string | null = null;
+  const generated = false;
 
   return (
     <FormProvider {...form}>

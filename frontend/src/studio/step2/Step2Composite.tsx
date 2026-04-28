@@ -91,7 +91,11 @@ export default function Step2Composite({ state }: Step2CompositeProps) {
   const regenerate = gen.regenerate;
   const productUpload = useUploadReferenceImage(uploadReferenceImage);
   const backgroundUpload = useUploadReferenceImage(uploadBackgroundImage);
-  const attemptsRef = useRef<number>(composition.generation.state === 'ready' ? 1 : 0);
+  // v9: 'attached' (in-flight or finished server-side) counts as a
+  // prior attempt; 'idle' = user hasn't started.
+  const attemptsRef = useRef<number>(
+    composition.generation.state === 'attached' ? 1 : 0,
+  );
   const [pickerFor, setPickerFor] = useState<'products' | 'bg' | null>(null);
 
   // Form-shaped projection. Memo keys on the three sub-slice refs
@@ -206,29 +210,9 @@ export default function Step2Composite({ state }: Step2CompositeProps) {
 
   const selectComposite = (v: CompositionVariant) => {
     if (!v.url || !v.path || !v.imageId) return;
-    const imageId = v.imageId;
-    setComposition((prev) => {
-      if (prev.generation.state !== 'ready' && prev.generation.state !== 'streaming') return prev;
-      const variants = prev.generation.state === 'ready' ? prev.generation.variants : [];
-      const prevSelected = prev.generation.state === 'ready' ? prev.generation.prevSelected : null;
-      const selected: SchemaCompositionVariant = {
-        seed: v.seed,
-        imageId,
-        url: v.url as string,
-        path: v.path as string,
-      };
-      return {
-        ...prev,
-        generation: {
-          state: 'ready',
-          batchId: prev.generation.state === 'ready' ? prev.generation.batchId : null,
-          variants,
-          selected,
-          prevSelected,
-        },
-      };
-    });
-    selectCompositeApi(imageId).catch((e) => {
+    // v9: only the server-side select call lands. Step 17 introduces
+    // composition.selected + jobCacheStore mirroring.
+    selectCompositeApi(v.imageId).catch((e) => {
       console.warn('composite select sync failed (non-fatal):', e);
     });
   };
@@ -248,10 +232,8 @@ export default function Step2Composite({ state }: Step2CompositeProps) {
     setPickerFor(null);
   };
 
-  const selectedImageId =
-    composition.generation.state === 'ready' && composition.generation.selected
-      ? composition.generation.selected.imageId
-      : null;
+  // v9: see selectComposite — selected lives on jobCacheStore (step 17).
+  const selectedImageId: string | null = null;
 
   const addEmptyProduct = () => {
     const next: Products = [
@@ -352,8 +334,9 @@ function CompositeCanvas({
   onRegenerate,
   canRegenerate,
 }: CompositeCanvasProps) {
-  const selected =
-    composition.generation.state === 'ready' ? composition.generation.selected : null;
+  // v9: selected lives off-schema until step 17. UI renders pre-pick mode.
+  type Sel = { url: string };
+  const selected: Sel | null = null as Sel | null;
   const hasSelection = selected !== null;
   const empty = !isLoading && variants.length === 0 && !hasSelection;
   const heroUrl = selected ? selected.url : null;

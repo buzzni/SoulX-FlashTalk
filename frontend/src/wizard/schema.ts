@@ -105,25 +105,23 @@ export const HostVariantSchema = z.object({
 export type HostVariant = z.infer<typeof HostVariantSchema>;
 
 /**
- * Generation lifecycle. Discriminator `state` rules out invalid combos
- * (e.g. you can't have a `selected` variant in `idle`, can't be
- * `streaming` and have a `failed.error` simultaneously).
+ * Generation lifecycle (v9 — streaming-resume Phase B).
+ *
+ * The frontend treats generation as a thin handle: either nothing is
+ * happening (`idle`) or a server-side job is in flight (`attached`).
+ * Variants, batch_id, prev_selected, errors — all live on the server's
+ * generation_jobs row, not in the wizard state. Hooks resolve
+ * attached(jobId) → snapshot via jobCacheStore (step 14) and SSE.
+ *
+ * v8 used a 4-state discriminator (idle|streaming|ready|failed) that
+ * duplicated the server's authoritative state. v9 drops it: persisted
+ * v8 rows migrate to idle on first load. Ready results from v8 are NOT
+ * lost — they live in studio_hosts (the candidates collection); v2.1's
+ * history view will surface them.
  */
 export const HostGenerationSchema = z.discriminatedUnion('state', [
   z.object({ state: z.literal('idle') }),
-  z.object({
-    state: z.literal('streaming'),
-    batchId: z.string().nullable(),
-    variants: z.array(HostVariantSchema),
-  }),
-  z.object({
-    state: z.literal('ready'),
-    batchId: z.string().nullable(),
-    variants: z.array(HostVariantSchema),
-    selected: HostVariantSchema.nullable(),
-    prevSelected: HostVariantSchema.nullable(),
-  }),
-  z.object({ state: z.literal('failed'), error: z.string() }),
+  z.object({ state: z.literal('attached'), jobId: z.string() }),
 ]);
 export type HostGeneration = z.infer<typeof HostGenerationSchema>;
 
@@ -209,21 +207,12 @@ export const CompositionVariantSchema = z.object({
 });
 export type CompositionVariant = z.infer<typeof CompositionVariantSchema>;
 
+/** v9 — same idle | attached(jobId) shape as HostGeneration. The
+ * generation_jobs row carries kind='composite' so it dispatches to the
+ * right backend handler; the frontend doesn't need to differentiate. */
 export const CompositionGenerationSchema = z.discriminatedUnion('state', [
   z.object({ state: z.literal('idle') }),
-  z.object({
-    state: z.literal('streaming'),
-    batchId: z.string().nullable(),
-    variants: z.array(CompositionVariantSchema),
-  }),
-  z.object({
-    state: z.literal('ready'),
-    batchId: z.string().nullable(),
-    variants: z.array(CompositionVariantSchema),
-    selected: CompositionVariantSchema.nullable(),
-    prevSelected: CompositionVariantSchema.nullable(),
-  }),
-  z.object({ state: z.literal('failed'), error: z.string() }),
+  z.object({ state: z.literal('attached'), jobId: z.string() }),
 ]);
 export type CompositionGeneration = z.infer<typeof CompositionGenerationSchema>;
 
@@ -498,12 +487,19 @@ export const INITIAL_WIZARD_STATE: WizardState = {
 // Type guards (small, frequently-needed predicates)
 // ────────────────────────────────────────────────────────────────────
 
-export function isHostReady(host: Host): host is Host & { generation: { state: 'ready'; selected: HostVariant } } {
-  return host.generation.state === 'ready' && host.generation.selected !== null;
+// v9: 'ready' is no longer a generation state — readiness now means the
+// row has a server-side job attached AND that job's snapshot is ready
+// AND the user has picked a candidate. None of those facts are visible
+// on the schema yet (step 17 will add them via jobCacheStore + a
+// host.selected field), so these guards return false during the
+// transitional phase. Keeping the function names + signatures preserves
+// the call sites; they'll start returning true once step 17 lands.
+export function isHostReady(_host: Host): boolean {
+  return false;
 }
 
-export function isCompositionReady(comp: Composition): comp is Composition & { generation: { state: 'ready'; selected: CompositionVariant } } {
-  return comp.generation.state === 'ready' && comp.generation.selected !== null;
+export function isCompositionReady(_comp: Composition): boolean {
+  return false;
 }
 
 export function isBackgroundReady(bg: Background): boolean {

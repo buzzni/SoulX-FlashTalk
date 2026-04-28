@@ -187,13 +187,14 @@ export default function ResultPage() {
                 extraPrompt: '',
               },
         temperature: num(metaHost.temperature, 0.7),
-        generation: {
-          state: 'ready',
-          batchId: null,
-          variants: [variant],
-          selected: variant,
-          prevSelected: null,
-        },
+        // v9 (streaming-resume Phase B): the legacy "rebuild ready
+        // generation from the result manifest" path doesn't fit the new
+        // {idle | attached(jobId)} schema. Step 17 will introduce a
+        // dedicated host.selected field that this code can populate
+        // without touching generation. Until then, the wizard re-entry
+        // from the result page lands on an empty Step 1 — minor UX
+        // regression accepted as part of the broader refactor.
+        generation: { state: 'idle' },
       };
     }
 
@@ -252,13 +253,10 @@ export default function ResultPage() {
           temperature: num(metaComposition.temperature, 0.7),
           rembg: true,
         },
-        generation: {
-          state: 'ready',
-          batchId: null,
-          variants: [compVariant],
-          selected: compVariant,
-          prevSelected: null,
-        },
+        // v9: see HostGeneration above — composition.selected lives on
+        // a separate field once step 17 lands. Re-entry to Step 2 from
+        // the result page lands on an empty grid until then.
+        generation: { state: 'idle' },
       };
     }
 

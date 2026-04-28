@@ -55,7 +55,11 @@ describe('Lane C — persist hydrate safeParse gate', () => {
     warn.mockRestore();
   });
 
-  it("preserves 'ready' host generation through the migrate", () => {
+  it("resets v8 'ready' host generation to idle on migrate to v9", () => {
+    // v9 (streaming-resume Phase B): {idle | streaming | ready | failed}
+    // collapsed to {idle | attached(jobId)}. Migrating a v8 ready blob
+    // resets to idle — the candidates collection on the server retains
+    // the actual variant data (eng-spec §7 migration table).
     const blob = {
       ...v8Valid,
       host: {
@@ -71,7 +75,7 @@ describe('Lane C — persist hydrate safeParse gate', () => {
       },
     };
     const out = migrateWizardEnvelope(blob, 8);
-    expect(out.host.generation.state).toBe('ready');
+    expect(out.host.generation.state).toBe('idle');
   });
 
   it('migrated v7 blob with stale streaming voice still parses (scrub happens later via onRehydrateStorage)', () => {

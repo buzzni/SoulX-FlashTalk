@@ -68,6 +68,97 @@ describe('migrateWizardEnvelope — v7 → v8', () => {
   });
 });
 
+describe('migrateWizardEnvelope — v8 → v9 (HostGeneration collapse)', () => {
+  // v9 (streaming-resume Phase B): {idle | streaming | ready | failed}
+  // collapses to {idle | attached(jobId)}. Persisted v8 streaming/ready/
+  // failed rows reset to idle on first hydrate; ready candidates from v8
+  // still live in studio_hosts (server-side) and resurface via v2.1's
+  // history view (eng-spec §7 migration table).
+
+  const v8Base = {
+    ...v7Base,
+    playlistId: null,
+  };
+
+  it('resets a v8 streaming host.generation to idle', () => {
+    const before = {
+      ...v8Base,
+      host: {
+        ...v8Base.host,
+        generation: {
+          state: 'streaming',
+          batchId: 'b1',
+          variants: [{ seed: 1, imageId: 'h1', url: '/u/h1.png', path: '/p/h1.png' }],
+        },
+      },
+    };
+    const after = migrateWizardEnvelope(before, 8) as unknown as Record<string, unknown>;
+    const host = after.host as { generation: { state: string } };
+    expect(host.generation.state).toBe('idle');
+    expect(Object.keys(host.generation)).toEqual(['state']);  // no leftover variants/batchId
+  });
+
+  it('resets a v8 ready host.generation to idle (server keeps the candidates)', () => {
+    const before = {
+      ...v8Base,
+      host: {
+        ...v8Base.host,
+        generation: {
+          state: 'ready',
+          batchId: 'b2',
+          variants: [{ seed: 1, imageId: 'h1', url: '/u/h1.png', path: '/p/h1.png' }],
+          selected: { seed: 1, imageId: 'h1', url: '/u/h1.png', path: '/p/h1.png' },
+          prevSelected: null,
+        },
+      },
+    };
+    const after = migrateWizardEnvelope(before, 8) as unknown as Record<string, unknown>;
+    const host = after.host as { generation: { state: string } };
+    expect(host.generation.state).toBe('idle');
+  });
+
+  it('resets a v8 failed host.generation to idle', () => {
+    const before = {
+      ...v8Base,
+      host: {
+        ...v8Base.host,
+        generation: { state: 'failed', error: 'GPU OOM' },
+      },
+    };
+    const after = migrateWizardEnvelope(before, 8) as unknown as Record<string, unknown>;
+    const host = after.host as { generation: { state: string } };
+    expect(host.generation.state).toBe('idle');
+  });
+
+  it('resets composition.generation the same way', () => {
+    const before = {
+      ...v8Base,
+      composition: {
+        ...v8Base.composition,
+        generation: {
+          state: 'streaming',
+          batchId: 'cb1',
+          variants: [],
+        },
+      },
+    };
+    const after = migrateWizardEnvelope(before, 8) as unknown as Record<string, unknown>;
+    const comp = after.composition as { generation: { state: string } };
+    expect(comp.generation.state).toBe('idle');
+  });
+
+  it('passes already-v9 envelopes through (idle stays idle, attached stays attached)', () => {
+    const before = {
+      ...v8Base,
+      host: { ...v8Base.host, generation: { state: 'attached', jobId: 'job-x' } },
+    };
+    const after = migrateWizardEnvelope(before, 9) as unknown as Record<string, unknown>;
+    const host = after.host as { generation: { state: string; jobId?: string } };
+    expect(host.generation.state).toBe('attached');
+    expect(host.generation.jobId).toBe('job-x');
+  });
+});
+
 describe('migrateWizardEnvelope — older shapes still compose', () => {
   it('runs the v1 → v8 chain without throwing on a partial legacy blob', () => {
     const veryLegacy = {

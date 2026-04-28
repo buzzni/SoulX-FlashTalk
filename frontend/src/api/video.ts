@@ -47,16 +47,14 @@ export async function generateVideo(
   // host_image_path here is the FINAL composite frame (Step 2 selection) — that's
   // the single frame FlashTalk animates. The Step 1 host-only image is not sent.
   const body = new FormData();
-  // Selected path lives on `generation.selected` for both host and
-  // composition when state === 'ready'.
-  const hostSelectedPath =
-    state.host?.generation?.state === 'ready'
-      ? state.host.generation.selected?.path ?? null
-      : null;
-  const compositeSelectedPath =
-    state.composition?.generation?.state === 'ready'
-      ? state.composition.generation.selected?.path ?? null
-      : null;
+  // v9 (streaming-resume Phase B): selected path lives on jobCacheStore
+  // (step 14) once step 17 wires it. Until then, fall back to null —
+  // which means the resulting render request omits host_image_path and
+  // the backend rejects with 400 ("missing host image"). The wizard
+  // navigation guards (wizardValidation) keep users on step 1 until
+  // step 17 lands, so this branch is unreachable from the UI.
+  const hostSelectedPath: string | null = null;
+  const compositeSelectedPath: string | null = null;
   const composite = compositeSelectedPath || hostSelectedPath;
   if (composite) body.append('host_image_path', composite);
   body.append('audio_path', audio.audio_path);
@@ -135,8 +133,10 @@ function hostProvenance(h: unknown): {
       outfitText: '', faceStrength: null, outfitStrength: null, temperature: null,
     };
   }
-  const selected =
-    host.generation.state === 'ready' ? host.generation.selected : null;
+  // v9: provenance no longer pulls selected from generation (the row
+  // doesn't carry it). step 17 will swap this for a jobCacheStore lookup.
+  type Sel = { seed: number; path: string; url: string };
+  const selected: Sel | null = null as Sel | null;
   const text = host.input.kind === 'text' ? host.input : null;
   const image = host.input.kind === 'image' ? host.input : null;
   return {
@@ -172,8 +172,9 @@ function compositionProvenance(c: unknown): {
       direction: '', shot: null, angle: null, temperature: null,
     };
   }
-  const selected =
-    comp.generation.state === 'ready' ? comp.generation.selected : null;
+  // v9: same pattern as host — selected lives off-schema until step 17.
+  type Sel = { seed: number; path: string; url: string };
+  const selected: Sel | null = null as Sel | null;
   return {
     selectedSeed: selected?.seed ?? null,
     selectedPath: selected?.path ?? null,

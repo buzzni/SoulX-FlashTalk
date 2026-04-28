@@ -537,9 +537,13 @@ describe('api.js — generateVideo attaches full provenance meta', () => {
     const metaStr = opts.body.get('meta');
     expect(metaStr).toBeTruthy();
     const meta = JSON.parse(metaStr);
-    // Host
+    // Host. v9 (streaming-resume Phase B): selectedSeed/selectedPath
+    // come off-schema until step 17 wires jobCacheStore + a host.selected
+    // field. Provenance falls back to null for those fields. The non-
+    // generation host fields (mode, temperature, outfit) still thread
+    // through.
     expect(meta.host.mode).toBe('image');
-    expect(meta.host.selectedSeed).toBe(42);
+    expect(meta.host.selectedSeed).toBeNull();
     expect(meta.host.temperature).toBe(1.0);
     expect(meta.host.outfitText).toBe('베이지 니트');
     // Composition

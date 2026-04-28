@@ -83,23 +83,20 @@ function lowerToSchema(variants: HostVariant[]): SchemaHostVariant[] {
     }));
 }
 
-/** Seed initial UI state from the current store host slice. */
+/** Seed initial UI state from the current store host slice.
+ *
+ * v9 (streaming-resume Phase B): the schema no longer carries
+ * variants/selected/batchId. Step 17 will rehydrate from jobCacheStore
+ * via the host.generation.attached.jobId handle. Until then, return
+ * empty state — reload mid-generation reverts to a blank grid (the
+ * trade-off the broader refactor accepts in exchange for race-free
+ * server-side truth). */
 function readInitialFromStore(): {
   variants: HostVariant[];
   prevSelected: HostVariant | null;
   batchId: string | null;
 } {
-  const host = useWizardStore.getState().host;
-  if (host.generation.state !== 'ready') {
-    return { variants: [], prevSelected: null, batchId: null };
-  }
-  return {
-    variants: host.generation.variants.map(liftSchemaVariant),
-    prevSelected: host.generation.prevSelected
-      ? { ...liftSchemaVariant(host.generation.prevSelected), id: `prev-${host.generation.prevSelected.imageId}`, isPrev: true }
-      : null,
-    batchId: host.generation.batchId,
-  };
+  return { variants: [], prevSelected: null, batchId: null };
 }
 
 export function useHostGeneration(): UseHostGenerationReturn {
@@ -123,28 +120,17 @@ export function useHostGeneration(): UseHostGenerationReturn {
       setError(null);
       setVariants([]);
 
-      // Carry over current selection (if any) as prev_selected so it
-      // appears as the 5th tile until the next pick. Schema state's
-      // `selected` becomes this batch's `prevSelected`.
-      const hostBefore = useWizardStore.getState().host;
-      const oldSelected =
-        hostBefore.generation.state === 'ready' ? hostBefore.generation.selected : null;
-      const seedPrev: HostVariant | null = oldSelected
-        ? { ...liftSchemaVariant(oldSelected), id: `prev-${oldSelected.imageId}`, isPrev: true }
-        : null;
+      // v9: no schema-side selected/variants. Step 17 will source the
+      // previous selection from jobCacheStore + a host.selected field.
+      // Until then, prev tile is null and persisted generation stays idle.
+      const seedPrev: HostVariant | null = null;
       setPrevSelected(seedPrev);
 
-      // Move generation into streaming state. The state machine
-      // transition is the only persisted side-effect at stream start;
-      // variants stay [] until candidates land.
-      useWizardStore.getState().setHost((prev) => ({
-        ...prev,
-        generation: {
-          state: 'streaming',
-          batchId: null,
-          variants: [],
-        },
-      }));
+      // The store's generation state stays idle through this transitional
+      // phase — step 17 will swap to attached(jobId) once the new POST
+      // /api/jobs path is wired in. SSE progress is tracked entirely via
+      // hook-local React state in the meantime (reload-lossy, fixed in
+      // step 17).
 
       let currentVariants: HostVariant[] = [];
       let currentPrev: HostVariant | null = seedPrev;
@@ -181,15 +167,9 @@ export function useHostGeneration(): UseHostGenerationReturn {
                 : v,
             );
             setVariants(currentVariants);
-            // Persist completed slots only.
-            useWizardStore.getState().setHost((prev) => ({
-              ...prev,
-              generation: {
-                state: 'streaming',
-                batchId: currentBatchId,
-                variants: lowerToSchema(currentVariants),
-              },
-            }));
+            // v9: don't mirror per-candidate state into the store; the
+            // store carries only the {idle | attached(jobId)} handle and
+            // step 17 will route progress through jobCacheStore.
           } else if (evt.type === 'error') {
             errorCount += 1;
             const detail = typeof evt.error === 'string' ? evt.error : 'unknown';
@@ -241,29 +221,9 @@ export function useHostGeneration(): UseHostGenerationReturn {
             }
             setPrevSelected(currentPrev);
 
-            // Final state machine transition to `ready`. Selection
-            // resets to null — user picks fresh from this batch.
-            // prevSelected (the 5th tile) is preserved for revert.
-            const finalVariants = lowerToSchema(currentVariants);
-            const prevSchema: SchemaHostVariant | null =
-              currentPrev && currentPrev.imageId && currentPrev.url && currentPrev.path
-                ? {
-                    seed: currentPrev.seed,
-                    imageId: currentPrev.imageId,
-                    url: currentPrev.url,
-                    path: currentPrev.path,
-                  }
-                : null;
-            useWizardStore.getState().setHost((prev) => ({
-              ...prev,
-              generation: {
-                state: 'ready',
-                batchId: currentBatchId,
-                variants: finalVariants,
-                selected: null,
-                prevSelected: prevSchema,
-              },
-            }));
+            // v9: terminal state lives on the server. Don't persist
+            // variants/selected/prevSelected into the schema — step 17
+            // will derive them from jobCacheStore.
           }
         }
 
@@ -279,10 +239,9 @@ export function useHostGeneration(): UseHostGenerationReturn {
         setIsLoading(false);
         const msg = humanizeError(err);
         setError(msg);
-        useWizardStore.getState().setHost((prev) => ({
-          ...prev,
-          generation: { state: 'failed', error: msg },
-        }));
+        // v9: failure state lives on the server's generation_jobs row;
+        // the schema's host.generation stays idle. Hook-local `error`
+        // surfaces to the UI for the current session.
       }
     },
     [run],

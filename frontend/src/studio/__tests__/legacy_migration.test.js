@@ -74,9 +74,10 @@ describe('wizardStore — legacy showhost_state migration', () => {
     expect(envelope.version).toBe(7);
     expect(envelope.state.host.input.kind).toBe('text');
     expect(envelope.state.host.input.prompt).toBe('소개 영상');
-    expect(envelope.state.host.generation.state).toBe('ready');
-    expect(envelope.state.host.generation.selected?.seed).toBeDefined();
-    expect(envelope.state.host.generation.variants).toHaveLength(1);
+    // v9 (streaming-resume Phase B): legacy migration drops variants/
+    // selected — they live in studio_hosts on the server, surfaced via
+    // v2.1's history view. Migrated state is always idle.
+    expect(envelope.state.host.generation.state).toBe('idle');
     expect(envelope.state.background).toEqual({ kind: 'preset', presetId: 'cafe' });
     expect(envelope.state.products).toHaveLength(1);
     // Phase 2c.4: voice is schema-typed. Legacy `voice.voiceId` lives

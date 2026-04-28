@@ -89,14 +89,11 @@ export function persistHost(host: Host): Host {
           outfitRef: persistAsset(host.input.outfitRef),
         };
 
-  // Variants survive (they live on the server). Selected survives.
-  // Streaming/failed states reset on reload — the SSE stream is gone.
-  const generation: HostGeneration =
-    host.generation.state === 'streaming' || host.generation.state === 'failed'
-      ? { state: 'idle' }
-      : host.generation;
-
-  return { ...host, input, generation };
+  // v9 — generation is either idle or attached(jobId). Both survive
+  // reload: idle is trivially fine, and attached jobIds are the server's
+  // canonical handle (the snapshot endpoint resolves the current state
+  // on rehydrate). No transient state to drop here.
+  return { ...host, input };
 }
 
 function persistProduct(p: Product): Product {
@@ -117,15 +114,11 @@ export function persistBackground(bg: Background): Background {
   return bg;
 }
 
-/** Drop transient generation states (streaming/failed → idle) on
- * persist. Exported for per-slice persisters in wizardStore — Phase
- * 2c.3. */
+/** v9: composition.generation is idle | attached(jobId), both
+ * reload-safe. No transient state to drop. Kept as a thin wrapper so
+ * the wizardStore call signature stays stable. */
 export function persistComposition(comp: Composition): Composition {
-  const generation: CompositionGeneration =
-    comp.generation.state === 'streaming' || comp.generation.state === 'failed'
-      ? { state: 'idle' }
-      : comp.generation;
-  return { ...comp, generation };
+  return comp;
 }
 
 /** Drop transient generation states (generating/failed → idle), pending
@@ -260,26 +253,14 @@ function migrateHost(raw: unknown): Host {
           outfitStrength: asNumber(r.outfitStrength, 0.5),
         };
 
-  const variants = migrateHostVariants(r.variants);
-  const generation: HostGeneration = (() => {
-    if (variants.length === 0) return { state: 'idle' };
-    // Legacy "user picked one" signal — `generated: true` OR
-    // `selectedSeed`/`selectedImageId`/`selectedPath` present.
-    const selectedImageId =
-      asString(r.selectedImageId) ||
-      (asString(r.selectedPath) ? imageIdFromPath(asString(r.selectedPath)) : '');
-    const selectedSeed = asNumber(r.selectedSeed, NaN);
-    const selected =
-      variants.find((v) => v.imageId === selectedImageId) ??
-      variants.find((v) => v.seed === selectedSeed) ??
-      null;
-    return { state: 'ready', batchId: null, variants, selected, prevSelected: null };
-  })();
-
+  // v9 (eng-spec §7 migration table): legacy variants/selected/seed
+  // data is dropped — the candidates collection on the server has the
+  // canonical record, surfaced via v2.1's history view. Migrated state
+  // is always idle so the user re-rolls if they want fresh variants.
   return {
     input,
     temperature: asNumber(r.temperature, 0.7),
-    generation,
+    generation: { state: 'idle' },
   };
 }
 
@@ -355,18 +336,9 @@ function migrateComposition(raw: unknown): Composition {
     temperature: asNumber(r.temperature, 0.7),
     rembg: r.rembg !== false, // default true
   };
-  const variants = migrateCompositionVariants(r.variants);
-  const generation: CompositionGeneration =
-    r.generated === true && variants.length > 0
-      ? (() => {
-          const selectedImageId = asString(r.selectedImageId);
-          const selected = variants.find((v) => v.imageId === selectedImageId) ?? null;
-          return { state: 'ready' as const, batchId: null, variants, selected, prevSelected: null };
-        })()
-      : variants.length > 0
-        ? { state: 'ready' as const, batchId: null, variants, selected: null, prevSelected: null }
-        : { state: 'idle' as const };
-  return { settings, generation };
+  // v9: legacy variants/selected dropped (eng-spec §7). Server-side
+  // candidates collection retains the data; v2.1 history view exposes it.
+  return { settings, generation: { state: 'idle' } };
 }
 
 function migrateVoiceAdvanced(raw: unknown): VoiceAdvanced {
