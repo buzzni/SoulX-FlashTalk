@@ -32,7 +32,10 @@ MAX_UPLOAD_BYTES = 20 * 1024 * 1024  # 20 MB
 # SoulX-FlashTalk Model Settings
 # ========================================
 FLASHTALK_CKPT_DIR = os.path.join(PROJECT_ROOT, "models", "SoulX-FlashTalk-14B")
-FLASHTALK_WAV2VEC_DIR = os.path.join(PROJECT_ROOT, "models", "chinese-wav2vec2-base")
+FLASHTALK_WAV2VEC_DIR = os.environ.get(
+    "FLASHTALK_WAV2VEC_DIR",
+    os.path.join(PROJECT_ROOT, "models", "chinese-wav2vec2-base"),
+)
 
 FLASHTALK_OPTIONS = {
     # Prompt conditions the T5 text encoder → diffusion model. Emphasize
@@ -40,10 +43,13 @@ FLASHTALK_OPTIONS = {
     # moving" hint tended to produce jerky hand swings and exaggerated mouth
     # openings.
     "default_prompt": (
-        "A person is talking with subtle, natural hand gestures and minimal, "
-        "stable body movement. The lips move softly and naturally in sync "
-        "with speech, not exaggerated. Only the foreground character moves; "
-        "the background remains static."
+        "A close-up of a person calmly speaking. Each consonant and vowel "
+        "is articulated with precise, restrained lip movement that exactly "
+        "matches the audio. Lips fully close for /m/, /b/, /p/ sounds. "
+        "Mouth opens cleanly but remains naturally proportioned — no "
+        "horizontal stretching, no wide lateral mouth opening, no "
+        "smile-like distortion. Jaw stays restrained. Subtle natural hand "
+        "gestures, stable body posture. Static background."
     ),
     "audio_encode_mode": "stream",  # "stream" or "once"
     "base_seed": 9999,
