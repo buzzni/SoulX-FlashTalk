@@ -46,7 +46,15 @@ export function LiveTaskRow({
         type="button"
         onClick={() => onOpen(task.task_id)}
         className={ROW_BUTTON_CLASS}
-        title="클릭하면 진행 화면으로 이동해요"
+        // Pending rows have an X next to them (showCancel). Running
+        // rows don't — backend can't kill an in-flight FlashTalk/Gemini
+        // call cleanly. Without a hint, users wonder why "this one"
+        // can't be cancelled. Hover tooltip explains in-place.
+        title={
+          showCancel
+            ? '클릭하면 진행 화면으로 이동해요'
+            : '실행 중인 작업은 취소할 수 없어요. 클릭하면 진행 화면으로 이동해요.'
+        }
       >
         <div className="min-w-0 overflow-hidden">
           <div className="font-medium truncate">

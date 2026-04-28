@@ -15,8 +15,9 @@
  *   - completed → `/result/:taskId`
  *   - error/cancelled → no target
  */
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { toast } from 'sonner';
 import { useQueue, usePolling } from '../stores/queueStore';
 import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover';
 import { QueueTrigger } from './queue/QueueTrigger';
@@ -45,7 +46,17 @@ export default function QueueStatus() {
     retryingIds,
     retryError,
     retry,
+    resetErrors,
   } = useQueueActions(refresh);
+
+  // Clear stale cancel/retry errors whenever the popover transitions to
+  // open. Without this, an error from a previous session lingers in the
+  // hook's local state forever (the action only resets it on the next
+  // attempt) and the user sees a fossilized message every time they
+  // reopen the panel.
+  useEffect(() => {
+    if (open) resetErrors();
+  }, [open, resetErrors]);
 
   // Confirm modal lives one level up from the rows so a single instance
   // covers cancel + retry across all rows. State holds the pending
@@ -78,7 +89,14 @@ export default function QueueStatus() {
     setPending(null);
     try {
       if (type === 'cancel') {
-        await cancel(taskId, label);
+        const ok = await cancel(taskId, label);
+        if (ok) {
+          // On success, close the popover and toast — matches retry's
+          // behavior and gives the user explicit feedback that the row
+          // is gone because of their action (not a refresh race).
+          setOpen(false);
+          toast.success('작업이 취소됐어요');
+        }
         return;
       }
       // Retry returns the new task_id; navigate to it so the user lands
@@ -140,6 +158,7 @@ export default function QueueStatus() {
             retryingIds={retryingIds}
             retryError={retryError}
             totalActive={totalActive}
+            onRefresh={() => { void refresh(); }}
             onClose={() => setOpen(false)}
             onOpenLive={handleOpenLive}
             onOpenRecent={handleOpenRecent}
@@ -149,19 +168,13 @@ export default function QueueStatus() {
         ) : (
           // No snapshot yet — either the first fetch is still in flight
           // (loading) or it failed (error). Without this branch, opening
-          // the panel mid-failure showed a blank box; the user had no way
-          // to see what went wrong or trigger another attempt.
+          // the panel mid-failure showed a blank box; the user had no
+          // way to see what went wrong or trigger another attempt. No X
+          // button — Esc / outside-click cover dismissal, matching the
+          // populated-panel header.
           <div className="py-2">
-            <div className="flex justify-between items-center mb-2">
+            <div className="mb-2">
               <strong className="text-sm-tight">작업 목록</strong>
-              <button
-                type="button"
-                onClick={() => setOpen(false)}
-                aria-label="닫기"
-                className="bg-transparent border-0 cursor-pointer text-ink-3"
-              >
-                ✕
-              </button>
             </div>
             {error ? (
               <div className="space-y-2">

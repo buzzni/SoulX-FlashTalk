@@ -5,13 +5,19 @@
  * in QueueStatus via shadcn `Popover` (Radix). This component only
  * renders the body: header + sections (실행 중 / 대기 중 / 최근 완료) +
  * empty-state.
+ *
+ * No X close button — Radix's outside-click + Esc already cover that
+ * surface, and a redundant X in a 340-px wide panel header just steals
+ * space from the title.
  */
+import { Link } from 'react-router-dom';
 import type { QueueSnapshot } from '../../types/app';
-import Icon from '../Icon.jsx';
 import { LiveTaskRow } from './LiveTaskRow';
 import { RecentTaskRow } from './RecentTaskRow';
 import { formatTime } from './queueFormat';
 import { SECTION_CLASS, SECTION_HEADER_CLASS } from './styles';
+
+const RECENT_VISIBLE_LIMIT = 5;
 
 export interface QueuePanelProps {
   queueData: QueueSnapshot;
@@ -21,6 +27,11 @@ export interface QueuePanelProps {
   retryingIds: Set<string>;
   retryError: string | null;
   totalActive: number;
+  /** Refire the queue fetch — wired to the inline retry button when
+   * polling errored against a still-displayed stale snapshot. */
+  onRefresh: () => void;
+  /** Close the popover. Used by the recent-section "전체 보기" link
+   * so the popover collapses behind the navigation. */
   onClose: () => void;
   onOpenLive: (taskId: string) => void;
   onOpenRecent: (taskId: string, status: string) => void;
@@ -36,6 +47,7 @@ export function QueuePanel({
   retryingIds,
   retryError,
   totalActive,
+  onRefresh,
   onClose,
   onOpenLive,
   onOpenRecent,
@@ -45,22 +57,26 @@ export function QueuePanel({
   const running = queueData.running ?? [];
   const pending = queueData.pending ?? [];
   const recent = queueData.recent ?? [];
+  const hasMoreRecent = recent.length > RECENT_VISIBLE_LIMIT;
 
   return (
     <div>
-      <div className="flex justify-between items-center mb-2">
+      <div className="mb-2">
         <strong className="text-sm-tight">작업 목록</strong>
-        <button
-          type="button"
-          onClick={onClose}
-          aria-label="닫기"
-          className="bg-transparent border-0 cursor-pointer text-ink-3"
-        >
-          <Icon name="close" size={14} />
-        </button>
       </div>
 
-      {error && <div className="text-destructive text-xs">{error}</div>}
+      {error && (
+        <div className="mb-2 px-2 py-1.5 bg-destructive-soft rounded-sm flex items-center justify-between gap-2">
+          <span className="text-destructive text-xs">{error}</span>
+          <button
+            type="button"
+            onClick={onRefresh}
+            className="text-xs text-destructive underline cursor-pointer shrink-0"
+          >
+            다시 시도
+          </button>
+        </div>
+      )}
 
       {running.length > 0 && (
         <div className={SECTION_CLASS}>
@@ -116,7 +132,7 @@ export function QueuePanel({
       {recent.length > 0 && (
         <div className={SECTION_CLASS}>
           <div className={SECTION_HEADER_CLASS}>최근 완료</div>
-          {recent.slice(0, 5).map((t) => (
+          {recent.slice(0, RECENT_VISIBLE_LIMIT).map((t) => (
             <RecentTaskRow
               key={t.task_id}
               task={t}
@@ -125,6 +141,20 @@ export function QueuePanel({
               retrying={retryingIds.has(t.task_id)}
             />
           ))}
+          {/* The popover only shows the latest 5 — anything beyond that
+              was previously unreachable from this surface. /results is
+              the canonical library view, so route the user there for
+              the long tail. Closing the popover behind the link keeps
+              the back button working as expected. */}
+          {hasMoreRecent && (
+            <Link
+              to="/results"
+              onClick={onClose}
+              className="block text-center text-2xs text-ink-2 underline mt-1 py-1 hover:text-ink-1"
+            >
+              전체 보기
+            </Link>
+          )}
         </div>
       )}
 

@@ -19,10 +19,16 @@ import { humanizeError } from '../../api/http';
 export interface UseQueueActions {
   cancellingIds: Set<string>;
   cancelError: string | null;
-  cancel: (taskId: string, label: string) => Promise<void>;
+  /** Returns true on success, false on failure. The caller uses this
+   * to decide whether to toast / close the popover (success) or just
+   * surface the error inline (failure — already in cancelError). */
+  cancel: (taskId: string, label: string) => Promise<boolean>;
   retryingIds: Set<string>;
   retryError: string | null;
   retry: (taskId: string, label: string) => Promise<string | null>;
+  /** Clear cancel/retry errors. Called when the popover opens so a
+   * stale error from a previous session doesn't fossilize. */
+  resetErrors: () => void;
 }
 
 export function useQueueActions(refresh: () => void): UseQueueActions {
@@ -36,7 +42,7 @@ export function useQueueActions(refresh: () => void): UseQueueActions {
   // dialog instead of the OS native confirm. Each caller decides when
   // the action is committed; the hook just runs it and tracks state.
   const cancel = useCallback(
-    async (taskId: string, _label: string) => {
+    async (taskId: string, _label: string): Promise<boolean> => {
       setCancellingIds((prev) => {
         const next = new Set(prev);
         next.add(taskId);
@@ -46,8 +52,10 @@ export function useQueueActions(refresh: () => void): UseQueueActions {
       try {
         await cancelQueuedTask(taskId);
         refresh();
+        return true;
       } catch (err) {
         setCancelError(humanizeError(err));
+        return false;
       } finally {
         setCancellingIds((prev) => {
           const next = new Set(prev);
@@ -87,6 +95,11 @@ export function useQueueActions(refresh: () => void): UseQueueActions {
     [refresh],
   );
 
+  const resetErrors = useCallback(() => {
+    setCancelError(null);
+    setRetryError(null);
+  }, []);
+
   return {
     cancellingIds,
     cancelError,
@@ -94,5 +107,6 @@ export function useQueueActions(refresh: () => void): UseQueueActions {
     retryingIds,
     retryError,
     retry,
+    resetErrors,
   };
 }
