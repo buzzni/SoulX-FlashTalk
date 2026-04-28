@@ -3069,18 +3069,22 @@ async def delete_video(task_id: str, request: Request):
             logger.warning("Failed to delete video file %s: %s", video_path, e)
 
     # Result row (PR5 replacement for outputs/results/<task>.json + history.json).
-    await _result_repo.delete(user["user_id"], task_id)
+    deleted_row = await _result_repo.delete(user["user_id"], task_id)
 
     # In-memory task state (best effort)
     task_states.pop(task_id, None)
 
-    if not deleted_video and not removed_images:
+    # Failed/cancelled tasks own a studio_results row but no video file and
+    # no cascade images. Treat row deletion as success so /results "삭제"
+    # works on every card, not just completed ones.
+    if not deleted_video and not removed_images and not deleted_row:
         raise HTTPException(status_code=404, detail="Video not found")
     return {
         "message": "deleted",
         "task_id": task_id,
         "video_deleted": deleted_video,
         "images_removed": removed_images,
+        "row_deleted": deleted_row,
     }
 
 

@@ -9,7 +9,7 @@
 import { useCallback, useEffect, useMemo, useState, useRef } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { toast } from 'sonner';
-import { MoreHorizontal, Plus, Play, RotateCw } from 'lucide-react';
+import { MoreHorizontal, Plus, Play, RotateCw, Trash2 } from 'lucide-react';
 import { AppLayout } from './AppLayout';
 import { EmptyState } from '../components/empty-state';
 import { Pagination } from '../components/pagination';
@@ -17,6 +17,7 @@ import { videoTitle, formatCompactDate } from '../lib/format';
 import { startNewVideo } from '../lib/wizardNav';
 import { cn } from '@/lib/utils';
 import { humanizeError } from '../api/http';
+import { deleteResult } from '../api/result';
 import {
   fetchHistoryPage,
   fetchHistoryCounts,
@@ -775,6 +776,7 @@ interface ResultCardProps {
 
 function ResultCard({ item, playlists, onMoved }: ResultCardProps) {
   const [busy, setBusy] = useState(false);
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
   const videoRef = useRef<HTMLVideoElement>(null);
 
   const status = item.status ?? 'completed';
@@ -787,6 +789,20 @@ function ResultCard({ item, playlists, onMoved }: ResultCardProps) {
     try {
       await moveResultToPlaylist(item.task_id, playlistId);
       toast.success(`'${playlistName}' 으로 옮겼어요`);
+      onMoved();
+    } catch (e) {
+      toast.error(humanizeError(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const submitDelete = async () => {
+    setConfirmingDelete(false);
+    setBusy(true);
+    try {
+      await deleteResult(item.task_id);
+      toast.success('영상을 삭제했어요');
       onMoved();
     } catch (e) {
       toast.error(humanizeError(e));
@@ -918,8 +934,36 @@ function ResultCard({ item, playlists, onMoved }: ResultCardProps) {
               {p.name}
             </DropdownMenuItem>
           ))}
+          <div className="my-1 h-px bg-border" />
+          <DropdownMenuItem
+            variant="destructive"
+            onSelect={() => setConfirmingDelete(true)}
+          >
+            <Trash2 className="size-3.5 mr-1.5" />
+            삭제
+          </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
+      <ConfirmModal
+        open={confirmingDelete}
+        title="이 영상을 삭제할까요?"
+        description={
+          <p className="m-0 leading-relaxed">
+            <b>{title}</b>
+            <br />
+            <span className="text-tertiary">
+              {isCompleted
+                ? '영상 파일과 결과 정보가 모두 삭제돼요. 되돌릴 수 없어요.'
+                : '결과 기록이 삭제돼요. 되돌릴 수 없어요.'}
+            </span>
+          </p>
+        }
+        confirmLabel="삭제"
+        variant="danger"
+        busy={busy}
+        onConfirm={submitDelete}
+        onCancel={() => setConfirmingDelete(false)}
+      />
     </div>
   );
 }

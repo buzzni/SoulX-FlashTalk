@@ -44,20 +44,34 @@ PUBLIC_PATHS: set[str] = {
     "/favicon.ico",
 }
 PUBLIC_PATH_PREFIXES: tuple[str, ...] = (
-    "/api/files/",
-    "/api/videos/",   # served through /api/files but kept explicit per plan #10
     "/static/",
     "/assets/",
     "/@vite",         # Vite HMR (only relevant when frontend proxies)
+)
+# GET-only public prefixes — read-only paths that <img>/<video> tags need
+# without an Authorization header. POST/DELETE/PATCH on these paths still
+# go through auth middleware. Originally /api/videos/* and /api/files/*
+# were in PUBLIC_PATH_PREFIXES (GET + every other method), which meant
+# DELETE /api/videos/{task_id} bypassed auth and 500'd at
+# get_request_user. Splitting fixes both bugs at once.
+PUBLIC_GET_PATH_PREFIXES: tuple[str, ...] = (
+    "/api/files/",
+    "/api/videos/",   # plan #10 — public read; writes still need auth
 )
 
 JWT_ALGORITHM = "HS256"
 
 
-def _is_public(path: str) -> bool:
+def _is_public(path: str, method: str = "GET") -> bool:
     if path in PUBLIC_PATHS:
         return True
-    return any(path.startswith(p) for p in PUBLIC_PATH_PREFIXES)
+    if any(path.startswith(p) for p in PUBLIC_PATH_PREFIXES):
+        return True
+    if method.upper() in ("GET", "HEAD") and any(
+        path.startswith(p) for p in PUBLIC_GET_PATH_PREFIXES
+    ):
+        return True
+    return False
 
 
 def _verify_password(plaintext: str, hashed: str) -> bool:
@@ -172,7 +186,7 @@ async def auth_middleware(request, call_next):
     On success, attaches the user record to `request.state.user`.
     """
     path = request.url.path
-    if _is_public(path):
+    if _is_public(path, request.method):
         return await call_next(request)
 
     auth_header = request.headers.get("authorization", "")

@@ -6,7 +6,7 @@
  * fallback (see `_synthesize_result_from_queue` in app.py).
  */
 
-import { fetchJSON } from './http';
+import { API_BASE, fetchJSON, getAuthHeaders, parseResponse } from './http';
 import { schemas } from './schemas-generated';
 import type { ResultManifest } from '../types/app';
 
@@ -23,4 +23,23 @@ export function fetchResult(taskId: string, { signal }: CallOptions = {}): Promi
     signal,
     schema: schemas.ResultManifest,
   });
+}
+
+/**
+ * Delete a result + cascade. Hits DELETE /api/videos/{task_id} which:
+ *  - removes the video file (if any — none for failed/cancelled)
+ *  - cascade-deletes committed step1/step2 images linked exclusively to it
+ *  - drops the studio_results row
+ */
+export async function deleteResult(
+  taskId: string,
+  { signal }: CallOptions = {},
+): Promise<{ message: string; task_id: string; row_deleted?: boolean }> {
+  if (!taskId) throw new Error('taskId가 비어 있어요');
+  const res = await fetch(`${API_BASE}/api/videos/${encodeURIComponent(taskId)}`, {
+    method: 'DELETE',
+    headers: getAuthHeaders(),
+    signal,
+  });
+  return parseResponse(res, '영상 삭제');
 }
