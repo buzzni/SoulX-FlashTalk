@@ -7,8 +7,8 @@
  *   all three have the common 새로 만들기 + 수정해서 다시 만들기 pair.
  * Retry depth (3): retriedFrom=null → 재시도; retriedFrom="abc" →
  *   수정해서 다시 만들기; one-deep heuristic short-circuits the chain walk.
- * Mobile breakpoint (1): viewport=375 wraps kebab to its own row (asserted
- *   via the `flex-col md:flex-row` className on the wrapper).
+ * Layout + touch targets (1): always flex-row — primary grows (flex-1),
+ *   kebab is a fixed square (h-11 w-11 → md:h-9 md:w-9 for a11y minimums).
  * a11y (2): kebab trigger has aria-haspopup="menu" + aria-label; focus
  *   returns to trigger on close (Radix default).
  *
@@ -169,20 +169,22 @@ describe('ResultPrimary — retry-depth swap (D3A)', () => {
 
 // ── Mobile breakpoint (1) ────────────────────────────────────────────
 
-describe('ResultPrimary — mobile breakpoint', () => {
-  it('wrapper has flex-col on mobile, md:flex-row on ≥640px', () => {
+describe('ResultPrimary — layout + touch targets', () => {
+  it('wrapper is flex-row, primary fills, kebab is square', () => {
     renderPrimary({ status: 'completed' });
     const wrapper = screen.getByTestId('result-primary');
-    // Tailwind responsive class — assert presence; the actual flip is a
-    // CSS @media concern, not testable in jsdom directly. Both children
-    // also carry w-full md:w-auto + h-11 md:h-9 for the touch-target jump.
-    expect(wrapper.className).toMatch(/flex-col/);
-    expect(wrapper.className).toMatch(/md:flex-row/);
+    expect(wrapper.className).toMatch(/flex-row/);
+    // Primary grows to fill the row; kebab stays a fixed square at the end.
+    const primary = screen.getByTestId('result-primary-action');
+    expect(primary.className).toMatch(/flex-1/);
     const kebab = screen.getByTestId('result-primary-kebab');
+    // 44px square on mobile (a11y minimum), 36px square on ≥md to match
+    // the rest of the wizard chrome.
     expect(kebab.className).toMatch(/h-11/);
+    expect(kebab.className).toMatch(/w-11/);
     expect(kebab.className).toMatch(/md:h-9/);
-    expect(kebab.className).toMatch(/w-full/);
-    expect(kebab.className).toMatch(/md:w-auto/);
+    expect(kebab.className).toMatch(/md:w-9/);
+    expect(kebab.className).toMatch(/shrink-0/);
   });
 });
 

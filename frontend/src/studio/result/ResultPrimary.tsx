@@ -50,10 +50,11 @@ export interface ResultPrimaryProps {
   onNew: () => void;
 }
 
-/** Touch-target + responsive sizing applied uniformly to primary + kebab.
- *  ≤640px: full-width row, 44px tall. ≥md: auto width, 36px tall (matches
- *  WizardButton size="" default). */
-const ROW_BUTTON_CLASSES = 'w-full md:w-auto h-11 md:h-9';
+/** Layout: primary grows to fill the row, kebab is a fixed square at the
+ *  end. Touch-target sizing kept on mobile (44px) per a11y; collapses to
+ *  36px square on ≥md to match the rest of the wizard chrome. */
+const PRIMARY_CLASSES = 'flex-1 min-w-0 h-11 md:h-9';
+const KEBAB_CLASSES = 'h-11 w-11 md:h-9 md:w-9 shrink-0';
 
 export function ResultPrimary({
   status,
@@ -72,10 +73,10 @@ export function ResultPrimary({
       <div
         data-testid="result-primary"
         data-status="loading"
-        className="flex flex-col md:flex-row gap-2 mt-auto md:justify-end"
+        className="flex flex-row gap-2 mt-auto"
       >
         <div
-          className={`skeleton-shimmer rounded-md bg-muted ${ROW_BUTTON_CLASSES} min-w-[160px]`}
+          className={`skeleton-shimmer rounded-md bg-muted ${PRIMARY_CLASSES}`}
           aria-hidden="true"
         />
         <button
@@ -84,24 +85,24 @@ export function ResultPrimary({
           data-testid="result-primary-kebab"
           aria-label="다른 작업 열기"
           aria-haspopup="menu"
-          className={`${ROW_BUTTON_CLASSES} inline-flex items-center justify-center gap-1.5 px-3 rounded-md border border-border text-muted-foreground opacity-60`}
+          className={`${KEBAB_CLASSES} inline-flex items-center justify-center rounded-md border border-border text-muted-foreground opacity-60`}
         >
           <MoreHorizontal className="size-4" aria-hidden="true" />
-          <span className="md:hidden">다른 작업</span>
         </button>
       </div>
     );
   }
 
   // Processing: queue race window — task is dispatched but no manifest yet.
-  // No commit-able primary action exists, so render only the kebab. User
-  // can still escape via 새로 만들기 or hop to 수정해서 다시 만들기.
+  // No commit-able primary action exists, so render only the kebab on the
+  // right edge. User can still escape via 새로 만들기 or hop to 수정해서
+  // 다시 만들기 from the kebab.
   if (status === 'processing') {
     return (
       <div
         data-testid="result-primary"
         data-status="processing"
-        className="flex flex-col md:flex-row gap-2 mt-auto md:justify-end"
+        className="flex flex-row gap-2 mt-auto justify-end"
       >
         <KebabMenu
           showShare={false}
@@ -114,14 +115,15 @@ export function ResultPrimary({
     );
   }
 
-  // For completed/error/cancelled: render primary + kebab.
+  // For completed/error/cancelled: primary fills the row, kebab is the
+  // fixed square on the right.
   const showShareInKebab = status === 'completed';
 
   return (
     <div
       data-testid="result-primary"
       data-status={status}
-      className="flex flex-col md:flex-row gap-2 mt-auto md:justify-end"
+      className="flex flex-row gap-2 mt-auto"
     >
       <PrimaryButton
         status={status}
@@ -170,7 +172,7 @@ function PrimaryButton({
         data-testid="result-primary-action"
         href={`/api/videos/${taskId}?download=true`}
         download
-        className={`${ROW_BUTTON_CLASSES} inline-flex items-center justify-center gap-2 px-4 rounded-md bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-colors no-underline`}
+        className={`${PRIMARY_CLASSES} inline-flex items-center justify-center gap-2 px-4 rounded-md bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-colors no-underline`}
       >
         <Icon name="download" size={14} />
         내 컴퓨터에 저장
@@ -191,7 +193,7 @@ function PrimaryButton({
           variant="primary"
           onClick={onEdit}
           title="이전 시도가 같은 입력으로 실패했어요. 입력을 손봐서 다시 만들어요."
-          className={ROW_BUTTON_CLASSES}
+          className={PRIMARY_CLASSES}
         >
           수정해서 다시 만들기
         </Button>
@@ -204,7 +206,7 @@ function PrimaryButton({
         variant="primary"
         onClick={onRetry}
         title="같은 입력으로 그대로 다시 시도"
-        className={ROW_BUTTON_CLASSES}
+        className={PRIMARY_CLASSES}
       >
         재시도
       </Button>
@@ -218,7 +220,7 @@ function PrimaryButton({
       icon="plus"
       variant="primary"
       onClick={onNew}
-      className={ROW_BUTTON_CLASSES}
+      className={PRIMARY_CLASSES}
     >
       새로 만들기
     </Button>
@@ -250,10 +252,9 @@ function KebabMenu({
           data-testid="result-primary-kebab"
           aria-label="다른 작업 열기"
           aria-haspopup="menu"
-          className={`${ROW_BUTTON_CLASSES} inline-flex items-center justify-center gap-1.5 px-3 rounded-md border border-border bg-transparent hover:bg-secondary transition-colors text-foreground cursor-pointer`}
+          className={`${KEBAB_CLASSES} inline-flex items-center justify-center rounded-md border border-border bg-transparent hover:bg-secondary transition-colors text-foreground cursor-pointer`}
         >
           <MoreHorizontal className="size-4" aria-hidden="true" />
-          <span className="md:hidden">다른 작업</span>
         </button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="min-w-[200px]">
