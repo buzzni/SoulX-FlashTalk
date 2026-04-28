@@ -48,3 +48,4 @@ frontend/playwright/.cache/
 # G2 step3-motion eval binaries — manifests + scores are kept, videos are not
 eval/step3/results/*/videos/
 eval/step3/results/*/blind/
+frontend/node_modules
