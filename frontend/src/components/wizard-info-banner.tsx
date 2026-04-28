@@ -18,8 +18,14 @@ import { cn } from '@/lib/utils';
 
 type Tone = 'accent' | 'muted';
 
+// Use explicit `primary-*` tokens instead of `bg-accent` / `text-accent-
+// foreground`. The `--accent` name historically resolved differently
+// inside `.studio-root` than at global :root (see studio/styles/tokens.css
+// header). This banner renders inside studio screens, so reaching for
+// the explicit tokens makes the result robust against any future global
+// `--accent` redefinition.
 const TONE_CLASS: Record<Tone, string> = {
-  accent: 'bg-accent border border-accent text-accent-foreground',
+  accent: 'bg-primary-soft border border-primary text-primary-on-soft',
   muted: 'bg-secondary text-ink-2',
 };
 

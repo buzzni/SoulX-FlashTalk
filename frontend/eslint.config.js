@@ -53,6 +53,33 @@ export default tseslint.config(
     },
   },
   {
+    // Studio scope guard — `bg-accent` / `text-accent-foreground` resolve to
+    // *different* colors inside `.studio-root` than at global :root, because
+    // wizard tokens redefine the same names. The 2026-04 BackgroundPicker
+    // bug landed exactly here. Force studio components onto explicit
+    // `bg-primary-soft` / `text-primary-on-soft` (or the studio-scoped
+    // `bg-accent-soft` / `text-accent-text` aliases that don't have the
+    // same trap).
+    files: ['src/studio/**/*.{ts,tsx,jsx}'],
+    rules: {
+      'no-restricted-syntax': [
+        'error',
+        {
+          selector:
+            "Literal[value=/(^|\\s)(bg-accent|text-accent-foreground|border-accent)(\\s|$)/]",
+          message:
+            'Do not use bg-accent / text-accent-foreground / border-accent inside src/studio/* — token resolves to deep blue here. Use bg-primary-soft / text-primary-on-soft / border-primary, or the studio-only bg-accent-soft / text-accent-text aliases.',
+        },
+        {
+          selector:
+            "TemplateElement[value.raw=/(^|\\s)(bg-accent|text-accent-foreground|border-accent)(\\s|$)/]",
+          message:
+            'Do not use bg-accent / text-accent-foreground / border-accent inside src/studio/* — token resolves to deep blue here. Use bg-primary-soft / text-primary-on-soft / border-primary, or the studio-only bg-accent-soft / text-accent-text aliases.',
+        },
+      ],
+    },
+  },
+  {
     files: ['**/__tests__/**/*.{js,jsx,ts,tsx}', '**/*.test.{js,jsx,ts,tsx}'],
     languageOptions: {
       globals: {
