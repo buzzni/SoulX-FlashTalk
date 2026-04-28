@@ -230,11 +230,9 @@ export function ResultsListPage() {
         <div className="mb-6">
           <div className="text-sm-tight text-muted-foreground mb-1.5">라이브러리</div>
           <h1 className="headline-section m-0">{filterTitle}</h1>
-          {items !== null && (
-            <p className="m-0 mt-1 text-sm-tight text-muted-foreground">
-              {total}개의 영상
-            </p>
-          )}
+          <p className="m-0 mt-1 text-sm-tight text-muted-foreground">
+            {total}개의 영상
+          </p>
         </div>
 
         {/* Row 1: Playlist chips */}
