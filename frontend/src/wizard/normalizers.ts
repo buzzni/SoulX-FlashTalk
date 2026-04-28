@@ -253,14 +253,26 @@ function migrateHost(raw: unknown): Host {
           outfitStrength: asNumber(r.outfitStrength, 0.5),
         };
 
-  // v9 (eng-spec §7 migration table): legacy variants/selected/seed
-  // data is dropped — the candidates collection on the server has the
-  // canonical record, surfaced via v2.1's history view. Migrated state
-  // is always idle so the user re-rolls if they want fresh variants.
+  // v9: generation resets to idle (eng-spec §7 — server's candidates
+  // collection still has the row). selected may survive — if the legacy
+  // blob carried a selected variant snapshot, lift it onto the new
+  // host.selected field so the user's prior pick isn't lost on upgrade.
+  const selected = (() => {
+    const variants = migrateHostVariants(r.variants);
+    if (variants.length === 0) return null;
+    const selectedImageId = asString(r.selectedImageId);
+    const selectedSeed = asNumber(r.selectedSeed, NaN);
+    const v =
+      variants.find((x) => x.imageId === selectedImageId) ??
+      variants.find((x) => x.seed === selectedSeed) ??
+      null;
+    return v ? { imageId: v.imageId, path: v.path, url: v.url, seed: v.seed } : null;
+  })();
   return {
     input,
     temperature: asNumber(r.temperature, 0.7),
     generation: { state: 'idle' },
+    selected,
   };
 }
 
@@ -336,9 +348,16 @@ function migrateComposition(raw: unknown): Composition {
     temperature: asNumber(r.temperature, 0.7),
     rembg: r.rembg !== false, // default true
   };
-  // v9: legacy variants/selected dropped (eng-spec §7). Server-side
-  // candidates collection retains the data; v2.1 history view exposes it.
-  return { settings, generation: { state: 'idle' } };
+  // v9: same pattern as migrateHost — lift any legacy selected variant
+  // onto composition.selected.
+  const compSelected = (() => {
+    const variants = migrateCompositionVariants(r.variants);
+    if (variants.length === 0) return null;
+    const selectedImageId = asString(r.selectedImageId);
+    const v = variants.find((x) => x.imageId === selectedImageId) ?? null;
+    return v ? { imageId: v.imageId, path: v.path, url: v.url, seed: v.seed } : null;
+  })();
+  return { settings, generation: { state: 'idle' }, selected: compSelected };
 }
 
 function migrateVoiceAdvanced(raw: unknown): VoiceAdvanced {

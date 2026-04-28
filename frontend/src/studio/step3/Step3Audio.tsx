@@ -547,14 +547,13 @@ function RenderBooth({ state }: RenderBoothProps) {
   const valid = computeValidity(state);
   const allValid = isAllValid(valid);
 
-  // v9 (streaming-resume Phase B): composite/host selected lives on
-  // jobCacheStore (step 14) once step 17 wires it. Until then, the
-  // RenderBooth's preview falls back to the placeholder labels — the
-  // wizard validation already keeps the user from reaching this booth
-  // through normal navigation while step 13–17 are in transition.
-  type Sel = { url: string };
-  const composite: Sel | null = null as Sel | null;
-  const host: Sel | null = null as Sel | null;
+  // v9: read from schema-side selected snapshots.
+  const composite = state.composition && isCompositionReady(state.composition)
+    ? state.composition.selected
+    : null;
+  const host = state.host && isHostReady(state.host)
+    ? state.host.selected
+    : null;
   const compositeUrl = composite?.url ?? undefined;
   const hostUrl = host?.url ?? undefined;
   const heroUrl = compositeUrl || hostUrl || null;

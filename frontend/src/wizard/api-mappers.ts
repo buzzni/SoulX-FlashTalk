@@ -105,14 +105,9 @@ export interface CompositeMapperInput {
  * discriminator, dropping everything that's UI-only.
  */
 export function toCompositeRequest(input: CompositeMapperInput): CompositeInput {
-  // v9 (streaming-resume Phase B): the 'ready' branch with a selected
-  // variant is gone from the schema. step 17 will route the selected
-  // host candidate through jobCacheStore + a new host.selected field.
-  // Until then, fall back to null — this mapper just won't produce a
-  // valid composite request, which the UI surfaces as "select a host
-  // first".
-  type Sel = { path: string };
-  const hostSelected: Sel | null = null as Sel | null;
+  // v9: host.selected carries a snapshot of the user-picked variant
+  // (imageId, path, url, seed). Pure mappers read it directly.
+  const hostSelected = input.host.selected;
 
   // CompositeInput's products only carries `path`; the wizard's
   // id/name are provenance-only, dropped on the wire.
@@ -220,11 +215,9 @@ export function toRenderRequest(args: {
   resolution: ResolutionKey;
   playlistId: string | null;
 }): RenderRequest | null {
-  // v9 same as host above — composition.selected lives on jobCacheStore
-  // (step 14) once step 17 wires it. Until then, return null so render
-  // requests are gated on the user picking a candidate via the new path.
-  type Sel = { path: string };
-  const compositeSelected: Sel | null = null as Sel | null;
+  // v9: composition.selected is the user's pick snapshot. Render only
+  // when something is picked.
+  const compositeSelected = args.composition.selected;
   if (!compositeSelected) return null;
 
   const audioPath = (() => {

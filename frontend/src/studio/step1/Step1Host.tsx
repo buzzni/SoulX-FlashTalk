@@ -143,28 +143,34 @@ export default function Step1Host({ state, update }: Step1HostProps) {
           formValuesToHostSlice(values, host),
           imageQuality,
         );
-        await regenerate(apiInput, attempt === 0 ? undefined : seeds);
+        // The mapper still emits the snake_case UI-side shape that the
+        // legacy /api/host/generate/stream endpoint expected. The new
+        // useHostGeneration hook accepts that shape and re-keys to the
+        // /api/jobs body internally — see toHostJobInput in the hook.
+        await regenerate(apiInput as unknown as Parameters<typeof regenerate>[0], attempt === 0 ? undefined : seeds);
       }),
     [form, host, imageQuality, regenerate],
   );
 
   const handleSelectVariant = (v: HostVariant) => {
-    if (!v.url || !v.path || !v.imageId) return;
-    // v9 (streaming-resume Phase B): selected variants live off-schema.
-    // Step 17 will introduce a dedicated host.selected field + sync via
-    // jobCacheStore. Until then, only the server-side select call goes
-    // out — the in-memory zustand state can't track the choice.
-    selectHost(v.imageId).catch((e) => {
+    if (!v.imageId || !v.path || !v.url) return;
+    const imageId = v.imageId;
+    // v9: persist a snapshot of the chosen variant. Pure functions
+    // like api-mappers + api/video read host.selected directly without
+    // the jobCacheStore.
+    setHost((prev) => ({
+      ...prev,
+      selected: { imageId, path: v.path!, url: v.url!, seed: v.seed },
+    }));
+    selectHost(imageId).catch((e) => {
       console.warn('host select sync failed (non-fatal):', e);
     });
   };
 
   const variants = gen.variants;
   const prevSelected = gen.prevSelected;
-  // v9: selected lives on jobCacheStore (step 14) once step 17 wires it.
-  // Both fall through to "no selection" so the UI stays in pre-pick mode.
-  const selectedImageId: string | null = null;
-  const generated = false;
+  const selectedImageId = host.selected?.imageId ?? null;
+  const generated = host.selected !== null;
 
   return (
     <FormProvider {...form}>

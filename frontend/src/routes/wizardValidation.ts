@@ -26,18 +26,11 @@ export interface WizardValidity {
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export function computeValidity(state: any): WizardValidity {
   const v: WizardValidity = { 1: false, 2: false, 3: false };
-  // v9 (streaming-resume Phase B): host.generation collapsed to
-  // {idle | attached(jobId)}. The "ready + selected" predicate that
-  // gated step progression in v8 now lives behind the jobCacheStore
-  // snapshot (step 14) and a yet-to-be-introduced 'selected' field
-  // tracked separately on the host slice. Until step 17 wires those,
-  // validation is intentionally false so route guards keep users on
-  // step 1 — better than letting them advance past stale data.
-  v[1] = false;
-  v[2] = false;
-  // Voice/resolution don't depend on generation state — keep their
-  // checks honest so step 3 can still verify its own prerequisites
-  // once steps 1 and 2 are unlocked.
+  // v9 (streaming-resume Phase B): host.selected and composition.selected
+  // are the user-side picks. Both gate step progression — having an
+  // attached job alone isn't enough; the user must commit a candidate.
+  v[1] = state?.host?.selected != null;
+  v[2] = v[1] && state?.composition?.selected != null;
   const voice = state?.voice as Voice | undefined;
   v[3] =
     v[2] &&

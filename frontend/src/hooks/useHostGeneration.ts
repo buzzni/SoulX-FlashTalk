@@ -1,38 +1,34 @@
 /**
- * useHostGeneration — SSE-driven host candidate generation with
- * slot-aware state.
+ * useHostGeneration — server-side job orchestrator (streaming-resume v9).
  *
- * The backend emits 5 event flavors during a stream:
- *   - `init` — accepted + echoes the seeds it will use. ONLY after
- *     this do we draw placeholder tiles. (Drawing them before init
- *     meant a validation failure left 4 spinners stuck on screen.)
- *   - `candidate` — one slot completed. Has seed + url + path.
- *   - `error` — per-slot failure. Mark that slot as errored.
- *   - `fatal` — stream aborted backend-side. Rethrow.
- *   - `done` — terminal. If min_success_met is false, throw.
+ * Replaces the v8 SSE-driving hook. The new flow:
+ *   1. regenerate(input) calls POST /api/jobs (kind='host'), receives a
+ *      jobId, writes host.generation = attached(jobId) to the wizard
+ *      store.
+ *   2. The store change triggers useJobSnapshot subscription via the
+ *      Step1Host page; this hook reads that snapshot from jobCacheStore.
+ *   3. UI variants are derived from the cache's variants array.
+ *      Reload, cross-device, and resume are all free — the server is
+ *      authoritative.
  *
- * Variants have matching `seed` identity so out-of-order candidate
- * events land in the right tile. UI never sees intermediate
- * un-init'd placeholders.
- *
- * Phase 2b: schema-typed. The store holds `host.generation` (state
- * machine: idle | streaming | ready | failed) — this hook drives the
- * transitions. The hook itself keeps a local `HostVariantUI` type
- * with placeholder/error fields for mid-stream UI; only completed
- * variants get committed to the schema's `HostVariant`.
+ * Kept the public surface (variants, prevSelected, batchId, isLoading,
+ * error, regenerate, abort) so Step1Host doesn't need a major rewrite.
+ * `abort` now cancels via DELETE /api/jobs/:id rather than aborting an
+ * SSE fetch.
  */
 
 import { useCallback, useState } from 'react';
-import { streamHost, type HostGenerateInput } from '../api/host';
 import { humanizeError } from '../api/http';
 import { imageIdFromPath } from '../api/mapping';
+import { createJob, deleteJob, type HostJobInput } from '../api/jobs';
+import {
+  selectJobEntry,
+  useJobCacheStore,
+} from '../stores/jobCacheStore';
 import { useWizardStore } from '../stores/wizardStore';
-import { useAbortableRequest } from './useAbortableRequest';
-import type { HostVariant as SchemaHostVariant } from '../wizard/schema';
+import { useJobSnapshot } from './useJobSnapshot';
 
-/** UI/transient streaming variant shape. Carries placeholder/error
- * for mid-stream rendering — the schema's stable HostVariant is the
- * sub-shape that survives to persistence. */
+/** UI/transient host variant. Lifted from the cache's JobVariant. */
 export interface HostVariant {
   seed: number;
   id: string;
@@ -41,9 +37,7 @@ export interface HostVariant {
   path?: string;
   placeholder: boolean;
   error?: string;
-  /** True for the 5th "이전 선택" tile carried over from a prior batch. */
   isPrev?: boolean;
-  _gradient?: string | null;
 }
 
 export interface UseHostGenerationReturn {
@@ -53,199 +47,165 @@ export interface UseHostGenerationReturn {
   isLoading: boolean;
   error: string | null;
   regenerate: (
-    input: HostGenerateInput & { imageSize?: '1K' | '2K' | '4K' },
+    input: HostJobInput,
     seeds?: number[],
   ) => Promise<void>;
   abort: () => void;
 }
 
-/** Schema HostVariant → UI HostVariant (add placeholder=false). */
-function liftSchemaVariant(v: SchemaHostVariant): HostVariant {
+export interface HostGenerateUIInput {
+  mode?: string;
+  text_prompt?: string | null;
+  face_ref_path?: string | null;
+  outfit_ref_path?: string | null;
+  style_ref_path?: string | null;
+  extra_prompt?: string | null;
+  builder?: Record<string, unknown> | null;
+  negative_prompt?: string | null;
+  face_strength?: number;
+  outfit_strength?: number;
+  outfit_text?: string | null;
+  imageSize?: string;
+  n?: number;
+  temperature?: number | null;
+}
+
+/** Translate the legacy snake_case UI-side input into the JSON body
+ * /api/jobs (kind='host') expects. The Form-style POST endpoint has
+ * been deprecated; this is the canonical mapping going forward. */
+function toHostJobInput(
+  input: HostGenerateUIInput,
+  seeds?: number[],
+): HostJobInput {
   return {
-    seed: v.seed,
-    id: `v${v.seed}`,
-    imageId: v.imageId,
-    url: v.url,
-    path: v.path,
-    placeholder: false,
+    mode: input.mode ?? 'text',
+    prompt: input.text_prompt ?? null,
+    extraPrompt: input.extra_prompt ?? null,
+    negativePrompt: input.negative_prompt ?? null,
+    builder: input.builder ?? null,
+    faceRefPath: input.face_ref_path ?? null,
+    outfitRefPath: input.outfit_ref_path ?? null,
+    styleRefPath: input.style_ref_path ?? null,
+    faceStrength: input.face_strength ?? 0.7,
+    outfitStrength: input.outfit_strength ?? 0.7,
+    outfitText: input.outfit_text ?? null,
+    seeds: seeds ?? null,
+    imageSize: input.imageSize ?? '1K',
+    n: input.n ?? 4,
+    temperature: input.temperature ?? null,
   };
 }
 
-/** UI HostVariant (filter to non-placeholder, non-error) → schema. */
-function lowerToSchema(variants: HostVariant[]): SchemaHostVariant[] {
-  return variants
-    .filter((v) => !v.placeholder && !v.error && v.url && v.path && v.imageId)
-    .map((v) => ({
-      seed: v.seed,
-      imageId: v.imageId as string,
-      url: v.url as string,
-      path: v.path as string,
-    }));
-}
-
-/** Seed initial UI state from the current store host slice.
- *
- * v9 (streaming-resume Phase B): the schema no longer carries
- * variants/selected/batchId. Step 17 will rehydrate from jobCacheStore
- * via the host.generation.attached.jobId handle. Until then, return
- * empty state — reload mid-generation reverts to a blank grid (the
- * trade-off the broader refactor accepts in exchange for race-free
- * server-side truth). */
-function readInitialFromStore(): {
-  variants: HostVariant[];
-  prevSelected: HostVariant | null;
-  batchId: string | null;
-} {
-  return { variants: [], prevSelected: null, batchId: null };
-}
-
 export function useHostGeneration(): UseHostGenerationReturn {
-  const initial = readInitialFromStore();
-  const [variants, setVariants] = useState<HostVariant[]>(initial.variants);
-  const [prevSelected, setPrevSelected] = useState<HostVariant | null>(initial.prevSelected);
-  const [batchId, setBatchId] = useState<string | null>(initial.batchId);
-  const [isLoading, setIsLoading] = useState(false);
+  const setHost = useWizardStore((s) => s.setHost);
+  const generation = useWizardStore((s) => s.host.generation);
+  const jobId =
+    generation.state === 'attached' ? generation.jobId : null;
+  // useJobSnapshot subscribes (refcounted) and returns the live entry.
+  const entry = useJobSnapshot(jobId);
   const [error, setError] = useState<string | null>(null);
-  const { run, abort } = useAbortableRequest();
 
   const regenerate = useCallback(
-    async (
-      input: HostGenerateInput & { imageSize?: '1K' | '2K' | '4K' },
-      seeds?: number[],
-    ): Promise<void> => {
-      const { signal, isCurrent } = run();
-      const req: HostGenerateInput = seeds ? { ...input, _seeds: seeds } : input;
-
-      setIsLoading(true);
+    async (input: HostJobInput | HostGenerateUIInput, seeds?: number[]): Promise<void> => {
       setError(null);
-      setVariants([]);
-
-      // v9: no schema-side selected/variants. Step 17 will source the
-      // previous selection from jobCacheStore + a host.selected field.
-      // Until then, prev tile is null and persisted generation stays idle.
-      const seedPrev: HostVariant | null = null;
-      setPrevSelected(seedPrev);
-
-      // The store's generation state stays idle through this transitional
-      // phase — step 17 will swap to attached(jobId) once the new POST
-      // /api/jobs path is wired in. SSE progress is tracked entirely via
-      // hook-local React state in the meantime (reload-lossy, fixed in
-      // step 17).
-
-      let currentVariants: HostVariant[] = [];
-      let currentPrev: HostVariant | null = seedPrev;
-      let currentBatchId: string | null = null;
-      const errs: string[] = [];
-      let errorCount = 0;
-
       try {
-        for await (const evt of streamHost(req, { signal })) {
-          if (!isCurrent()) return;
-
-          if (evt.type === 'init') {
-            const slotSeeds =
-              Array.isArray(evt.seeds) && evt.seeds.length > 0
-                ? (evt.seeds as number[])
-                : (seeds ?? []);
-            currentVariants = slotSeeds.map((s) => ({
-              seed: s,
-              id: `v${s}`,
-              placeholder: true,
-            }));
-            setVariants(currentVariants);
-          } else if (evt.type === 'candidate') {
-            const path = evt.path as string;
-            currentVariants = currentVariants.map((v) =>
-              v.seed === evt.seed
-                ? {
-                    ...v,
-                    url: evt.url as string,
-                    path,
-                    imageId: imageIdFromPath(path),
-                    placeholder: false,
-                  }
-                : v,
-            );
-            setVariants(currentVariants);
-            // v9: don't mirror per-candidate state into the store; the
-            // store carries only the {idle | attached(jobId)} handle and
-            // step 17 will route progress through jobCacheStore.
-          } else if (evt.type === 'error') {
-            errorCount += 1;
-            const detail = typeof evt.error === 'string' ? evt.error : 'unknown';
-            errs.push(`seed ${evt.seed}: ${detail}`);
-            currentVariants = currentVariants.map((v) =>
-              v.seed === evt.seed ? { ...v, error: detail, placeholder: false } : v,
-            );
-            setVariants(currentVariants);
-          } else if (evt.type === 'fatal') {
-            const err = new Error(
-              (typeof evt.error === 'string' && evt.error) || '알 수 없는 오류',
-            );
-            (err as { status?: number }).status = evt.status as number | undefined;
-            throw err;
-          } else if (evt.type === 'done') {
-            if (evt.min_success_met === false) {
-              const successCount = currentVariants.filter(
-                (v) => !v.placeholder && !v.error,
-              ).length;
-              const total = (evt.total as number | undefined) ?? currentVariants.length;
-              const err = new Error(`후보가 부족해요 (${successCount}/${total})`);
-              (err as { status?: number }).status = 503;
-              throw err;
-            }
-            if (errorCount > 0) {
-              // eslint-disable-next-line no-console
-              console.warn('host generate had partial errors:', errs);
-            }
-            if (typeof evt.batch_id === 'string') {
-              currentBatchId = evt.batch_id;
-              setBatchId(currentBatchId);
-            }
-            const prevRaw = evt.prev_selected as
-              | { image_id?: string; path?: string; url?: string; seed?: number; batch_id?: string }
-              | null
-              | undefined;
-            if (prevRaw && prevRaw.image_id && prevRaw.url) {
-              currentPrev = {
-                seed: typeof prevRaw.seed === 'number' ? prevRaw.seed : -1,
-                id: `prev-${prevRaw.image_id}`,
-                imageId: prevRaw.image_id,
-                url: prevRaw.url,
-                path: prevRaw.path,
-                placeholder: false,
-                isPrev: true,
-              };
-            } else {
-              currentPrev = null;
-            }
-            setPrevSelected(currentPrev);
-
-            // v9: terminal state lives on the server. Don't persist
-            // variants/selected/prevSelected into the schema — step 17
-            // will derive them from jobCacheStore.
-          }
-        }
-
-        if (!isCurrent()) return;
-        setIsLoading(false);
-      } catch (err) {
-        if (!isCurrent()) return;
-        const name = (err as { name?: string } | null)?.name;
-        if (name === 'AbortError') {
-          setIsLoading(false);
-          return;
-        }
-        setIsLoading(false);
-        const msg = humanizeError(err);
-        setError(msg);
-        // v9: failure state lives on the server's generation_jobs row;
-        // the schema's host.generation stays idle. Hook-local `error`
-        // surfaces to the UI for the current session.
+        // Accept either the new HostJobInput shape (passed by callers
+        // already on the new path) or the UI-side snake_case shape
+        // (Step1Host's submit handler still feeds that).
+        const body: HostJobInput =
+          'text_prompt' in input || 'face_ref_path' in input
+            ? toHostJobInput(input as HostGenerateUIInput, seeds)
+            : { ...(input as HostJobInput), seeds: seeds ?? (input as HostJobInput).seeds };
+        const job = await createJob({ kind: 'host', input: body });
+        // Move host.generation onto the new job. Reset selected — the
+        // new batch starts without a pick (eng-spec §5: cleanup
+        // demotes any prior selected to is_prev_selected on the
+        // server side; the new select must be made by the user).
+        setHost((prev) => ({
+          ...prev,
+          generation: { state: 'attached', jobId: job.id },
+          selected: null,
+        }));
+      } catch (e) {
+        setError(humanizeError(e));
       }
     },
-    [run],
+    [setHost],
   );
 
-  return { variants, prevSelected, batchId, isLoading, error, regenerate, abort };
+  const abort = useCallback(() => {
+    if (!jobId) return;
+    deleteJob(jobId).catch((e) => {
+      // Already terminal (409) or already gone (404) — silent. Other
+      // errors surface so the user knows the cancel didn't land.
+      const status = (e as { status?: number } | null)?.status;
+      if (status === 409 || status === 404) return;
+      setError(humanizeError(e));
+    });
+  }, [jobId]);
+
+  return deriveReturn(entry, error, regenerate, abort);
+}
+
+/** Project the cache entry onto the v8-shaped return. The public
+ * surface (variants, prevSelected, batchId, isLoading, error,
+ * regenerate, abort) stays stable so Step1Host doesn't churn. */
+function deriveReturn(
+  entry: ReturnType<ReturnType<typeof selectJobEntry>>,
+  error: string | null,
+  regenerate: UseHostGenerationReturn['regenerate'],
+  abort: UseHostGenerationReturn['abort'],
+): UseHostGenerationReturn {
+  // suppress unused-import warning — useJobCacheStore re-export is
+  // for tests only; functional reference here keeps the linter happy.
+  void useJobCacheStore;
+
+  const snap = entry.snapshot;
+  if (!snap) {
+    return {
+      variants: [],
+      prevSelected: null,
+      batchId: null,
+      isLoading: entry.isLoading,
+      error: error ?? entry.error,
+      regenerate,
+      abort,
+    };
+  }
+
+  const variants: HostVariant[] = snap.variants.map((v, i) => ({
+    seed: typeof v.seed === 'number' ? v.seed : i,
+    id: typeof v.image_id === 'string' ? v.image_id : `v${i}`,
+    imageId: typeof v.image_id === 'string'
+      ? v.image_id
+      : (typeof v.path === 'string' ? imageIdFromPath(v.path) : null),
+    url: typeof v.url === 'string' ? v.url : undefined,
+    path: typeof v.path === 'string' ? v.path : undefined,
+    placeholder: false,
+  }));
+
+  const prevSelected: HostVariant | null = snap.prev_selected_image_id
+    ? {
+        seed: -1,
+        id: `prev-${snap.prev_selected_image_id}`,
+        imageId: snap.prev_selected_image_id,
+        placeholder: false,
+        isPrev: true,
+      }
+    : null;
+
+  const isLoading =
+    entry.isLoading ||
+    snap.state === 'pending' ||
+    snap.state === 'streaming';
+
+  return {
+    variants,
+    prevSelected,
+    batchId: snap.batch_id,
+    isLoading,
+    error: error ?? entry.error ?? snap.error,
+    regenerate,
+    abort,
+  };
 }

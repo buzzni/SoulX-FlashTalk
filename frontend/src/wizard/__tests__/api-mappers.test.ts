@@ -22,6 +22,7 @@ const READY_HOST: Host = {
   input: { kind: 'text', prompt: 'a'.repeat(20), builder: {}, negativePrompt: '', extraPrompt: '' },
   temperature: 0.7,
   generation: { state: 'attached', jobId: 'job-h1' },
+  selected: { imageId: 'h1', path: '/srv/h1.png', url: '/u/h1.png', seed: 1 },
 };
 
 const TWO_PRODUCTS: Products = [
@@ -49,9 +50,7 @@ const READY_COMPOSITION: Composition = {
 };
 
 describe('toCompositeRequest', () => {
-  it('returns null host.selectedPath during the v9 transitional phase', () => {
-    // step 17 will restore "host.selected.path threads through" once
-    // jobCacheStore + host.selected ship.
+  it('threads host.selected.path through to host.selectedPath', () => {
     const req = toCompositeRequest({
       host: READY_HOST,
       products: [],
@@ -59,7 +58,7 @@ describe('toCompositeRequest', () => {
       composition: READY_COMPOSITION,
       imageQuality: '1K',
     });
-    expect(req.host.selectedPath).toBeNull();
+    expect(req.host.selectedPath).toBe('/srv/h1.png');
   });
 
   it('returns null host.selectedPath when host generation is not ready', () => {

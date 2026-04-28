@@ -25,6 +25,7 @@ const READY_TEXT_HOST: Host = {
   },
   temperature: 0.7,
   generation: { state: 'attached', jobId: 'job-h1' },
+  selected: null,
 };
 
 describe('hostSliceToFormValues', () => {
@@ -73,6 +74,7 @@ describe('formValuesToHostSlice', () => {
         outfitStrength: 0.5,
       },
       temperature: 0.7,
+      selected: null,
     };
 
     const next = formValuesToHostSlice(imageValues, READY_TEXT_HOST);

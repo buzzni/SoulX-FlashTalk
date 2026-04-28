@@ -341,17 +341,13 @@ describe('readiness predicates', () => {
     expect(isProductReady({ id: 'a', source: { kind: 'url', url: 'https://x', urlInput: 'x' } })).toBe(true);
   });
 
-  it('isHostReady returns false during the v9 transitional phase', () => {
-    // v9 (streaming-resume Phase B): readiness has moved to the
-    // server-side generation_jobs row + a yet-to-be-introduced
-    // host.selected field. Until step 17 wires those, isHostReady
-    // returns false for every input — test the placeholder so a
-    // future regression to "always returns true" is loud.
+  it('isHostReady requires host.selected to be set (v9)', () => {
     expect(
       isHostReady({
         input: { kind: 'text', prompt: '', builder: {}, negativePrompt: '', extraPrompt: '' },
         temperature: 0.7,
         generation: { state: 'idle' },
+        selected: null,
       }),
     ).toBe(false);
     expect(
@@ -359,8 +355,17 @@ describe('readiness predicates', () => {
         input: { kind: 'text', prompt: '', builder: {}, negativePrompt: '', extraPrompt: '' },
         temperature: 0.7,
         generation: { state: 'attached', jobId: 'job-x' },
+        selected: null,
       }),
     ).toBe(false);
+    expect(
+      isHostReady({
+        input: { kind: 'text', prompt: '', builder: {}, negativePrompt: '', extraPrompt: '' },
+        temperature: 0.7,
+        generation: { state: 'attached', jobId: 'job-x' },
+        selected: { imageId: 'h1', path: '/p.png', url: '/u.png', seed: 1 },
+      }),
+    ).toBe(true);
   });
 
   it('isVoiceReady tts requires voiceId + script + ready generation', () => {

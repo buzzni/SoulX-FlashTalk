@@ -125,11 +125,26 @@ export const HostGenerationSchema = z.discriminatedUnion('state', [
 ]);
 export type HostGeneration = z.infer<typeof HostGenerationSchema>;
 
+/** v9: the user's chosen variant. Tracked separately from
+ * `generation` because `attached(jobId)` is the server's truth and
+ * a candidate pick is a UI-side decision. Stores a full snapshot of
+ * the variant (imageId/path/url/seed) so pure functions like
+ * api-mappers can render without consulting the cache — and so the
+ * pick survives even after the cache evicts the job entry. */
+export const HostSelectedSchema = z.object({
+  imageId: z.string(),
+  path: z.string(),
+  url: z.string(),
+  seed: z.number(),
+}).nullable();
+export type HostSelected = z.infer<typeof HostSelectedSchema>;
+
 export const HostSchema = z.object({
   input: HostInputSchema,
   /** 0..1 creativity dial. Shared across modes. */
   temperature: z.number(),
   generation: HostGenerationSchema,
+  selected: HostSelectedSchema,
 });
 export type Host = z.infer<typeof HostSchema>;
 
@@ -216,9 +231,19 @@ export const CompositionGenerationSchema = z.discriminatedUnion('state', [
 ]);
 export type CompositionGeneration = z.infer<typeof CompositionGenerationSchema>;
 
+/** v9: same pattern as HostSelectedSchema. */
+export const CompositionSelectedSchema = z.object({
+  imageId: z.string(),
+  path: z.string(),
+  url: z.string(),
+  seed: z.number(),
+}).nullable();
+export type CompositionSelected = z.infer<typeof CompositionSelectedSchema>;
+
 export const CompositionSchema = z.object({
   settings: CompositionSettingsSchema,
   generation: CompositionGenerationSchema,
+  selected: CompositionSelectedSchema,
 });
 export type Composition = z.infer<typeof CompositionSchema>;
 
@@ -363,6 +388,7 @@ const HostSerializedSchema = z.object({
   input: HostInputSerializedSchema,
   temperature: z.number(),
   generation: HostGenerationSchema,
+  selected: HostSelectedSchema,
 });
 
 const ProductSourceSerializedSchema = z.discriminatedUnion('kind', [
@@ -443,6 +469,7 @@ export const INITIAL_HOST: Host = {
   },
   temperature: 0.7,
   generation: { state: 'idle' },
+  selected: null,
 };
 
 export const INITIAL_BACKGROUND: Background = {
@@ -459,6 +486,7 @@ export const INITIAL_COMPOSITION: Composition = {
     rembg: true,
   },
   generation: { state: 'idle' },
+  selected: null,
 };
 
 export const INITIAL_VOICE: Voice = {
@@ -487,19 +515,18 @@ export const INITIAL_WIZARD_STATE: WizardState = {
 // Type guards (small, frequently-needed predicates)
 // ────────────────────────────────────────────────────────────────────
 
-// v9: 'ready' is no longer a generation state — readiness now means the
-// row has a server-side job attached AND that job's snapshot is ready
-// AND the user has picked a candidate. None of those facts are visible
-// on the schema yet (step 17 will add them via jobCacheStore + a
-// host.selected field), so these guards return false during the
-// transitional phase. Keeping the function names + signatures preserves
-// the call sites; they'll start returning true once step 17 lands.
-export function isHostReady(_host: Host): boolean {
-  return false;
+// v9: readiness = a candidate has been picked. The picked variant's
+// jobId / variants live on jobCacheStore; the schema only carries
+// `selected.imageId` as the user's intent. This deliberately doesn't
+// gate on generation.state because the user's pick on a 'ready' job
+// survives a re-roll attempt, a Last-Event-ID drop, etc. — UI-side
+// truth.
+export function isHostReady(host: Host): host is Host & { selected: { imageId: string } } {
+  return host.selected !== null;
 }
 
-export function isCompositionReady(_comp: Composition): boolean {
-  return false;
+export function isCompositionReady(comp: Composition): comp is Composition & { selected: { imageId: string } } {
+  return comp.selected !== null;
 }
 
 export function isBackgroundReady(bg: Background): boolean {

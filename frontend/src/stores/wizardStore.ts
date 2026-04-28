@@ -258,18 +258,46 @@ export function migrateWizardEnvelope(
   }
   if (fromVersion < 9) {
     // v9 generation discriminator: {idle|streaming|ready|failed} →
-    // {idle|attached(jobId)}. The streaming-resume Phase B treats
-    // generation as a thin handle whose source of truth is server-side.
-    // Reset every persisted in-flight or terminal state to idle; ready
-    // candidates from v8 still live in the studio_hosts collection and
-    // resurface in v2.1's history view (eng-spec §7 migration table).
+    // {idle|attached(jobId)}. Reset to idle. Selected variants from
+    // a v8 'ready' generation are lifted onto the new selected field
+    // so the user's prior pick survives the upgrade.
     const host = (p.host as Record<string, unknown> | undefined);
     if (host && typeof host === 'object') {
+      const gen = host.generation as Record<string, unknown> | undefined;
+      const sel = gen?.selected as
+        | { imageId?: string; path?: string; url?: string; seed?: number }
+        | null
+        | undefined;
       host.generation = { state: 'idle' };
+      if (sel && sel.imageId && sel.path && sel.url) {
+        host.selected = {
+          imageId: sel.imageId,
+          path: sel.path,
+          url: sel.url,
+          seed: typeof sel.seed === 'number' ? sel.seed : 0,
+        };
+      } else if (host.selected === undefined) {
+        host.selected = null;
+      }
     }
     const composition = (p.composition as Record<string, unknown> | undefined);
     if (composition && typeof composition === 'object') {
+      const gen = composition.generation as Record<string, unknown> | undefined;
+      const sel = gen?.selected as
+        | { imageId?: string; path?: string; url?: string; seed?: number }
+        | null
+        | undefined;
       composition.generation = { state: 'idle' };
+      if (sel && sel.imageId && sel.path && sel.url) {
+        composition.selected = {
+          imageId: sel.imageId,
+          path: sel.path,
+          url: sel.url,
+          seed: typeof sel.seed === 'number' ? sel.seed : 0,
+        };
+      } else if (composition.selected === undefined) {
+        composition.selected = null;
+      }
     }
   }
   // Lane C: validate the migrated blob against the canonical persisted
