@@ -8,6 +8,7 @@ gradio_results/
 gradio_results_multigpu/
 models/
 .gstack/
+.gstack-design-review/
 
 # Secrets / credentials (never commit)
 .env
