@@ -99,6 +99,7 @@ function toHostJobInput(
 export function useHostGeneration(): UseHostGenerationReturn {
   const setHost = useWizardStore((s) => s.setHost);
   const generation = useWizardStore((s) => s.host.generation);
+  const selected = useWizardStore((s) => s.host.selected);
   const jobId =
     generation.state === 'attached' ? generation.jobId : null;
   // useJobSnapshot subscribes (refcounted) and returns the live entry.
@@ -109,22 +110,20 @@ export function useHostGeneration(): UseHostGenerationReturn {
     async (input: HostJobInput | HostGenerateUIInput, seeds?: number[]): Promise<void> => {
       setError(null);
       try {
-        // Accept either the new HostJobInput shape (passed by callers
-        // already on the new path) or the UI-side snake_case shape
-        // (Step1Host's submit handler still feeds that).
         const body: HostJobInput =
           'text_prompt' in input || 'face_ref_path' in input
             ? toHostJobInput(input as HostGenerateUIInput, seeds)
             : { ...(input as HostJobInput), seeds: seeds ?? (input as HostJobInput).seeds };
         const job = await createJob({ kind: 'host', input: body });
-        // Move host.generation onto the new job. Reset selected — the
-        // new batch starts without a pick (eng-spec §5: cleanup
-        // demotes any prior selected to is_prev_selected on the
-        // server side; the new select must be made by the user).
+        // step 18 (UI gate fix): keep host.selected as-is during the
+        // re-roll. The deriveReturn path uses it as a fallback prev
+        // tile until the snapshot's prev_selected_image_id lands on
+        // 'done', so the user never sees an empty 5th tile during
+        // streaming. handleSelectVariant overwrites selected when the
+        // user picks from the new batch.
         setHost((prev) => ({
           ...prev,
           generation: { state: 'attached', jobId: job.id },
-          selected: null,
         }));
       } catch (e) {
         setError(humanizeError(e));
@@ -144,14 +143,22 @@ export function useHostGeneration(): UseHostGenerationReturn {
     });
   }, [jobId]);
 
-  return deriveReturn(entry, error, regenerate, abort);
+  return deriveReturn(entry, selected, error, regenerate, abort);
 }
 
 /** Project the cache entry onto the v8-shaped return. The public
  * surface (variants, prevSelected, batchId, isLoading, error,
- * regenerate, abort) stays stable so Step1Host doesn't churn. */
+ * regenerate, abort) stays stable so Step1Host doesn't churn.
+ *
+ * step 18 prev-tile gate: if the snapshot doesn't yet carry a
+ * prev_selected_image_id (server publishes it on 'done'), fall back
+ * to host.selected — the user's pre-regenerate pick. Once the new
+ * batch's variants render, handleSelectVariant overwrites
+ * host.selected; once 'done' lands, snap.prev_selected_image_id wins.
+ * Net: the 5th tile never blanks mid-stream. */
 function deriveReturn(
   entry: ReturnType<ReturnType<typeof selectJobEntry>>,
+  schemaSelected: { imageId: string; path: string; url: string; seed: number } | null,
   error: string | null,
   regenerate: UseHostGenerationReturn['regenerate'],
   abort: UseHostGenerationReturn['abort'],
@@ -184,6 +191,14 @@ function deriveReturn(
     placeholder: false,
   }));
 
+  // Server-provided prev wins; otherwise fall back to the user's
+  // pre-regenerate pick so streaming never shows an empty 5th tile.
+  // Suppress the fallback if schemaSelected.imageId already appears
+  // in the new variants — it's the user's current-batch pick, not a
+  // "previous" item.
+  const newBatchHasSchemaSelected = schemaSelected
+    ? variants.some((v) => v.imageId === schemaSelected.imageId)
+    : false;
   const prevSelected: HostVariant | null = snap.prev_selected_image_id
     ? {
         seed: -1,
@@ -192,7 +207,17 @@ function deriveReturn(
         placeholder: false,
         isPrev: true,
       }
-    : null;
+    : (schemaSelected && !newBatchHasSchemaSelected
+        ? {
+            seed: schemaSelected.seed,
+            id: `prev-${schemaSelected.imageId}`,
+            imageId: schemaSelected.imageId,
+            url: schemaSelected.url,
+            path: schemaSelected.path,
+            placeholder: false,
+            isPrev: true,
+          }
+        : null);
 
   const isLoading =
     entry.isLoading ||
