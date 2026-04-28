@@ -70,6 +70,7 @@ function persistAsset(a: ServerAsset | LocalAsset | null | undefined): ServerAss
       path: a.path,
       url: isTransientUrl(a.url) ? undefined : a.url,
       name: a.name,
+      size: a.size,
     };
   }
   return null;

@@ -61,9 +61,7 @@ export function HostTextForm() {
   return (
     <div className="flex-col gap-4">
       <div>
-        <div className="text-sm font-semibold text-foreground mb-2">
-          어떤 쇼호스트로 시작할까요?
-        </div>
+        <div className="text-sm font-semibold text-foreground mb-2">예시로 시작하기</div>
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
           {PRESETS.map((p) => (
             <button
@@ -77,15 +75,10 @@ export function HostTextForm() {
             </button>
           ))}
         </div>
-        <div className="mt-1.5 text-2xs text-tertiary">
-          카드를 누르면 아래 입력칸이 채워져요. 자유롭게 다듬어 주세요.
-        </div>
       </div>
 
       <div>
-        <div className="text-sm font-semibold text-foreground mb-1.5">
-          쇼호스트 설명 <span className="text-tertiary font-normal">· 15자 이상</span>
-        </div>
+        <div className="text-sm font-semibold text-foreground mb-1.5">쇼호스트 설명</div>
         <textarea
           className={cn('textarea', prompt && prompt.length < 15 && 'invalid')}
           placeholder="예) 30대 여성, 밝게 웃고 있음, 베이지 니트, 따뜻한 분위기"
@@ -94,7 +87,7 @@ export function HostTextForm() {
       </div>
 
       <details className="text-xs text-tertiary">
-        <summary className="cursor-pointer select-none">피하고 싶은 표현이 있나요? (선택)</summary>
+        <summary className="cursor-pointer select-none">피하고 싶은 표현</summary>
         <input
           className="input mt-2"
           placeholder="예) 과한 화장, 어두운 표정"

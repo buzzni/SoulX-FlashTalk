@@ -33,6 +33,10 @@ export const ServerAssetSchema = z.object({
   path: z.string(),
   url: z.string().optional(),
   name: z.string().optional(),
+  /** Bytes — display-only, preserved across LocalAsset → ServerAsset
+   * swap so the upload tile keeps showing the right KB after the
+   * upload completes. Not authoritative; backend never reads it. */
+  size: z.number().optional(),
 });
 export type ServerAsset = z.infer<typeof ServerAssetSchema>;
 

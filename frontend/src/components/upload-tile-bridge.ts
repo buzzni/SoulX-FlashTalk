@@ -59,7 +59,7 @@ export function uploadFileFromAsset(
     };
   }
   if (isServerAsset(asset)) {
-    return { name: asset.name, url: asset.url };
+    return { name: asset.name, url: asset.url, size: asset.size };
   }
   return null;
 }

@@ -535,16 +535,22 @@
 .upload-tile.has-file {
   border-style: solid;
   border-color: var(--border);
-  padding: 10px;
+  padding: 12px;
   background: var(--bg-elev);
-  min-height: 0;
+  /* Match empty-state min-height so the surrounding layout doesn't
+   * jump when the user picks a file. */
   display: grid;
-  grid-template-columns: 56px 1fr auto;
+  grid-template-columns: auto 1fr auto;
   grid-template-rows: auto;
   align-items: center;
-  gap: 12px;
+  gap: 14px;
   cursor: default;
   transform: none;
+}
+.upload-tile.has-file .file-thumb {
+  /* Bigger thumb to fill the matched 132px height. */
+  width: 108px;
+  height: 108px;
 }
 .upload-tile.has-file:hover { background: var(--bg-elev); border-color: var(--border-strong); color: inherit; transform: none; }
 .upload-tile .icon { width: 28px; height: 28px; color: var(--text-tertiary); }

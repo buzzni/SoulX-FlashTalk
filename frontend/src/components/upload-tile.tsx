@@ -47,6 +47,15 @@ export function UploadTile({
   const [dragOver, setDragOver] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
+  // Reset value before opening the picker so re-selecting the same
+  // file (after delete or replace) still fires `onChange`. Browsers
+  // suppress the event when the value is unchanged.
+  const openPicker = () => {
+    if (!inputRef.current) return;
+    inputRef.current.value = '';
+    inputRef.current.click();
+  };
+
   const handleFile = (f: File | undefined) => {
     if (!f) return;
     const reader = new FileReader();
@@ -84,7 +93,7 @@ export function UploadTile({
         />
         <div
           className="file-thumb cursor-pointer"
-          onClick={() => inputRef.current?.click()}
+          onClick={() => openPicker()}
         >
           {file.url ? (
             <img src={file.url} alt={file.name ?? ''} />
@@ -108,7 +117,7 @@ export function UploadTile({
             className="file-btn"
             onClick={(e) => {
               e.stopPropagation();
-              inputRef.current?.click();
+              openPicker();
             }}
           >
             <RefreshCcw className="size-3" />
@@ -149,7 +158,7 @@ export function UploadTile({
       className="upload-tile"
       style={dragOver ? { borderColor: 'var(--accent)', background: 'var(--accent-soft)' } : undefined}
       tabIndex={0}
-      onClick={() => inputRef.current?.click()}
+      onClick={() => openPicker()}
       onDragOver={(e) => {
         e.preventDefault();
         setDragOver(true);
