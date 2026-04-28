@@ -208,3 +208,72 @@ class SimpleMessage(_ExtraAllowBase):
 
     message: str
     task_id: Optional[str] = None
+
+
+# ────────────────────────────────────────────────────────────────────
+# Generation jobs (/api/jobs) — streaming-resume Phase A.
+#
+# Step 3 ships only kind="host"; step 4 expands HostJobRequestPayload into
+# a discriminated union with composite. Keep `extra='forbid'` on the
+# request schemas so a typo'd field (e.g., faceRefpath) fails validation
+# instead of silently bypassing safe_upload_path.
+# ────────────────────────────────────────────────────────────────────
+
+JobKind = Literal["host", "composite"]
+JobState = Literal["pending", "streaming", "ready", "failed", "cancelled"]
+
+
+class HostJobInput(BaseModel):
+    """Step 1 host-candidate generation parameters. Mirrors the
+    /api/host/generate Form fields as JSON so the runner can replay them
+    exactly. Path fields (faceRefPath, outfitRefPath, styleRefPath) are
+    sanitized via utils.security.safe_upload_path before storage —
+    eng-spec §8."""
+
+    model_config = ConfigDict(extra='forbid')
+
+    mode: str
+    prompt: Optional[str] = None
+    extraPrompt: Optional[str] = None
+    negativePrompt: Optional[str] = None
+    builder: Optional[dict[str, Any]] = None
+    faceRefPath: Optional[str] = None
+    outfitRefPath: Optional[str] = None
+    styleRefPath: Optional[str] = None
+    faceStrength: float = 0.7
+    outfitStrength: float = 0.7
+    outfitText: Optional[str] = None
+    seeds: Optional[list[int]] = None
+    imageSize: str = "1K"
+    n: int = 4
+    temperature: Optional[float] = None
+
+
+class HostJobRequestPayload(BaseModel):
+    """POST /api/jobs body for kind='host'.
+
+    Step 4 will replace this with a Field(discriminator='kind') union over
+    {HostJobRequestPayload, CompositeJobRequestPayload}."""
+
+    model_config = ConfigDict(extra='forbid')
+
+    kind: Literal["host"]
+    input: HostJobInput
+
+
+class JobSnapshot(_ExtraAllowBase):
+    """Public job shape — input_blob is intentionally excluded. Used by
+    POST /api/jobs (response_model) and step 5's GET /api/jobs/:id."""
+
+    id: str
+    user_id: str
+    kind: JobKind
+    state: JobState
+    variants: list[dict[str, Any]] = Field(default_factory=list)
+    prev_selected_image_id: Optional[str] = None
+    batch_id: Optional[str] = None
+    error: Optional[str] = None
+    input_hash: Optional[str] = None
+    created_at: Optional[Any] = None
+    updated_at: Optional[Any] = None
+    heartbeat_at: Optional[Any] = None

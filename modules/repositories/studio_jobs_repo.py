@@ -101,8 +101,35 @@ async def create(
     input_hash: str,
     input_blob: dict,
 ) -> dict:
-    """Insert a new pending job. Dedupe-by-reuse on (user_id, input_hash):
-    if an active row already exists, that row is returned instead.
+    """Convenience wrapper: drops the was_created flag from
+    create_or_get_active. Tests use this; callers that need to distinguish
+    a fresh insert from a dedupe hit (e.g., POST /api/jobs deciding whether
+    to call runner.submit) use create_or_get_active directly."""
+    snap, _ = await create_or_get_active(
+        user_id=user_id,
+        kind=kind,
+        input_hash=input_hash,
+        input_blob=input_blob,
+    )
+    return snap
+
+
+async def create_or_get_active(
+    *,
+    user_id: str,
+    kind: str,
+    input_hash: str,
+    input_blob: dict,
+) -> tuple[dict, bool]:
+    """Returns (snapshot, was_created). True on fresh insert; False when
+    the dedupe partial-unique index matched an existing pending/streaming
+    row (eng-spec §6.5).
+
+    Callers needing only the snapshot can use create() above. POST /api/jobs
+    needs the bool to decide whether to call runner.submit — submitting
+    again on dedupe-hit would either no-op (the in-flight task is already
+    in _running) or wastefully spawn a second task whose mark_streaming
+    conditional update returns False on the next-state row anyway.
 
     Raises:
       ValueError on bad kind.
@@ -142,10 +169,10 @@ async def create(
             # is better than looping.
             doc["_id"] = str(uuid.uuid4())
             await _coll().insert_one(doc)
-            return _serialize(doc)
+            return _serialize(doc), True
         # find_active_by_hash already returns the serialized shape.
-        return existing
-    return _serialize(doc)
+        return existing, False
+    return _serialize(doc), True
 
 
 async def get_by_id(user_id: str, job_id: str) -> Optional[dict]:

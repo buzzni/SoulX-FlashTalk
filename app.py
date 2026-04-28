@@ -24,9 +24,12 @@ import config
 from modules import auth as auth_module
 from modules import db as db_module
 from modules.job_runner import job_runner
+from modules.repositories import studio_jobs_repo as jobs_repo
 from modules.task_queue import task_queue
 from modules.schemas import (
     HistoryResponse,
+    HostJobRequestPayload,
+    JobSnapshot,
     QueueSnapshot,
     ResultManifest,
     TaskStateSnapshot,
@@ -2973,6 +2976,60 @@ async def delete_video(task_id: str, request: Request):
         "video_deleted": deleted_video,
         "images_removed": removed_images,
     }
+
+
+# ========================================
+# Generation jobs (streaming-resume Phase A)
+# ========================================
+
+@app.post("/api/jobs", response_model=JobSnapshot)
+async def create_job(request: Request, body: HostJobRequestPayload):
+    """Create a generation job and submit it to the runner.
+
+    Dedupe-by-reuse: if the same (user_id, input_hash) already has an
+    active row (pending or streaming), the existing row is returned and
+    no new submit happens — the runner is already working on it
+    (eng-spec §6.5).
+
+    Step 3 ships kind='host' only; step 4 expands the body to a discriminated
+    union covering composite as well.
+    """
+    user = auth_module.get_request_user(request)
+
+    # Pydantic has already validated shape + types. Now sanitize paths
+    # and compute the canonical blob.
+    from modules.job_input import (
+        compute_input_hash,
+        enforce_size_cap,
+        validate_and_sanitize,
+    )
+
+    raw_input = body.input.model_dump(exclude_none=True)
+    sanitized = validate_and_sanitize(body.kind, raw_input)
+    enforce_size_cap(sanitized)
+    input_hash = compute_input_hash(sanitized)
+
+    job, was_created = await jobs_repo.create_or_get_active(
+        user_id=user["user_id"],
+        kind=body.kind,
+        input_hash=input_hash,
+        input_blob=sanitized,
+    )
+
+    # Only submit on a fresh insert. A dedupe-hit means an earlier POST
+    # already submitted this row; the runner is either still running it
+    # (in which case a second submit no-ops via _running) or it transitioned
+    # to terminal (in which case the next conditional update would no-op
+    # anyway). Skipping keeps the log noise clean.
+    if was_created:
+        try:
+            await job_runner.submit(job["id"])
+        except RuntimeError as e:
+            # Runner is stopping — surface to the client as 503 so the
+            # request can be retried after the next deploy.
+            raise HTTPException(status_code=503, detail=str(e))
+
+    return job
 
 
 # ========================================
