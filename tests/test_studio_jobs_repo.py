@@ -222,6 +222,97 @@ async def test_mark_cancelled_already_terminal_returns_false(repo_db):
         job["id"], owner_user_id="u1") is False
 
 
+async def test_mark_ready_blocked_from_pending(repo_db):
+    """mark_ready filters on state='streaming'. A worker that skips
+    mark_streaming and tries to fast-forward pending → ready must fail
+    closed (the state machine guarantee depends on this filter)."""
+    job = await repo.create(user_id="u1", kind="host",
+                            input_hash="h1", input_blob={})
+    # No mark_streaming.
+    assert await repo.mark_ready(job["id"], batch_id="b") is False
+    snap = await repo.get_by_id("u1", job["id"])
+    assert snap["state"] == "pending"
+
+
+async def test_append_variant_blocked_from_pending(repo_db):
+    """Same shape as mark_ready_blocked_from_pending: append_variant only
+    accepts streaming. A handler emitting a candidate before mark_streaming
+    landed must see False so it doesn't write a phantom variant."""
+    job = await repo.create(user_id="u1", kind="host",
+                            input_hash="h1", input_blob={})
+    assert await repo.append_variant(job["id"], {"image_id": "x"}) is False
+
+
+async def test_mark_ready_blocked_from_already_ready(repo_db):
+    """Idempotent retries on a 'done' event must not double-fire ready
+    bookkeeping. mark_ready's state filter ('streaming') blocks the
+    second call so callers see False rather than a phantom transition."""
+    job = await repo.create(user_id="u1", kind="host",
+                            input_hash="h1", input_blob={})
+    await repo.mark_streaming(job["id"])
+    assert await repo.mark_ready(job["id"], batch_id="b") is True
+    assert await repo.mark_ready(job["id"], batch_id="b2") is False
+    # First batch_id wins.
+    snap = await repo.get_by_id("u1", job["id"])
+    assert snap["batch_id"] == "b"
+
+
+async def test_mark_failed_blocked_from_terminal(repo_db):
+    """Symmetric to test_mark_failed_blocked_when_cancelled, but the
+    terminal state here is 'ready'. Once a job has shipped, a late
+    failure signal must NOT corrupt the snapshot."""
+    job = await repo.create(user_id="u1", kind="host",
+                            input_hash="h1", input_blob={})
+    await repo.mark_streaming(job["id"])
+    await repo.mark_ready(job["id"], batch_id="b")
+    assert await repo.mark_failed(job["id"], "boom") is False
+    snap = await repo.get_by_id("u1", job["id"])
+    assert snap["state"] == "ready"
+    assert snap["error"] is None
+
+
+async def test_create_or_get_active_race_recovery(repo_db, monkeypatch):
+    """Eng-spec §6.5 race: DuplicateKeyError fires (partial unique hit),
+    but the conflicting row terminated between our insert and our
+    find_active_by_hash read — so find returns None. The repo retries
+    with a fresh uuid rather than surfacing the error.
+    """
+    from pymongo.errors import DuplicateKeyError
+
+    insert_calls = {"n": 0}
+    orig_coll = repo._coll
+
+    class _ProxyColl:
+        def __init__(self, real):
+            self._real = real
+
+        def __getattr__(self, name):
+            return getattr(self._real, name)
+
+        async def insert_one(self, doc):
+            insert_calls["n"] += 1
+            if insert_calls["n"] == 1:
+                raise DuplicateKeyError("simulated race")
+            return await self._real.insert_one(doc)
+
+    real = orig_coll()
+    monkeypatch.setattr(repo, "_coll", lambda: _ProxyColl(real))
+
+    async def _no_active(user_id, input_hash):
+        return None  # Conflicting row already terminated.
+
+    monkeypatch.setattr(repo, "find_active_by_hash", _no_active)
+
+    snap, was_created = await repo.create_or_get_active(
+        user_id="u1", kind="host", input_hash="h1", input_blob={},
+    )
+    assert was_created is True
+    assert snap["state"] == "pending"
+    # Two insert attempts: the first raised, the second succeeded with
+    # a fresh uuid.
+    assert insert_calls["n"] == 2
+
+
 async def test_update_heartbeat_only_when_streaming(repo_db):
     job = await repo.create(user_id="u1", kind="host",
                             input_hash="h1", input_blob={})
