@@ -209,3 +209,33 @@ Deferred work captured during plan reviews. Each entry includes context for futu
 **Completed:** feat/step2-rhf (2026-04-27)
 
 `Step2Composite.tsx` is now a `FormProvider` container with `useForm({resolver: zodResolver(Step2FormValuesSchema), mode:'onBlur'})`. The form spans three store slices — `products`, `background`, `composition.settings`. The container subscribes to `composition.settings` (NOT the full `composition`) via a narrow zustand selector so SSE candidate events during composite streaming can't trigger `form.reset` and wipe in-progress edits. CRITICAL bug caught during /simplify pre-landing review (formSlice memo originally depended on the full composition); fixed and committed with a Playwright regression guard (`step2-rhf.spec.ts` "typed direction survives a simulated composition.generation mutation"). `BackgroundPicker` swaps the 4-way `background.kind` tagged union via `setValue`, `ProductList` uses `useFieldArray` for drag/add/remove with per-row source-kind swaps via `update(idx, ...)`, and `CompositionControls` uses `Controller` for shot/angle/temperature plus `register` for the direction textarea (with merged-ref pattern to keep the N번 caret-insert chip working). Submit runs through `form.handleSubmit` and parallelizes product + background uploads via `Promise.all`, then reuses `toCompositeRequest` from `wizard/api-mappers.ts`. `onChange` writes via a single `updateState` call (atomic 3-slice batch — one render, one selector run per subscriber). Dropped dead surface: `update?` prop, `Step2Slice`/`step2SliceToFormValues`/`Step2WriteTargets`/`formValuesToStep2WriteTargets`, `_props: ProductListProps`. Reused: `uploadFileFromAsset` + `localAssetFromUploadFile` (upload-tile-bridge), `isProductReady` (schema), `productPreviewUrl` (now exported from ProductList for CompositionControls). Final test counts: 216 → 225 vitest (+9 new api-mapper tests, +2 schema tests, -4 stale step2 mapper tests), 3/3 step2-rhf e2e PASS (preset→prompt swap, prompt→preset reverse, streaming-during-typing regression).
+
+## Admin page v2 — A/B 도구 + RUBRIC integration + 8 inference params hot-tune
+
+**What**: MVP admin page (prompt only) 가 lever 입증한 후 격상.
+
+1. **A/B 동시 enqueue 도구** — 같은 host+audio 입력으로 prompt N variants 동시 enqueue, result grid 비교 UI
+2. **RUBRIC 점수 누적** — eval/step3 framework 통합. 각 task 에 score 매기면 prompt 별 yes-rate / mouth_over_articulation 통계
+3. **8 inference params hot-tune** — `flash_talk/inference.py:12` module-level `infer_params` 를 lazy callable 로 refactor. subprocess (USP) 환경 도 admin doc read. sample_steps / motion_frames_num / sample_shift / color_correction_strength / audio_trim_pad_ms / lipsync_audio_offset_ms / default_seed
+4. **wav2vec_dir hot-swap** — pipeline reload + GPU memory churn 처리 logic. allowlist enum (free path 보안 footgun)
+5. **Multi-prompt library** — 라벨, 즐겨찾기, history, diff view
+
+**Why**: MVP admin page 가 prompt lever 입증 입증되면 evidence mechanism 자체가 다음 lever. codex outside voice (T5) 가 지적한 핵심 — A/B + RUBRIC 없으면 admin tooling 이 noise 만 만듦.
+
+**Pros**:
+- A/B 가 manual replay-and-compare 시간 90%+ 단축
+- RUBRIC 통합으로 객관적 lever 입증 (1134bc2 류 함정 회피)
+- 8 inference params hot-tune 으로 sample_steps / motion_frames 등 다른 axis 도 admin 에서
+
+**Cons**:
+- inference.py module-level refactor 가 subprocess (USP) 환경에서 복잡
+- wav2vec_dir hot-swap 은 pipeline reload + GPU 위험. 잘못하면 OOM
+- A/B 도구가 batch enqueue + result grid UI 까지 커지면 1주 작업
+
+**Context**: 2026-04-28 plan-eng-review + codex outside voice 에서 도출. Design doc: `~/.gstack/projects/buzzni-SoulX-FlashTalk/jack-main-design-20260428-142619.md`. MVP (prompt only) 가 lever 입증된 후에만 진행. 입증 못 하면 다른 lever (HeyGen / Hallo2 / fine-tune) 로 점프.
+
+**Effort**: human ~1-2 weeks / CC ~3-5 days total.
+
+**Priority**: P2 (defer until prompt lever 입증).
+
+**Depends on / blocked by**: MVP admin page (prompt only) 구현 + 5-7번 prompt 변형 시도 + RUBRIC blind score 의 yes-rate 평가.
