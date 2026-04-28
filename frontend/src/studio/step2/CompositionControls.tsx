@@ -143,30 +143,36 @@ export function CompositionControls({
 
       {products.length > 0 && (
         <div className="flex items-center flex-wrap gap-1.5 mt-2.5">
-          <span className="text-xs text-tertiary mr-0.5">번호 넣기</span>
-          {products.map((p, i) => (
-            <button
-              key={p.id}
-              type="button"
-              className="product-ref-chip"
-              onClick={() => insertProductRef(i)}
-              title={`${i + 1}번 상품 입력`}
-            >
-              <span className="product-ref-thumb">
-                {(() => {
-                  const url = productPreviewUrl(p);
-                  return url ? (
-                    <img src={url} alt="" />
+          <span className="text-xs text-muted-foreground mr-0.5">번호 넣기</span>
+          {products.map((p, i) => {
+            const url = productPreviewUrl(p);
+            return (
+              <button
+                key={p.id}
+                type="button"
+                onClick={() => insertProductRef(i)}
+                title={`${i + 1}번 상품 입력`}
+                className="inline-flex items-center gap-1.5 py-1 pr-2.5 pl-1 bg-card border border-border rounded text-xs font-medium text-foreground leading-none transition-colors hover:border-rule-strong hover:bg-secondary"
+              >
+                <span className="block relative w-[22px] h-[22px] rounded-[4px] overflow-hidden bg-secondary shrink-0">
+                  {url ? (
+                    <img src={url} alt="" className="w-full h-full object-cover block" />
                   ) : (
-                    <span className="product-ref-thumb__empty" />
-                  );
-                })()}
-              </span>
-              <span className="product-ref-text">
-                <strong>{i + 1}</strong>번
-              </span>
-            </button>
-          ))}
+                    <span
+                      className="block w-full h-full"
+                      style={{
+                        backgroundImage:
+                          'repeating-linear-gradient(45deg, var(--surface-2) 0 4px, var(--rule) 4px 5px)',
+                      }}
+                    />
+                  )}
+                </span>
+                <span className="inline-flex items-baseline gap-px text-ink-2">
+                  <strong className="text-primary text-[13px] font-bold">{i + 1}</strong>번
+                </span>
+              </button>
+            );
+          })}
         </div>
       )}
 

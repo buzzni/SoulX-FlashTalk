@@ -667,18 +667,6 @@
   color: #fff; border-radius: 99px; font-size: 10px; font-weight: 500;
 }
 
-/* Product tag (floating) */
-.product-tag {
-  position: absolute; bottom: 100px; left: 16px;
-  background: #fff; border-radius: 8px; padding: 6px 8px;
-  display: flex; align-items: center; gap: 8px;
-  box-shadow: 0 6px 16px rgba(0,0,0,0.25); max-width: 70%;
-}
-.product-tag .pt-thumb { width: 32px; height: 32px; border-radius: 4px; background: var(--bg-sunken); overflow: hidden; flex-shrink: 0; }
-.product-tag .pt-thumb img { width: 100%; height: 100%; object-fit: cover; }
-.product-tag .pt-name { font-size: 10px; font-weight: 600; color: #111; line-height: 1.2; }
-.product-tag .pt-price { font-size: 11px; font-weight: 700; color: var(--primary); margin-top: 2px; }
-
 /* Host silhouette placeholder (SVG bg) */
 .host-placeholder {
   width: 100%; height: 100%;
@@ -782,57 +770,9 @@
  * `.thumb-action*`, `.product-name`, `.product-price`, `.product-order`,
  * `.product-badge` selectors had no live consumers and went with them. */
 
-/* Product reference chips (구도 지시에 상품 번호 삽입) */
-.product-ref-chip {
-  display: inline-flex; align-items: center; gap: 6px;
-  padding: 4px 10px 4px 4px;
-  background: var(--bg-elev);
-  border: 1px solid var(--border);
-  border-radius: var(--r-sm);
-  cursor: pointer;
-  font-size: 12px; font-weight: 500;
-  color: var(--text-primary);
-  line-height: 1;
-  transition: border-color .12s, background .12s, color .12s;
-}
-.product-ref-chip:hover {
-  border-color: var(--border-strong);
-  background: var(--bg-subtle);
-}
-.product-ref-thumb {
-  width: 22px; height: 22px;
-  border-radius: 4px;
-  overflow: hidden;
-  background: var(--bg-sunken);
-  flex-shrink: 0;
-  display: block;
-  position: relative;
-}
-.product-ref-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
-.product-ref-thumb__empty {
-  display: block; width: 100%; height: 100%;
-  background-image: repeating-linear-gradient(45deg, var(--bg-sunken) 0 4px, var(--border) 4px 5px);
-}
-.product-ref-text {
-  display: inline-flex; align-items: baseline; gap: 1px;
-  color: var(--text-secondary);
-}
-.product-ref-text strong {
-  font-weight: 700;
-  color: var(--primary);
-  font-size: 13px;
-}
-.product-ref-badge {
-  display: grid; place-items: center;
-  width: 18px; height: 18px;
-  background: transparent;
-  color: var(--primary);
-  border: 1px solid var(--primary);
-  border-radius: 50%;
-  font-size: 11px; font-weight: 600;
-  line-height: 1;
-  flex-shrink: 0;
-}
+/* `.product-ref-chip` family migrated to inline Tailwind utilities in
+ * step2/CompositionControls.tsx. `.product-ref-badge` and `.product-tag`
+ * had no live consumers and were dropped. */
 
 /* Modal */
 @keyframes fadein { from { opacity: 0 } to { opacity: 1 } }
