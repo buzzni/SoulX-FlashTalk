@@ -9,6 +9,7 @@
 import { type ReactNode } from 'react';
 import { Sidebar } from './Sidebar';
 import { ProfileMenu } from './ProfileMenu';
+import QueueStatus from '../studio/QueueStatus';
 
 interface AppLayoutProps {
   children: ReactNode;
@@ -21,7 +22,8 @@ export function AppLayout({ children, active = 'home' }: AppLayoutProps) {
     <div className="min-h-screen grid grid-cols-1 md:grid-cols-[248px_1fr] bg-background">
       <Sidebar active={active} />
       <main className="relative min-h-screen overflow-x-hidden">
-        <div className="fixed top-4 right-5 md:right-8 z-20">
+        <div className="fixed top-4 right-5 md:right-8 z-20 flex items-center gap-2">
+          <QueueStatus />
           <ProfileMenu />
         </div>
         {children}
