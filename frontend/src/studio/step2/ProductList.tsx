@@ -87,7 +87,7 @@ export function ProductList() {
           label="제품 사진 올리기"
         />
       ) : (
-        <div className="product-list">
+        <div className="flex flex-col gap-2">
           {fields.map((field, idx) => {
             const p = products[idx];
             if (!p) return null;
@@ -95,26 +95,33 @@ export function ProductList() {
             return (
               <div
                 key={field.id}
-                className={cn('product-row', dragIdx === idx && 'dragging')}
                 draggable
                 onDragStart={() => onDragStart(idx)}
                 onDragOver={(e) => onDragOver(e, idx)}
                 onDragEnd={onDragEnd}
+                className={cn(
+                  'flex items-center gap-3 px-3 py-2.5 rounded-md border border-border bg-card shadow-xs transition-[border-color,box-shadow,opacity] duration-150',
+                  'hover:border-rule-strong hover:shadow-sm',
+                  dragIdx === idx && 'opacity-40 shadow-md',
+                )}
               >
-                <span className="product-drag" title="끌어서 순서 변경">
+                <span
+                  className="text-muted-foreground cursor-grab p-1"
+                  title="끌어서 순서 변경"
+                >
                   <Icon name="drag" />
                 </span>
-                <div className="product-thumb">
+                <div className="w-10 h-10 rounded shrink-0 relative overflow-hidden bg-secondary">
                   {url ? (
-                    <img src={url} alt="" />
+                    <img src={url} alt="" className="w-full h-full object-cover" />
                   ) : (
                     <div className="striped-placeholder text-[9px]">
                       {idx + 1}번
                     </div>
                   )}
                 </div>
-                <div className="product-info flex-col gap-2">
-                  <div className="product-label text-xs">
+                <div className="flex-1 min-w-0 flex-col gap-2">
+                  <div className="text-xs font-medium">
                     <strong className="text-primary font-semibold">{idx + 1}번</strong> 상품
                   </div>
                   <label className="self-start inline-flex items-center gap-1.5 h-8 px-3 rounded-md text-xs font-medium border border-input bg-card text-foreground hover:bg-secondary cursor-pointer transition-colors">

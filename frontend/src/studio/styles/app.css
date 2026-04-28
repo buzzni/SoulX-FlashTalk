@@ -776,52 +776,11 @@
   accent-color: var(--primary);
 }
 
-/* Product list — soft rows with shadow, draggable handle */
-.product-list { display: flex; flex-direction: column; gap: 8px; }
-.product-row {
-  display: flex; align-items: center; gap: 12px; padding: 10px 12px;
-  border: 1px solid var(--border);
-  border-radius: var(--r-md); background: var(--bg-elev);
-  box-shadow: var(--shadow-xs);
-  transition: border-color .15s, box-shadow .15s;
-}
-.product-row:hover {
-  border-color: var(--border-strong);
-  box-shadow: var(--shadow-sm);
-}
-.product-row.dragging { opacity: 0.4; box-shadow: var(--shadow-md); }
-.product-drag { color: var(--text-tertiary); cursor: grab; padding: 4px; }
-.product-thumb { width: 40px; height: 40px; border-radius: 4px; background: var(--bg-sunken); overflow: hidden; flex-shrink: 0; position: relative; }
-.product-thumb img { width: 100%; height: 100%; object-fit: cover; }
-.product-thumb-wrap { width: 100%; height: 100%; position: relative; }
-.product-thumb-actions {
-  position: absolute; inset: 0;
-  display: flex; gap: 1px;
-  opacity: 0; transition: opacity .12s;
-}
-.product-thumb:hover .product-thumb-actions { opacity: 1; }
-.thumb-action {
-  flex: 1; border: 0; padding: 0;
-  background: oklch(0 0 0 / 0.65); color: #fff;
-  cursor: pointer;
-  display: grid; place-items: center;
-}
-.thumb-action:hover { background: oklch(0 0 0 / 0.85); }
-.thumb-action-danger:hover { background: oklch(0.5 0.2 25 / 0.9); }
-.product-info { flex: 1; min-width: 0; }
-.product-name { font-size: 13px; font-weight: 500; }
-.product-price { font-size: 11px; color: var(--text-tertiary); }
-.product-order { font-size: 10px; font-family: 'JetBrains Mono', monospace; color: var(--text-tertiary); width: 18px; text-align: center; }
-.product-badge {
-  flex-shrink: 0;
-  width: 26px; height: 26px;
-  display: grid; place-items: center;
-  background: var(--primary); color: white;
-  border-radius: 50%;
-  font-size: 15px; font-weight: 600;
-  line-height: 1;
-}
-.product-label { font-weight: 500; color: var(--text-primary); }
+/* `.product-list`/`.product-row`/`.product-thumb`/`.product-info`/
+ * `.product-label` migrated to inline Tailwind utilities in
+ * step2/ProductList.tsx. The unused `.product-thumb-actions`,
+ * `.thumb-action*`, `.product-name`, `.product-price`, `.product-order`,
+ * `.product-badge` selectors had no live consumers and went with them. */
 
 /* Product reference chips (구도 지시에 상품 번호 삽입) */
 .product-ref-chip {
