@@ -176,6 +176,12 @@ async def persist_terminal_failure(
             "completed_at": _now(),                # always set (decision #19)
             "video_path": None,
             "video_bytes": 0,
+            # ResultManifest schema requires video_url. For terminal failures
+            # the file doesn't exist, but the URL stays consistent with the
+            # success-path manifest shape so /api/results/{task_id} validates.
+            # Frontend ResultPage gates the <video> tag on status=completed,
+            # so the resulting 404 is never user-visible.
+            "video_url": f"/api/videos/{task_id}",
         }
         await upsert(user_id, manifest)
     except Exception as e:
