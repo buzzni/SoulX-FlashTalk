@@ -138,6 +138,7 @@ async def persist_terminal_failure(
     status: str,                               # "error" | "cancelled"
     error: Optional[str],
     params: Optional[dict] = None,
+    meta: Optional[dict] = None,
     playlist_id: Optional[str] = None,
     started_at: Optional[datetime] = None,
     created_at: Optional[datetime] = None,
@@ -163,13 +164,27 @@ async def persist_terminal_failure(
         )
     try:
         public_error = _map_public_error(error) if status == "error" else "사용자가 취소했어요."
+        # Mirror the success-path manifest shape: `params` is the dispatch
+        # subset (prompt/seed/host_image/...) and `meta` is the wizard
+        # snapshot (host/composition/products/background/voice/...). The
+        # frontend "이렇게 만들었어요" panel reads from `meta`, so keeping
+        # them separate is the difference between full input recall and
+        # an empty grid of dashes.
+        params_clean = dict(params or {})
+        # If caller stuffed meta inside params (the queue entry shape),
+        # peel it out so it lands in the right slot.
+        if meta is None:
+            meta = params_clean.pop("meta", None)
+        else:
+            params_clean.pop("meta", None)
         manifest = {
             "task_id": task_id,
             "type": type,
             "status": status,
             "error": error,                        # raw, admin-readable only
             "public_error": public_error,          # user-facing
-            "params": params or {},
+            "params": params_clean,
+            "meta": meta,
             "playlist_id": playlist_id,
             "created_at": created_at or _now(),
             "started_at": started_at,

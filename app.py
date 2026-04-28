@@ -879,6 +879,7 @@ async def generate_video_task(
                             "scene_prompt": scene_prompt,
                             "reference_image_paths": reference_image_paths or [],
                         },
+                        meta=meta,
                         playlist_id=playlist_id,
                         started_at=datetime.fromtimestamp(start_time, tz=timezone.utc),
                         created_at=datetime.fromtimestamp(start_time, tz=timezone.utc),
