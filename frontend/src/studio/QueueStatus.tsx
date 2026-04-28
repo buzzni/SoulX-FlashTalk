@@ -138,7 +138,7 @@ export default function QueueStatus() {
           <p className="m-0 leading-relaxed">
             {pending.label || pending.taskId}
             <br />
-            <span className="text-tertiary">큐에서 제거되고 되돌릴 수 없어요.</span>
+            <span className="text-muted-foreground">큐에서 제거되고 되돌릴 수 없어요.</span>
           </p>
         ) : null
       }
@@ -156,7 +156,7 @@ export default function QueueStatus() {
           <p className="m-0 leading-relaxed">
             {pending.label || pending.taskId}
             <br />
-            <span className="text-tertiary">같은 입력으로 새 작업을 만들어요.</span>
+            <span className="text-muted-foreground">같은 입력으로 새 작업을 만들어요.</span>
           </p>
         ) : null
       }

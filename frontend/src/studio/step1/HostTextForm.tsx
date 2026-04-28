@@ -71,7 +71,7 @@ export function HostTextForm() {
               className="text-left p-2.5 rounded-md border border-border bg-card hover:border-primary hover:bg-accent-soft transition-colors text-xs leading-snug"
             >
               <div className="font-semibold text-foreground">{p.title}</div>
-              <div className="mt-1 text-tertiary line-clamp-2">{p.prompt}</div>
+              <div className="mt-1 text-muted-foreground line-clamp-2">{p.prompt}</div>
             </button>
           ))}
         </div>
@@ -86,7 +86,7 @@ export function HostTextForm() {
         />
       </div>
 
-      <details className="text-xs text-tertiary">
+      <details className="text-xs text-muted-foreground">
         <summary className="cursor-pointer select-none">피하고 싶은 표현</summary>
         <input
           className="input mt-2"

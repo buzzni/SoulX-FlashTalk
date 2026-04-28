@@ -100,7 +100,7 @@ export function AudioPlayer({ src }: AudioPlayerProps) {
         type="button"
         onClick={toggle}
         aria-label={playing ? '일시정지' : '재생'}
-        className="w-[30px] h-[30px] shrink-0 border-0 rounded-full bg-primary text-white cursor-pointer grid place-items-center transition-[background-color,filter] duration-150 hover:bg-primary-hover hover:brightness-105"
+        className="w-[30px] h-[30px] shrink-0 border-0 rounded-full bg-primary text-white cursor-pointer grid place-items-center transition-[background-color,filter] duration-150 hover:bg-[var(--primary-hover)] hover:brightness-105 focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary focus-visible:outline-offset-2"
       >
         <Icon name={playing ? 'pause' : 'play'} size={12} />
       </button>
@@ -112,7 +112,7 @@ export function AudioPlayer({ src }: AudioPlayerProps) {
         aria-valuemax={Math.round(duration)}
         aria-valuenow={Math.round(current)}
         tabIndex={0}
-        className="relative flex-1 min-w-0 h-3.5 cursor-pointer flex items-center"
+        className="relative flex-1 min-w-0 h-3.5 cursor-pointer flex items-center focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary focus-visible:outline-offset-2 rounded-sm"
       >
         {/* Track */}
         <div className="absolute inset-x-0 h-1 rounded-sm bg-secondary pointer-events-none" />

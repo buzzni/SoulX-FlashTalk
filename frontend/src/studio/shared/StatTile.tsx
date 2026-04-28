@@ -24,7 +24,7 @@ export function StatTile({ label, value, sub, mono }: StatTileProps) {
         {label}
       </div>
       <div className={cn('text-base font-semibold', mono && 'num mono')}>{value}</div>
-      {sub && <div className="text-xs text-tertiary mt-0.5">{sub}</div>}
+      {sub && <div className="text-xs text-muted-foreground mt-0.5">{sub}</div>}
     </div>
   );
 }

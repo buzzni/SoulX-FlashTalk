@@ -505,7 +505,7 @@ export default function Step3Audio({ state, update }: Step3AudioProps) {
                   <Badge variant="success" icon="check_circle">
                     음성 준비 완료
                   </Badge>
-                  <span className="text-xs text-tertiary">TTS를 거치지 않고 그대로 영상에 들어가요</span>
+                  <span className="text-xs text-muted-foreground">TTS를 거치지 않고 그대로 영상에 들어가요</span>
                 </div>
               )}
             </Card>
@@ -629,7 +629,7 @@ function RenderBooth({ state }: RenderBoothProps) {
         type="button"
         disabled={!allValid}
         onClick={() => navigate('/render')}
-        className="mt-1 inline-flex items-center justify-center gap-2 h-12 px-5 rounded-md border-0 bg-primary text-primary-foreground text-sm font-bold tracking-tight cursor-pointer transition-colors duration-150 hover:enabled:bg-primary-hover disabled:opacity-50 disabled:cursor-not-allowed"
+        className="mt-1 inline-flex items-center justify-center gap-2 h-12 px-5 rounded-md border-0 bg-primary text-primary-foreground text-sm font-bold tracking-tight cursor-pointer transition-colors duration-150 hover:enabled:bg-[var(--primary-hover)] disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary focus-visible:outline-offset-2"
       >
         <Sparkles className="size-4" strokeWidth={2.2} />
         <span>영상 만들기 시작</span>

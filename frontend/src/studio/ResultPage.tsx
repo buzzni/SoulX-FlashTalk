@@ -537,7 +537,7 @@ export default function ResultPage() {
                     <br />
                     <b>1단계</b>부터 다시 시작해요.
                   </p>
-                  <p className="mt-2 m-0 leading-relaxed text-tertiary">
+                  <p className="mt-2 m-0 leading-relaxed text-muted-foreground">
                     지금까지 입력하던 다른 마법사 작업이 있다면 사라져요.
                   </p>
                 </>
@@ -584,7 +584,7 @@ export default function ResultPage() {
                       <div className="text-base font-semibold truncate">
                         {formatTaskTitle(taskId, result.type || 'generate')}
                       </div>
-                      <div className="text-xs text-tertiary">
+                      <div className="text-xs text-muted-foreground">
                         {resolutionLabel ? `${resolutionLabel} · 세로형` : '—'}
                       </div>
                     </div>

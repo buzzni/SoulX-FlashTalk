@@ -29,6 +29,7 @@ export function ResolutionPicker({ selectedKey, onSelect }: ResolutionPickerProp
             onClick={() => onSelect(r.key)}
             className={cn(
               'relative px-3.5 py-4 rounded-md border bg-card text-left transition-[border-color,box-shadow,transform,background-color] duration-150',
+              'focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary focus-visible:outline-offset-2',
               on
                 ? 'border-primary bg-primary-soft -translate-y-px shadow-[0_0_0_3px_color-mix(in_oklch,var(--primary)_16%,transparent)]'
                 : 'border-border hover:border-rule-strong hover:-translate-y-px hover:shadow-sm',

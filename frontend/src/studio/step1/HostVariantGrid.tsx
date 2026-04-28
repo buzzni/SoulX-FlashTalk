@@ -126,7 +126,7 @@ function PickableTile({
     <button
       className={cn(
         TILE_BASE,
-        'cursor-pointer',
+        'cursor-pointer focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary focus-visible:outline-offset-2',
         // Hover lift only when not active and not prev.
         !selected && !isPrev && 'hover:border-rule-strong hover:-translate-y-px hover:shadow-sm',
         selected &&

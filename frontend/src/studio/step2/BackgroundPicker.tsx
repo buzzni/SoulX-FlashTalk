@@ -148,6 +148,7 @@ export function BackgroundPicker({ onPickServerFile }: BackgroundPickerProps) {
                       onClick={() => swap({ kind: 'preset', presetId: p.id })}
                       className={cn(
                         'relative flex flex-col items-start gap-2 p-3 rounded-md border text-left transition-colors',
+                        'focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary focus-visible:outline-offset-2',
                         on
                           ? 'border-primary bg-accent-soft text-accent-text shadow-[0_0_0_3px_color-mix(in_oklch,var(--primary)_14%,transparent)] z-[1]'
                           : 'border-border bg-card hover:border-foreground/30',
@@ -202,7 +203,7 @@ export function BackgroundPicker({ onPickServerFile }: BackgroundPickerProps) {
               value={background.prompt}
               onChange={(e) => swap({ kind: 'prompt', prompt: e.target.value })}
             />
-            <div className="flex items-center gap-2 text-xs text-tertiary">
+            <div className="flex items-center gap-2 text-xs text-muted-foreground">
               <Sparkles className="size-3.5 text-primary" />
               <span>"합성 이미지 만들기"를 누르면 이 설명으로 배경까지 같이 만들어줘요</span>
             </div>

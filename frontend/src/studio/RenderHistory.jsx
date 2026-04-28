@@ -74,11 +74,11 @@ export default function RenderHistory({ excludeTaskId, limit = 8 }) {
                       {formatTaskTitle(v.task_id, v.type || 'generate')}
                     </div>
                     {v.script_text && (
-                      <div className="truncate text-xs text-secondary mt-0.5">
+                      <div className="truncate text-xs text-ink-2 mt-0.5">
                         {v.script_text}
                       </div>
                     )}
-                    <div className="text-xs text-tertiary">
+                    <div className="text-xs text-muted-foreground">
                       {relativeTime(v.timestamp)}
                       {v.generation_time != null && ` · ${formatDuration(v.generation_time)}`}
                       {v.file_size ? ` · ${formatBytes(v.file_size)}` : ''}
@@ -115,11 +115,11 @@ export default function RenderHistory({ excludeTaskId, limit = 8 }) {
                   {formatTaskTitle(v.task_id, v.type || 'generate')}
                 </div>
                 {v.script_text && (
-                  <div className="truncate text-xs text-secondary mt-0.5">
+                  <div className="truncate text-xs text-ink-2 mt-0.5">
                     {v.script_text}
                   </div>
                 )}
-                <div className="text-xs text-tertiary">
+                <div className="text-xs text-muted-foreground">
                   {relativeTime(v.timestamp)}
                   {v.generation_time != null && ` · ${formatDuration(v.generation_time)}`}
                   {v.file_size ? ` · ${formatBytes(v.file_size)}` : ''}

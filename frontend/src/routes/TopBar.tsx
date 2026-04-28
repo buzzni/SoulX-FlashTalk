@@ -61,8 +61,11 @@ export function TopBar({ step, valid, onStepClick, onReset, queueSlot }: TopBarP
                     disabled={disabled}
                     className={cn(
                       'flex items-center gap-2 whitespace-nowrap py-1.5 pr-3 pl-2 rounded-full bg-transparent border-0 text-[13px] font-medium transition-colors',
-                      'enabled:hover:text-foreground enabled:hover:bg-secondary',
-                      'disabled:cursor-not-allowed',
+                      // Hover only when not active — active stays on the
+                      // primary-soft fill instead of swapping to bg-secondary.
+                      !active &&
+                        'enabled:hover:text-foreground enabled:hover:bg-secondary',
+                      'disabled:cursor-not-allowed focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary focus-visible:outline-offset-2',
                       active
                         ? 'text-foreground bg-primary-soft'
                         : done

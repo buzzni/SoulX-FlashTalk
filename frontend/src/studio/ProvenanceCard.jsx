@@ -113,7 +113,7 @@ export default function ProvenanceCard({ result, fallbackMeta = null }) {
               <div className="aspect-[9/16] rounded-lg overflow-hidden bg-[#0b0d12] border border-border">
                 <img src={h.imageUrl} alt="쇼호스트" className="w-full h-full object-cover" />
               </div>
-              <figcaption className="text-xs text-tertiary mt-1.5">1단계 · 쇼호스트</figcaption>
+              <figcaption className="text-xs text-muted-foreground mt-1.5">1단계 · 쇼호스트</figcaption>
             </figure>
           )}
           {compositeUrl && (
@@ -121,7 +121,7 @@ export default function ProvenanceCard({ result, fallbackMeta = null }) {
               <div className="aspect-[9/16] rounded-lg overflow-hidden bg-[#0b0d12] border border-border">
                 <img src={compositeUrl} alt="합성" className="w-full h-full object-cover" />
               </div>
-              <figcaption className="text-xs text-tertiary mt-1.5">2단계 · 합성 스틸</figcaption>
+              <figcaption className="text-xs text-muted-foreground mt-1.5">2단계 · 합성 스틸</figcaption>
             </figure>
           )}
         </div>
@@ -129,59 +129,59 @@ export default function ProvenanceCard({ result, fallbackMeta = null }) {
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-5 mt-4">
         <div>
-          <div className="text-xs text-tertiary">쇼호스트</div>
+          <div className="text-xs text-muted-foreground">쇼호스트</div>
           <div className="font-medium mt-0.5">
             {h.mode === 'text' ? '설명으로 만들기' : h.mode === 'image' ? '사진으로 만들기' : '—'}
           </div>
           {h.prompt && (
-            <div className="text-xs text-tertiary truncate" title={h.prompt}>{h.prompt}</div>
+            <div className="text-xs text-muted-foreground truncate" title={h.prompt}>{h.prompt}</div>
           )}
         </div>
         <div>
-          <div className="text-xs text-tertiary">소개할 제품</div>
+          <div className="text-xs text-muted-foreground">소개할 제품</div>
           <div className="font-medium mt-0.5 num">{products.length}개</div>
-          <div className="text-xs text-tertiary truncate">
+          <div className="text-xs text-muted-foreground truncate">
             {products.map(p => p.name).filter(Boolean).join(', ') || '—'}
           </div>
         </div>
         <div>
-          <div className="text-xs text-tertiary">배경</div>
+          <div className="text-xs text-muted-foreground">배경</div>
           <div className="font-medium mt-0.5">{bgLabel}</div>
-          <div className="text-xs text-tertiary truncate">
+          <div className="text-xs text-muted-foreground truncate">
             {bg.source === 'prompt' ? (bg.prompt || '—')
               : bg.source === 'preset' ? (bg.presetId || '')
               : bg.source === 'upload' ? '업로드 이미지' : ''}
           </div>
         </div>
         <div>
-          <div className="text-xs text-tertiary">목소리</div>
+          <div className="text-xs text-muted-foreground">목소리</div>
           <div className="font-medium mt-0.5">
             {voice.voiceName || (voiceSourceRaw === 'upload' ? '녹음 파일' : '—')}
           </div>
-          <div className="text-xs text-tertiary">{voiceSource}</div>
+          <div className="text-xs text-muted-foreground">{voiceSource}</div>
         </div>
       </div>
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-5 mt-4 pt-3.5 border-t border-border">
         <div>
-          <div className="text-xs text-tertiary">해상도</div>
+          <div className="text-xs text-muted-foreground">해상도</div>
           <div className="font-medium mt-0.5 num mono">
             {displayResolution(resolutionActual) || displayResolution(resolutionRequested) || '—'}
           </div>
           {resolutionActual && resolutionRequested && resolutionActual !== resolutionRequested && (
-            <div className="text-xs text-tertiary">요청 {displayResolution(resolutionRequested)}</div>
+            <div className="text-xs text-muted-foreground">요청 {displayResolution(resolutionRequested)}</div>
           )}
         </div>
         <div>
-          <div className="text-xs text-tertiary">이미지 품질</div>
+          <div className="text-xs text-muted-foreground">이미지 품질</div>
           <div className="font-medium mt-0.5">{qualityLabel}</div>
         </div>
         <div>
-          <div className="text-xs text-tertiary">샷</div>
+          <div className="text-xs text-muted-foreground">샷</div>
           <div className="font-medium mt-0.5">{shotLabel}</div>
         </div>
         <div>
-          <div className="text-xs text-tertiary">변동성 (쇼호스트 · 합성)</div>
+          <div className="text-xs text-muted-foreground">변동성 (쇼호스트 · 합성)</div>
           <div className="font-medium mt-0.5">
             {tempLabel(h.temperature)} · {tempLabel(c.temperature)}
           </div>
@@ -190,14 +190,14 @@ export default function ProvenanceCard({ result, fallbackMeta = null }) {
 
       {sceneDirection && (
         <div className="mt-4 pt-3.5 border-t border-border">
-          <div className="text-xs text-tertiary">합성 지시사항</div>
+          <div className="text-xs text-muted-foreground">합성 지시사항</div>
           <div className="text-sm-tight mt-1 whitespace-pre-wrap">{sceneDirection}</div>
         </div>
       )}
 
       {scriptText && (
         <div className="mt-4 pt-3.5 border-t border-border lg:flex-1 lg:min-h-0 lg:flex lg:flex-col">
-          <div className="text-xs text-tertiary">대본</div>
+          <div className="text-xs text-muted-foreground">대본</div>
           <div className="text-sm-tight mt-1 whitespace-pre-wrap max-h-[120px] lg:max-h-none lg:flex-1 lg:min-h-0 overflow-y-auto">
             {scriptText.replace(/\[breath\]/g, ' · ')}
           </div>

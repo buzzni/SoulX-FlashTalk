@@ -652,8 +652,16 @@
 .flex-1 { flex: 1; min-width: 0; }
 .w-full { width: 100%; }
 .mt-1 { margin-top: 4px; } .mt-2 { margin-top: 8px; } .mt-3 { margin-top: 12px; } .mt-4 { margin-top: 16px; }
-.text-xs { font-size: 11px; } .text-sm { font-size: 12px; }
-.text-secondary { color: var(--text-secondary); } .text-tertiary { color: var(--text-tertiary); }
+/* Match Tailwind v4 defaults so studio scope doesn't silently shrink
+ * `text-xs` / `text-sm` Tailwind utilities (was 11/12, now 12/14).
+ * Removing the override entirely would still leak via specificity in
+ * legacy BEM consumers, so we just align the sizes. Per-use intent
+ * (line-height, letter-spacing) stays on the consumer. */
+.text-xs { font-size: 12px; } .text-sm { font-size: 14px; }
+/* `.text-secondary` / `.text-tertiary` were studio-only fake utilities
+ * (Tailwind has no real `text-tertiary`, and `text-secondary` would
+ * resolve to a surface color, not text). Removed — consumers should
+ * use the global `text-ink-2` / `text-muted-foreground` utilities. */
 .truncate { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* Script paragraphs (Step 3) */

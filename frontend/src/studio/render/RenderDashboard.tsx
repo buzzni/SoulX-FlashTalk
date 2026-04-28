@@ -318,7 +318,7 @@ export default function RenderDashboard({
                   <div className="text-base font-semibold">
                     {formatTaskTitle(jobTitleId, job.entry?.type || 'generate')}
                   </div>
-                  <div className="text-xs text-tertiary">
+                  <div className="text-xs text-muted-foreground">
                     {actualResolution
                       ? `${actualResolution.width}×${actualResolution.height} · 세로형`
                       : '—'}

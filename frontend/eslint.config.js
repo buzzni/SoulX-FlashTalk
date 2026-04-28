@@ -53,28 +53,39 @@ export default tseslint.config(
     },
   },
   {
-    // Studio scope guard — `bg-accent` / `text-accent-foreground` resolve to
-    // *different* colors inside `.studio-root` than at global :root, because
-    // wizard tokens redefine the same names. The 2026-04 BackgroundPicker
-    // bug landed exactly here. Force studio components onto explicit
-    // `bg-primary-soft` / `text-primary-on-soft` (or the studio-scoped
-    // `bg-accent-soft` / `text-accent-text` aliases that don't have the
-    // same trap).
-    files: ['src/studio/**/*.{ts,tsx,jsx}'],
+    // Wizard-bridge guard — `bg-accent` / `text-accent-foreground` /
+    // `border-accent` resolve to studio-only color tokens that don't
+    // exist (or have a *different* meaning) at global :root. The 2026-04
+    // BackgroundPicker bug landed exactly here. The regex catches the
+    // bare class plus common variant prefixes (hover:, focus:,
+    // data-[state=on]:, data-[state=open]:, dark:, sm:, md:, lg:) and
+    // opacity suffixes (`bg-accent/50`).
+    //
+    // Scope: src/studio/** plus shared components that render inside
+    // .studio-root (UploadTile, OptionCard, WizardInfoBanner, the
+    // shadcn ui/* primitives). The shadcn primitives are flagged so
+    // any Toggle / Switch / DropdownMenu newly used inside the wizard
+    // is forced onto the explicit token set first.
+    files: [
+      'src/studio/**/*.{ts,tsx,jsx}',
+      'src/components/wizard-info-banner.tsx',
+      'src/components/upload-tile.tsx',
+      'src/components/option-card.tsx',
+    ],
     rules: {
       'no-restricted-syntax': [
         'error',
         {
           selector:
-            "Literal[value=/(^|\\s)(bg-accent|text-accent-foreground|border-accent)(\\s|$)/]",
+            "Literal[value=/(^|[\\s:'\"`])([A-Za-z-]+:)*(bg-accent|text-accent-foreground|border-accent)(\\/[0-9]+)?(\\s|$|['\"`])/]",
           message:
-            'Do not use bg-accent / text-accent-foreground / border-accent inside src/studio/* — token resolves to deep blue here. Use bg-primary-soft / text-primary-on-soft / border-primary, or the studio-only bg-accent-soft / text-accent-text aliases.',
+            'Do not use bg-accent / text-accent-foreground / border-accent inside studio surfaces — these tokens are studio-private or differently-scoped. Use bg-primary-soft / text-primary-on-soft / border-primary, or the studio-only bg-accent-soft / text-accent-text aliases.',
         },
         {
           selector:
-            "TemplateElement[value.raw=/(^|\\s)(bg-accent|text-accent-foreground|border-accent)(\\s|$)/]",
+            "TemplateElement[value.raw=/(^|[\\s:'\"`])([A-Za-z-]+:)*(bg-accent|text-accent-foreground|border-accent)(\\/[0-9]+)?(\\s|$|['\"`])/]",
           message:
-            'Do not use bg-accent / text-accent-foreground / border-accent inside src/studio/* — token resolves to deep blue here. Use bg-primary-soft / text-primary-on-soft / border-primary, or the studio-only bg-accent-soft / text-accent-text aliases.',
+            'Do not use bg-accent / text-accent-foreground / border-accent inside studio surfaces — these tokens are studio-private or differently-scoped. Use bg-primary-soft / text-primary-on-soft / border-primary, or the studio-only bg-accent-soft / text-accent-text aliases.',
         },
       ],
     },

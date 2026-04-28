@@ -52,10 +52,10 @@ export function ProgressCard({
     <>
       <div>
         <div className="flex justify-between mb-1.5 text-xs">
-          <span className="text-secondary">
+          <span className="text-ink-2">
             {message || STAGES[currentStageIdx]?.label}
           </span>
-          <span className="num mono text-secondary">{Math.floor(progressPct)}%</span>
+          <span className="num mono text-ink-2">{Math.floor(progressPct)}%</span>
         </div>
         <div className="progress">
           <div className="progress-bar" style={{ width: `${progressPct}%` }} />

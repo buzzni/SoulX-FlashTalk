@@ -176,7 +176,7 @@ export function CompositionControls({
         </div>
       )}
 
-      <div className="text-xs text-tertiary mt-3.5 mb-1.5">예시</div>
+      <div className="text-xs text-muted-foreground mt-3.5 mb-1.5">예시</div>
       <div className="flex flex-wrap gap-1.5">
         {DIRECTION_EXAMPLES.map((ex) => (
           <Chip
@@ -331,7 +331,7 @@ export function CompositionControls({
         </button>
       </div>
       {!canGenerate && missingReason && (
-        <div className="text-xs text-tertiary mt-1.5">{missingReason}</div>
+        <div className="text-xs text-muted-foreground mt-1.5">{missingReason}</div>
       )}
     </TooltipProvider>
   );

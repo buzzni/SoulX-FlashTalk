@@ -42,7 +42,10 @@ export interface UploadTileProps {
 // Reused shells so consumers can stamp out a server-asset confirmation
 // row (BackgroundPicker) with the same chrome.
 export const UPLOAD_TILE_HAS_FILE_CLASS =
-  'min-h-[132px] grid grid-cols-[auto_1fr_auto] grid-rows-[auto] items-center gap-3.5 p-3 rounded-lg border border-border bg-card cursor-default';
+  // `flex-wrap` so narrow form columns don't horizontally overflow when
+  // thumb (108px) + meta + 2 buttons exceed available width. The grid
+  // collapses to two rows: thumb + meta on top, buttons wrap below.
+  'min-h-[132px] flex flex-wrap items-center gap-3.5 p-3 rounded-lg border border-border bg-card cursor-default';
 export const UPLOAD_TILE_THUMB_CLASS =
   'w-[108px] h-[108px] rounded shrink-0 overflow-hidden flex items-center justify-center bg-secondary relative';
 export const UPLOAD_TILE_FILE_BTN_CLASS =
@@ -127,7 +130,7 @@ export function UploadTile({
             </div>
           )}
         </div>
-        <div className="flex flex-col gap-0.5 min-w-0 text-[13px] text-foreground">
+        <div className="flex flex-col gap-0.5 min-w-0 flex-1 text-[13px] text-foreground">
           <span className="truncate font-semibold tracking-tight">{file.name ?? ''}</span>
           <span className="font-mono text-[11px] text-muted-foreground">
             {((file.size ?? 0) / 1024).toFixed(0)}KB
@@ -192,6 +195,7 @@ export function UploadTile({
       className={cn(
         'min-h-[132px] flex flex-col items-center justify-center gap-2 px-5 py-7 rounded-lg border-[1.5px] border-dashed border-rule-strong bg-card text-ink-2 text-center cursor-pointer transition-[border-color,background-color,color,transform] duration-150',
         'hover:border-primary hover:bg-primary-soft hover:text-primary-on-soft hover:-translate-y-px',
+        'focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary focus-visible:outline-offset-2',
       )}
       style={
         dragOver

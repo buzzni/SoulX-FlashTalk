@@ -756,7 +756,7 @@ function PlaylistChip({ playlist, active, onSelect, onChanged }: PlaylistChipPro
           <p className="m-0 leading-relaxed">
             <b>{playlist.name}</b>
             <br />
-            <span className="text-tertiary">
+            <span className="text-muted-foreground">
               안에 있는 영상들은 미지정으로 옮겨져요.
             </span>
           </p>
@@ -972,7 +972,7 @@ function ResultCard({ item, playlists, onMoved }: ResultCardProps) {
           <p className="m-0 leading-relaxed">
             <b>{title}</b>
             <br />
-            <span className="text-tertiary">
+            <span className="text-muted-foreground">
               {isCompleted
                 ? '영상 파일과 결과 정보가 모두 삭제돼요. 되돌릴 수 없어요.'
                 : '결과 기록이 삭제돼요. 되돌릴 수 없어요.'}

@@ -110,7 +110,7 @@ function PickableTile({
     <button
       className={cn(
         TILE_BASE,
-        'cursor-pointer',
+        'cursor-pointer focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary focus-visible:outline-offset-2',
         !selected && !isPrev && 'hover:border-rule-strong hover:-translate-y-px hover:shadow-sm',
         selected &&
           'border-primary -translate-y-px shadow-[0_0_0_3px_color-mix(in_oklch,var(--primary)_18%,transparent),var(--shadow-1)]',
