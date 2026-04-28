@@ -13,14 +13,14 @@
  * "which source has this field?" gymnastics.
  */
 import { useEffect, useState } from 'react';
-import { useParams, useNavigate, Link } from 'react-router-dom';
+import { useParams, useNavigate } from 'react-router-dom';
 import { WizardBadge as Badge } from '@/components/wizard-badge';
 import { WizardButton as Button } from '@/components/wizard-button';
 import ProvenanceCard from './ProvenanceCard.jsx';
 import QueueStatus from './QueueStatus';
 import { ProfileMenu } from '../routes/ProfileMenu';
 import { fetchResult } from '../api/result';
-import { fetchJSON, humanizeError } from '../api/http';
+import { humanizeError } from '../api/http';
 import { retryFailedTask } from '../api/queue';
 import { useWizardStore } from '../stores/wizardStore';
 import {
@@ -42,7 +42,6 @@ import {
   deepestReachableStep,
 } from '../routes/wizardValidation';
 import { ConfirmModal } from '../components/confirm-modal';
-import { schemas } from '../api/schemas-generated';
 import { formatTaskTitle } from './taskFormat.js';
 import { Confetti } from './shared/Confetti';
 import { ResultVideoCard } from './result/ResultVideoCard';
@@ -50,7 +49,6 @@ import { ResultStats } from './result/ResultStats';
 import { ResultPrimary, type ResultPrimaryStatus } from './result/ResultPrimary';
 import { Brand } from '../components/brand';
 import { Spinner } from '../components/spinner';
-import { videoTitle, formatRelativeDate, formatDuration } from '../lib/format';
 
 // Manifest shape — matches /api/results/{id}. Kept inline (not shared
 // with ProvenanceCard) because ProvenanceCard types `result: any` to
@@ -88,14 +86,6 @@ function deriveResolutionLabel(
   return `${m[2]}×${m[1]}`;
 }
 
-interface RecentItem {
-  task_id: string;
-  type?: 'generate' | 'conversation' | null;
-  timestamp?: string | null;
-  generation_time?: number | null;
-  video_url?: string;
-}
-
 export default function ResultPage() {
   const { taskId } = useParams<{ taskId: string }>();
   const navigate = useNavigate();
@@ -103,7 +93,6 @@ export default function ResultPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
-  const [recent, setRecent] = useState<RecentItem[] | null>(null);
   const [retrying, setRetrying] = useState(false);
   const [retryError, setRetryError] = useState<string | null>(null);
   // null = no modal open; otherwise the action that's pending confirmation.
@@ -409,22 +398,6 @@ export default function ResultPage() {
     navigate(`/step/${deepestReachableStep(computeValidity(fresh))}`);
   };
 
-  // Fetch a few recent results to show as "다른 영상 둘러보기" sidebar.
-  useEffect(() => {
-    const ctl = new AbortController();
-    fetchJSON('/api/history?limit=6', {
-      signal: ctl.signal,
-      label: '최근 영상',
-      schema: schemas.HistoryResponse,
-    })
-      .then((r) => {
-        const videos = (r.videos ?? []) as RecentItem[];
-        setRecent(videos.filter((v) => v.task_id !== taskId).slice(0, 5));
-      })
-      .catch(() => {});
-    return () => ctl.abort();
-  }, [taskId]);
-
   useEffect(() => {
     if (!taskId) return;
     // AbortController + `alive` belt-and-braces: abort cancels in-flight
@@ -511,6 +484,9 @@ export default function ResultPage() {
           </div>
           <div className="topbar-right">
             <QueueStatus />
+            <Button icon="video" size="sm" onClick={() => navigate('/results')}>
+              내 영상
+            </Button>
             <Button icon="home" size="sm" onClick={() => navigate('/')}>
               처음으로
             </Button>
@@ -518,9 +494,9 @@ export default function ResultPage() {
           </div>
         </header>
 
-        <div className="relative flex-1 overflow-y-auto px-8 pt-7 pb-20 bg-background">
+        <div className="relative flex-1 overflow-y-auto lg:overflow-hidden lg:flex lg:flex-col px-8 pt-5 pb-5 bg-background">
           {isDone && <Confetti />}
-          <div className="relative z-[1] max-w-[1100px] mx-auto">
+          <div className="relative z-[1] max-w-[1100px] mx-auto w-full lg:flex-1 lg:min-h-0 lg:flex lg:flex-col">
             <div className="mb-6">
               <div className="text-sm-tight text-ink-3 font-medium">결과</div>
               <h1 className="inline-flex items-center gap-2.5 text-[22px] font-bold tracking-tighter leading-[1.25] mt-1 mb-0">
@@ -589,119 +565,79 @@ export default function ResultPage() {
             )}
 
             {!error && result && taskId && (
-              <div className="surface-base p-6">
-                <div className="grid grid-cols-[220px_1fr] gap-7 items-start">
-                  <ResultVideoCard
-                    status={videoCardStatus}
-                    videoUrl={videoUrl}
-                    errorMessage={result.error ?? null}
-                  />
-
-                  <div className="flex-col gap-3 min-w-0">
-                    <div className="flex justify-between items-center">
-                      <div>
-                        <div className="text-base font-semibold">
-                          {formatTaskTitle(taskId, result.type || 'generate')}
-                        </div>
-                        <div className="text-xs text-tertiary">
-                          {resolutionLabel ? `${resolutionLabel} · 세로형` : '—'}
-                        </div>
-                      </div>
-                      {isDone ? (
-                        <Badge variant="success" icon="check_circle">
-                          완성!
-                        </Badge>
-                      ) : isError ? (
-                        <Badge variant="warn" icon="alert_circle">
-                          오류
-                        </Badge>
-                      ) : isCancelled ? (
-                        // Match the /results grid card: pill-muted "취소".
-                        <span className="pill-muted">취소</span>
-                      ) : (
-                        <Badge variant="accent" icon="sparkles">
-                          처리 중
-                        </Badge>
-                      )}
-                    </div>
-
-                    {isDone && (
-                      <ResultStats
-                        elapsedSec={result.generation_time_sec}
-                        completedAt={result.completed_at}
-                        fileSizeBytes={result.video_bytes}
-                        resolutionLabel={resolutionLabel}
-                      />
-                    )}
-
-                    <ResultPrimary
-                      status={primaryStatus}
-                      taskId={taskId}
-                      retriedFrom={result.retried_from ?? null}
-                      copied={copied}
-                      onCopyShare={handleCopyShare}
-                      onEdit={() => setConfirmAction('edit')}
-                      onRetry={() => setConfirmAction('retry')}
-                      onNew={() => navigate('/')}
+              <div className="grid gap-5 lg:grid-cols-[360px_minmax(0,1fr)] lg:flex-1 lg:min-h-0">
+                {/* Video column: card → title/badge → stats. Card grows
+                    to consume slack height (aspect-bound), title + stats
+                    natural height. lg:overflow-hidden to forbid scroll. */}
+                <div className="surface-base p-5 flex flex-col gap-4 lg:min-h-0 lg:overflow-hidden">
+                  <div className="flex justify-center lg:flex-1 lg:min-h-0">
+                    <ResultVideoCard
+                      status={videoCardStatus}
+                      videoUrl={videoUrl}
+                      errorMessage={result.error ?? null}
+                      className="w-[280px] lg:w-auto lg:h-full lg:max-w-full lg:self-stretch"
                     />
+                  </div>
+
+                  <div className="flex justify-between items-center gap-3">
+                    <div className="min-w-0">
+                      <div className="text-base font-semibold truncate">
+                        {formatTaskTitle(taskId, result.type || 'generate')}
+                      </div>
+                      <div className="text-xs text-tertiary">
+                        {resolutionLabel ? `${resolutionLabel} · 세로형` : '—'}
+                      </div>
+                    </div>
+                    {isDone ? (
+                      <Badge variant="success" icon="check_circle">
+                        완성!
+                      </Badge>
+                    ) : isError ? (
+                      <Badge variant="warn" icon="alert_circle">
+                        오류
+                      </Badge>
+                    ) : isCancelled ? (
+                      // Match the /results grid card: pill-muted "취소".
+                      <span className="pill-muted">취소</span>
+                    ) : (
+                      <Badge variant="accent" icon="sparkles">
+                        처리 중
+                      </Badge>
+                    )}
+                  </div>
+
+                  {isDone && (
+                    <ResultStats
+                      elapsedSec={result.generation_time_sec}
+                      completedAt={result.completed_at}
+                      fileSizeBytes={result.video_bytes}
+                      resolutionLabel={resolutionLabel}
+                    />
+                  )}
+                </div>
+
+                {/* Provenance column — primary actions on top so 저장/케밥
+                    is visible above the fold; ProvenanceCard fills below. */}
+                <div className="flex flex-col gap-4 lg:min-h-0">
+                  <ResultPrimary
+                    status={primaryStatus}
+                    taskId={taskId}
+                    retriedFrom={result.retried_from ?? null}
+                    copied={copied}
+                    onCopyShare={handleCopyShare}
+                    onEdit={() => setConfirmAction('edit')}
+                    onRetry={() => setConfirmAction('retry')}
+                    onNew={() => navigate('/')}
+                  />
+                  <div className="lg:flex-1 lg:min-h-0 lg:overflow-y-auto">
+                    <ProvenanceCard result={result} />
                   </div>
                 </div>
               </div>
-            )}
-
-            {/* 2-column body: main details on left, related sidebar on right */}
-            {!error && result && taskId && recent && recent.length > 0 && (
-              <div className="grid grid-cols-[minmax(0,1fr)_280px] gap-5 mt-4 items-start">
-                <div>
-                  {result && <ProvenanceCard result={result} />}
-                </div>
-                <RelatedRail items={recent} />
-              </div>
-            )}
-            {!error && result && taskId && (!recent || recent.length === 0) && (
-              <>{result && <ProvenanceCard result={result} />}</>
             )}
           </div>
         </div>
       </div>
     </div>
-  );
-}
-
-function RelatedRail({ items }: { items: RecentItem[] }) {
-  return (
-    <aside className="surface-base p-3.5 sticky top-4">
-      <div className="text-2xs font-bold text-ink-3 uppercase tracking-widest mb-2.5">
-        다른 영상 둘러보기
-      </div>
-      <div className="flex flex-col gap-2">
-        {items.map((it) => (
-          <Link
-            key={it.task_id}
-            to={`/result/${it.task_id}`}
-            className="grid grid-cols-[64px_1fr] gap-2.5 p-2 rounded-md no-underline text-foreground hover:bg-secondary transition-colors"
-          >
-            <div className="w-16 h-12 rounded overflow-hidden bg-foreground">
-              <video
-                src={it.video_url || `/api/videos/${it.task_id}`}
-                preload="metadata"
-                muted
-                playsInline
-                className="block w-full h-full object-cover"
-              />
-            </div>
-            <div className="min-w-0 flex flex-col justify-center">
-              <div className="text-xs font-semibold tracking-tight line-clamp-2 leading-tight">
-                {videoTitle(it)}
-              </div>
-              <div className="text-2xs text-muted-foreground tabular-nums mt-0.5">
-                {formatRelativeDate(it.timestamp)}
-                {it.generation_time && it.generation_time < 600 && ` · ${formatDuration(it.generation_time)}`}
-              </div>
-            </div>
-          </Link>
-        ))}
-      </div>
-    </aside>
   );
 }

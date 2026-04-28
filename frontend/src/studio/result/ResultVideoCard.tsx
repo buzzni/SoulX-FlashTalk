@@ -14,11 +14,12 @@ export interface ResultVideoCardProps {
   status: 'completed' | 'error' | 'processing';
   videoUrl: string;
   errorMessage?: string | null;
+  className?: string;
 }
 
-export function ResultVideoCard({ status, videoUrl, errorMessage }: ResultVideoCardProps) {
+export function ResultVideoCard({ status, videoUrl, errorMessage, className }: ResultVideoCardProps) {
   return (
-    <VideoFrame>
+    <VideoFrame className={className}>
       {status === 'completed' && (
         // No autoPlay — user clicks to play. preload="metadata" so the
         // player knows duration/dimensions without fetching bytes.
@@ -26,7 +27,7 @@ export function ResultVideoCard({ status, videoUrl, errorMessage }: ResultVideoC
           src={videoUrl}
           controls
           preload="metadata"
-          className="w-full h-full object-cover"
+          className="w-full h-full object-contain"
         />
       )}
       {status === 'error' && (

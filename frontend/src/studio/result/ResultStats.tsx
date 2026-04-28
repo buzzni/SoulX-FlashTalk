@@ -1,5 +1,5 @@
 /**
- * ResultStats — 3-column stats card on the result page.
+ * ResultStats — 3-row stacked stats on the result page.
  *
  * Distinct from RenderStats because the data shapes differ: here
  * `elapsedSec` is read from the backend manifest (`generation_time_sec`),
@@ -22,7 +22,7 @@ export function ResultStats({
   resolutionLabel,
 }: ResultStatsProps) {
   return (
-    <div className="grid grid-cols-3 gap-3">
+    <div className="flex flex-col gap-2">
       <StatTile
         label="걸린 시간"
         value={formatElapsedSec(elapsedSec)}

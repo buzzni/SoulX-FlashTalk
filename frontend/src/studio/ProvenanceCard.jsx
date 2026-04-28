@@ -99,7 +99,7 @@ export default function ProvenanceCard({ result, fallbackMeta = null }) {
   const qualityLabel = QUALITY_LABELS[imageQuality] || '—';
 
   return (
-    <div className="surface-base p-5">
+    <div className="surface-base p-5 lg:h-full lg:flex lg:flex-col">
       <div className="text-2xs uppercase tracking-widest font-semibold text-muted-foreground">이렇게 만들었어요</div>
 
       {/* Thumbnails — host (Step 1) + composite (Step 2). What actually
@@ -109,7 +109,7 @@ export default function ProvenanceCard({ result, fallbackMeta = null }) {
       {(h.imageUrl || compositeUrl) && (
         <div className="flex gap-3 mt-3 mb-1">
           {h.imageUrl && (
-            <figure className="m-0 w-[120px] flex-none">
+            <figure className="m-0 w-[160px] flex-none">
               <div className="aspect-[9/16] rounded-lg overflow-hidden bg-[#0b0d12] border border-border">
                 <img src={h.imageUrl} alt="쇼호스트" className="w-full h-full object-cover" />
               </div>
@@ -117,7 +117,7 @@ export default function ProvenanceCard({ result, fallbackMeta = null }) {
             </figure>
           )}
           {compositeUrl && (
-            <figure className="m-0 w-[120px] flex-none">
+            <figure className="m-0 w-[160px] flex-none">
               <div className="aspect-[9/16] rounded-lg overflow-hidden bg-[#0b0d12] border border-border">
                 <img src={compositeUrl} alt="합성" className="w-full h-full object-cover" />
               </div>
@@ -127,7 +127,7 @@ export default function ProvenanceCard({ result, fallbackMeta = null }) {
         </div>
       )}
 
-      <div className="grid grid-cols-4 gap-5 mt-4">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-5 mt-4">
         <div>
           <div className="text-xs text-tertiary">쇼호스트</div>
           <div className="font-medium mt-0.5">
@@ -162,7 +162,7 @@ export default function ProvenanceCard({ result, fallbackMeta = null }) {
         </div>
       </div>
 
-      <div className="grid grid-cols-4 gap-5 mt-4 pt-3.5 border-t border-border">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-5 mt-4 pt-3.5 border-t border-border">
         <div>
           <div className="text-xs text-tertiary">해상도</div>
           <div className="font-medium mt-0.5 num mono">
@@ -196,9 +196,9 @@ export default function ProvenanceCard({ result, fallbackMeta = null }) {
       )}
 
       {scriptText && (
-        <div className="mt-4 pt-3.5 border-t border-border">
+        <div className="mt-4 pt-3.5 border-t border-border lg:flex-1 lg:min-h-0 lg:flex lg:flex-col">
           <div className="text-xs text-tertiary">대본</div>
-          <div className="text-sm-tight mt-1 whitespace-pre-wrap max-h-[120px] overflow-y-auto">
+          <div className="text-sm-tight mt-1 whitespace-pre-wrap max-h-[120px] lg:max-h-none lg:flex-1 lg:min-h-0 overflow-y-auto">
             {scriptText.replace(/\[breath\]/g, ' · ')}
           </div>
         </div>
