@@ -47,7 +47,7 @@ import { formatTaskTitle } from './taskFormat.js';
 import { Confetti } from './shared/Confetti';
 import { ResultVideoCard } from './result/ResultVideoCard';
 import { ResultStats } from './result/ResultStats';
-import { ResultActions } from './result/ResultActions';
+import { ResultPrimary, type ResultPrimaryStatus } from './result/ResultPrimary';
 import { Brand } from '../components/brand';
 import { Spinner } from '../components/spinner';
 import { videoTitle, formatRelativeDate, formatDuration } from '../lib/format';
@@ -64,6 +64,11 @@ interface ResultManifest {
   generation_time_sec?: number | null;
   video_url?: string | null;
   video_bytes?: number | null;
+  // D3A — non-null means this task was a retry of `retried_from`. Read
+  // defensively (`?? null`) since legacy rows pre-date the field. Backend
+  // pydantic schema uses extra='allow' so the value passes through even
+  // before the next gen:zod / gen:types regen.
+  retried_from?: string | null;
   params?: {
     resolution_actual?: string;
     resolution_requested?: string;
@@ -457,15 +462,32 @@ export default function ResultPage() {
 
   const status = result?.status;
   const isDone = status === 'completed';
-  const isError = status === 'error' || status === 'cancelled';
+  const isCancelled = status === 'cancelled';
+  const isError = status === 'error';
+  // Legacy combined boolean — kept for the header h1 + retry/edit modal
+  // gating, which still treats both error & cancelled as "terminal-with-retry".
+  const isTerminalFailure = isError || isCancelled;
   const videoUrl = result?.video_url || (taskId ? `/api/videos/${taskId}` : '');
   const resolutionLabel = deriveResolutionLabel(result?.params);
 
   const videoCardStatus: 'completed' | 'error' | 'processing' = isDone
     ? 'completed'
-    : isError
+    : isTerminalFailure
       ? 'error'
       : 'processing';
+
+  // Status for ResultPrimary. While the manifest is loading, render the
+  // skeleton variant. After load: completed / error / cancelled map 1:1.
+  // running/pending → "processing" (kebab-only). Unknown → processing.
+  const primaryStatus: ResultPrimaryStatus = loading
+    ? 'loading'
+    : isDone
+      ? 'completed'
+      : isError
+        ? 'error'
+        : isCancelled
+          ? 'cancelled'
+          : 'processing';
 
   const handleCopyShare = async () => {
     if (!taskId) return;
@@ -501,78 +523,55 @@ export default function ResultPage() {
         <div className="relative flex-1 overflow-y-auto px-8 pt-7 pb-20 bg-background">
           {isDone && <Confetti />}
           <div className="relative z-[1] max-w-[1100px] mx-auto">
-            <div className="flex justify-between items-center mb-6">
-              <div>
-                <div className="text-sm-tight text-ink-3 font-medium">결과</div>
-                <h1 className="inline-flex items-center gap-2.5 text-[22px] font-bold tracking-tighter leading-[1.25] mt-1 mb-0">
-                  {loading && <Spinner size="md" />}
-                  {loading
-                    ? '영상 정보 불러오는 중…'
-                    : isError
-                      ? '만들기에 실패했어요'
+            <div className="mb-6">
+              <div className="text-sm-tight text-ink-3 font-medium">결과</div>
+              <h1 className="inline-flex items-center gap-2.5 text-[22px] font-bold tracking-tighter leading-[1.25] mt-1 mb-0">
+                {loading && <Spinner size="md" />}
+                {loading
+                  ? '영상 정보 불러오는 중…'
+                  : isError
+                    ? '만들기에 실패했어요'
+                    : isCancelled
+                      ? '취소된 작업이에요'
                       : isDone
                         ? '영상이 완성됐어요!'
                         : error
                           ? '영상 정보를 불러오지 못했어요'
                           : '처리 중이에요'}
-                </h1>
-              </div>
-              <div className="flex gap-2">
-                {(isError || isDone) && (
-                  <Button
-                    icon="settings"
-                    variant="secondary"
-                    onClick={() => setConfirmAction('edit')}
-                    title="이 작업의 입력값을 마법사에 채우고 처음부터 다시"
-                  >
-                    수정해서 다시 만들기
-                  </Button>
-                )}
-                {isError && (
-                  <Button
-                    icon="refresh"
-                    variant="secondary"
-                    onClick={() => setConfirmAction('retry')}
-                    disabled={retrying}
-                    title="같은 입력으로 그대로 다시 시도"
-                  >
-                    {retrying ? '재시도 중…' : '재시도'}
-                  </Button>
-                )}
-                <Button icon="plus" variant="secondary" onClick={() => navigate('/')}>
-                  새로 만들기
-                </Button>
-              </div>
-
-              <ConfirmModal
-                open={confirmAction === 'retry'}
-                title="이 작업을 다시 시도할까요?"
-                description="같은 입력으로 새 작업을 큐에 넣어요. 같은 환경에서 같은 이유로 또 실패할 수 있어요."
-                confirmLabel="재시도"
-                onConfirm={doRetry}
-                onCancel={() => setConfirmAction(null)}
-                busy={retrying}
-              />
-              <ConfirmModal
-                open={confirmAction === 'edit'}
-                title="입력을 수정해서 다시 만들까요?"
-                description={
-                  <>
-                    <p className="m-0 leading-relaxed">
-                      이 작업의 <b>대본</b>과 <b>화질</b> 설정을 마법사에 채우고
-                      <br />
-                      <b>1단계</b>부터 다시 시작해요.
-                    </p>
-                    <p className="mt-2 m-0 leading-relaxed text-tertiary">
-                      지금까지 입력하던 다른 마법사 작업이 있다면 사라져요.
-                    </p>
-                  </>
-                }
-                confirmLabel="시작하기"
-                onConfirm={doEditAndRetry}
-                onCancel={() => setConfirmAction(null)}
-              />
+              </h1>
             </div>
+
+            {/* ConfirmModals stay at the page level — opened by the
+                ResultPrimary callbacks below, so the modals don't have
+                to live inside the (potentially unmounted) component. */}
+            <ConfirmModal
+              open={confirmAction === 'retry'}
+              title="이 작업을 다시 시도할까요?"
+              description="같은 입력으로 새 작업을 큐에 넣어요. 같은 환경에서 같은 이유로 또 실패할 수 있어요."
+              confirmLabel="재시도"
+              onConfirm={doRetry}
+              onCancel={() => setConfirmAction(null)}
+              busy={retrying}
+            />
+            <ConfirmModal
+              open={confirmAction === 'edit'}
+              title="입력을 수정해서 다시 만들까요?"
+              description={
+                <>
+                  <p className="m-0 leading-relaxed">
+                    이 작업의 <b>대본</b>과 <b>화질</b> 설정을 마법사에 채우고
+                    <br />
+                    <b>1단계</b>부터 다시 시작해요.
+                  </p>
+                  <p className="mt-2 m-0 leading-relaxed text-tertiary">
+                    지금까지 입력하던 다른 마법사 작업이 있다면 사라져요.
+                  </p>
+                </>
+              }
+              confirmLabel="시작하기"
+              onConfirm={doEditAndRetry}
+              onCancel={() => setConfirmAction(null)}
+            />
 
             {error && !result && (
               <div className="surface-base p-5 border-destructive">
@@ -618,6 +617,9 @@ export default function ResultPage() {
                         <Badge variant="warn" icon="alert_circle">
                           오류
                         </Badge>
+                      ) : isCancelled ? (
+                        // Match the /results grid card: pill-muted "취소".
+                        <span className="pill-muted">취소</span>
                       ) : (
                         <Badge variant="accent" icon="sparkles">
                           처리 중
@@ -634,12 +636,15 @@ export default function ResultPage() {
                       />
                     )}
 
-                    <ResultActions
-                      isDone={isDone}
+                    <ResultPrimary
+                      status={primaryStatus}
                       taskId={taskId}
+                      retriedFrom={result.retried_from ?? null}
                       copied={copied}
                       onCopyShare={handleCopyShare}
-                      onGoHome={() => navigate('/')}
+                      onEdit={() => setConfirmAction('edit')}
+                      onRetry={() => setConfirmAction('retry')}
+                      onNew={() => navigate('/')}
                     />
                   </div>
                 </div>
