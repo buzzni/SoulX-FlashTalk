@@ -27,10 +27,18 @@ from utils.security import safe_upload_path
 # Eng-spec §7: input_blob serialized JSON must fit under this cap.
 INPUT_BLOB_MAX_BYTES = 256_000
 
-# Path fields per kind. Step 4 will add the composite kind's path fields
-# (faceRefPath, outfitRefPath, styleRefPath, productPath, etc.) to this map.
+# Scalar path fields per kind. Sanitization runs safe_upload_path on each
+# present (truthy) value and replaces the dict entry with the realpath.
 _PATH_FIELDS_BY_KIND: dict[str, tuple[str, ...]] = {
     "host": ("faceRefPath", "outfitRefPath", "styleRefPath"),
+    "composite": ("hostImagePath", "backgroundUploadPath"),
+}
+
+# List-typed path fields per kind. Each list element runs through
+# safe_upload_path independently; the list keeps its order.
+_PATH_LIST_FIELDS_BY_KIND: dict[str, tuple[str, ...]] = {
+    "host": (),
+    "composite": ("productImagePaths",),
 }
 
 
@@ -62,28 +70,40 @@ def validate_and_sanitize(kind: str, raw: dict[str, Any]) -> dict[str, Any]:
     """Sanitize path fields per kind and return the canonical input blob.
 
     Raises HTTPException(400) on any invalid path (delegated from
-    safe_upload_path). Unknown `kind` raises HTTPException(400)."""
-    path_fields = _PATH_FIELDS_BY_KIND.get(kind)
-    if path_fields is None:
+    safe_upload_path). Unknown `kind` raises HTTPException(400) — defense
+    in depth against a future caller that bypasses the Pydantic
+    discriminator (e.g., direct repo write)."""
+    if kind not in _PATH_FIELDS_BY_KIND:
         raise HTTPException(
             status_code=400, detail=f"unsupported kind: {kind!r}"
         )
 
     sanitized = dict(raw)
-    for field in path_fields:
+    for field in _PATH_FIELDS_BY_KIND[kind]:
         val = sanitized.get(field)
         if val:
             sanitized[field] = safe_upload_path(val)
+    for field in _PATH_LIST_FIELDS_BY_KIND.get(kind, ()):
+        items = sanitized.get(field)
+        if items:
+            sanitized[field] = [safe_upload_path(p) for p in items]
     return _canonicalize(sanitized)
 
 
-def compute_input_hash(blob: dict[str, Any]) -> str:
-    """sha256 of canonical JSON. Caller has already passed `blob` through
-    validate_and_sanitize, so it's already canonical — but we re-serialize
-    here with sort_keys=True as a belt-and-braces guarantee that any future
-    drift in _canonicalize doesn't silently break the dedupe key."""
+def compute_input_hash(kind: str, blob: dict[str, Any]) -> str:
+    """sha256 of canonical JSON. The kind is mixed into the hash so host
+    and composite jobs live in distinct dedupe spaces — even if two blobs
+    happened to serialize identically (which is structurally impossible
+    given each kind's required fields, but the partition is cheap and
+    self-documents the intent).
+
+    Caller has already passed `blob` through validate_and_sanitize, so
+    it's already canonical — but we re-serialize here with sort_keys=True
+    as a belt-and-braces guarantee that any future drift in
+    _canonicalize doesn't silently break the dedupe key."""
     payload = json.dumps(
-        blob, sort_keys=True, ensure_ascii=False, default=_json_default,
+        {"kind": kind, "input": blob},
+        sort_keys=True, ensure_ascii=False, default=_json_default,
     )
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 

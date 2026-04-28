@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Optional, List
 from datetime import datetime
 
-from fastapi import FastAPI, File, UploadFile, Form, HTTPException, Request
+from fastapi import Body, FastAPI, File, UploadFile, Form, HTTPException, Request
 from fastapi.responses import FileResponse, StreamingResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -28,7 +28,7 @@ from modules.repositories import studio_jobs_repo as jobs_repo
 from modules.task_queue import task_queue
 from modules.schemas import (
     HistoryResponse,
-    HostJobRequestPayload,
+    JobCreateRequestPayload,
     JobSnapshot,
     QueueSnapshot,
     ResultManifest,
@@ -2983,16 +2983,20 @@ async def delete_video(task_id: str, request: Request):
 # ========================================
 
 @app.post("/api/jobs", response_model=JobSnapshot)
-async def create_job(request: Request, body: HostJobRequestPayload):
+async def create_job(
+    request: Request,
+    body: JobCreateRequestPayload = Body(...),
+):
     """Create a generation job and submit it to the runner.
 
-    Dedupe-by-reuse: if the same (user_id, input_hash) already has an
-    active row (pending or streaming), the existing row is returned and
+    Dedupe-by-reuse: if the same (user_id, kind, input_hash) already has
+    an active row (pending or streaming), the existing row is returned and
     no new submit happens — the runner is already working on it
     (eng-spec §6.5).
 
-    Step 3 ships kind='host' only; step 4 expands the body to a discriminated
-    union covering composite as well.
+    Body is a discriminated union over kind: 'host' uses HostJobInput,
+    'composite' uses CompositeJobInput. Pydantic surfaces 422 on any
+    field-level validation error before this handler runs.
     """
     user = auth_module.get_request_user(request)
 
@@ -3007,7 +3011,7 @@ async def create_job(request: Request, body: HostJobRequestPayload):
     raw_input = body.input.model_dump(exclude_none=True)
     sanitized = validate_and_sanitize(body.kind, raw_input)
     enforce_size_cap(sanitized)
-    input_hash = compute_input_hash(sanitized)
+    input_hash = compute_input_hash(body.kind, sanitized)
 
     job, was_created = await jobs_repo.create_or_get_active(
         user_id=user["user_id"],

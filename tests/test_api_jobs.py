@@ -283,3 +283,136 @@ def test_runner_submit_invoked_on_fresh_create(client, monkeypatch):
     b = tc.post("/api/jobs", json=_host_payload(face)).json()
     assert a["id"] == b["id"]  # dedupe hit
     assert calls == [a["id"]]  # submit called once (fresh insert only)
+
+
+# ── composite (step 4) ────────────────────────────────────────────────
+
+def _composite_payload(host_path: Path, products: list[Path], **overrides) -> dict:
+    body = {
+        "kind": "composite",
+        "input": {
+            "hostImagePath": str(host_path),
+            "productImagePaths": [str(p) for p in products],
+            "backgroundType": "prompt",
+            "backgroundPrompt": "modern showroom",
+            "direction": "front",
+            "shot": "bust",
+            "angle": "eye",
+            "n": 4,
+            "rembg": True,
+            "seeds": [10, 11, 12, 13],
+        },
+    }
+    body["input"].update(overrides)
+    return body
+
+
+def test_create_composite_job_returns_pending(client):
+    tc, uploads = client
+    host = _seed_image(uploads, "host.png")
+    p1 = _seed_image(uploads, "p1.png")
+    p2 = _seed_image(uploads, "p2.png")
+    r = tc.post("/api/jobs", json=_composite_payload(host, [p1, p2]))
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["kind"] == "composite"
+    assert body["state"] == "pending"
+    assert body["user_id"] == "testuser"
+
+
+def test_composite_dedupe_same_payload(client):
+    tc, uploads = client
+    host = _seed_image(uploads, "host.png")
+    p1 = _seed_image(uploads, "p1.png")
+    a = tc.post("/api/jobs", json=_composite_payload(host, [p1])).json()
+    b = tc.post("/api/jobs", json=_composite_payload(host, [p1])).json()
+    assert a["id"] == b["id"]
+
+
+def test_composite_product_path_traversal_rejected(client):
+    """Each item in productImagePaths runs through safe_upload_path."""
+    tc, uploads = client
+    host = _seed_image(uploads, "host.png")
+    legit = _seed_image(uploads, "p1.png")
+    body = _composite_payload(host, [legit])
+    body["input"]["productImagePaths"] = [str(legit), "/etc/passwd"]
+    r = tc.post("/api/jobs", json=body)
+    assert r.status_code == 400
+    assert "allowed directory" in r.text.lower()
+
+
+def test_composite_host_path_traversal_rejected(client):
+    tc, uploads = client
+    legit = _seed_image(uploads, "p1.png")
+    body = _composite_payload(uploads / "x.png", [legit])
+    body["input"]["hostImagePath"] = "/etc/passwd"
+    r = tc.post("/api/jobs", json=body)
+    assert r.status_code == 400
+
+
+def test_composite_background_upload_path_validated(client):
+    """backgroundUploadPath is a scalar path field — gets sanitized too."""
+    tc, uploads = client
+    host = _seed_image(uploads, "host.png")
+    bg = _seed_image(uploads, "bg.png")
+    body = _composite_payload(host, [])
+    body["input"]["backgroundType"] = "upload"
+    body["input"]["backgroundUploadPath"] = str(bg)
+    r = tc.post("/api/jobs", json=body)
+    assert r.status_code == 200, r.text
+
+
+def test_composite_background_upload_traversal_rejected(client):
+    tc, uploads = client
+    host = _seed_image(uploads, "host.png")
+    body = _composite_payload(host, [])
+    body["input"]["backgroundType"] = "upload"
+    body["input"]["backgroundUploadPath"] = "/etc/passwd"
+    r = tc.post("/api/jobs", json=body)
+    assert r.status_code == 400
+
+
+def test_composite_missing_required_field_rejected(client):
+    """backgroundType is required by CompositeJobInput."""
+    tc, uploads = client
+    host = _seed_image(uploads, "host.png")
+    body = _composite_payload(host, [])
+    body["input"].pop("backgroundType")
+    r = tc.post("/api/jobs", json=body)
+    assert r.status_code == 422
+
+
+def test_composite_invalid_background_type_rejected(client):
+    """backgroundType is a Literal — only preset/upload/prompt allowed."""
+    tc, uploads = client
+    host = _seed_image(uploads, "host.png")
+    body = _composite_payload(host, [])
+    body["input"]["backgroundType"] = "weird"
+    r = tc.post("/api/jobs", json=body)
+    assert r.status_code == 422
+
+
+def test_composite_extra_field_rejected(client):
+    """extra='forbid' on CompositeJobInput catches typos / spec drift."""
+    tc, uploads = client
+    host = _seed_image(uploads, "host.png")
+    body = _composite_payload(host, [])
+    body["input"]["productPath"] = str(host)  # singular — wrong field name
+    r = tc.post("/api/jobs", json=body)
+    assert r.status_code == 422
+
+
+def test_host_and_composite_partition_dedupe_space(client):
+    """Even if a host blob and a composite blob somehow serialized
+    identically, the kind is mixed into the input_hash so they live in
+    distinct dedupe spaces and never collide on the partial unique index."""
+    tc, uploads = client
+    face = _seed_image(uploads, "face.png")
+    p1 = _seed_image(uploads, "p1.png")
+
+    h = tc.post("/api/jobs", json=_host_payload(face)).json()
+    c = tc.post("/api/jobs", json=_composite_payload(face, [p1])).json()
+    assert h["kind"] == "host"
+    assert c["kind"] == "composite"
+    assert h["id"] != c["id"]
+    assert h["input_hash"] != c["input_hash"]

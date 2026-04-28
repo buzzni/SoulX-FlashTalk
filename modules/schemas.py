@@ -26,7 +26,7 @@ Shape discipline:
 
 from __future__ import annotations
 
-from typing import Any, Literal, Optional
+from typing import Annotated, Any, Literal, Optional, Union
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -250,15 +250,54 @@ class HostJobInput(BaseModel):
 
 
 class HostJobRequestPayload(BaseModel):
-    """POST /api/jobs body for kind='host'.
-
-    Step 4 will replace this with a Field(discriminator='kind') union over
-    {HostJobRequestPayload, CompositeJobRequestPayload}."""
+    """POST /api/jobs body for kind='host'."""
 
     model_config = ConfigDict(extra='forbid')
 
     kind: Literal["host"]
     input: HostJobInput
+
+
+class CompositeJobInput(BaseModel):
+    """Step 2 composite (host + products + background) generation
+    parameters. Mirrors the /api/composite/generate Form fields. Path
+    fields (hostImagePath, productImagePaths[], backgroundUploadPath) are
+    sanitized via safe_upload_path before storage."""
+
+    model_config = ConfigDict(extra='forbid')
+
+    hostImagePath: str
+    productImagePaths: list[str] = Field(default_factory=list)
+    backgroundType: Literal["preset", "upload", "prompt"]
+    backgroundPresetId: Optional[str] = None
+    backgroundPresetLabel: Optional[str] = None
+    backgroundUploadPath: Optional[str] = None
+    backgroundPrompt: Optional[str] = None
+    direction: str = ""
+    shot: str = "bust"
+    angle: str = "eye"
+    n: int = 4
+    rembg: bool = True
+    temperature: Optional[float] = None
+    seeds: Optional[list[int]] = None
+    imageSize: str = "1K"
+
+
+class CompositeJobRequestPayload(BaseModel):
+    """POST /api/jobs body for kind='composite'."""
+
+    model_config = ConfigDict(extra='forbid')
+
+    kind: Literal["composite"]
+    input: CompositeJobInput
+
+
+# Discriminated union — FastAPI surfaces 422 with field-level errors when
+# either the kind tag or any kind-specific field validation fails.
+JobCreateRequestPayload = Annotated[
+    Union[HostJobRequestPayload, CompositeJobRequestPayload],
+    Field(discriminator="kind"),
+]
 
 
 class JobSnapshot(_ExtraAllowBase):
