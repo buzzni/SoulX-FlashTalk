@@ -1,22 +1,28 @@
 /**
- * /results — 완성된 영상 + 플레이리스트.
+ * /results — 라이브러리. 완료/실패/취소 영상 + 플레이리스트.
  *
- * Korean Productivity 결: 페이지 헤딩 + 플레이리스트 chip 가로 스트립 +
- * 영상 그리드. 메인 사이드바는 AppLayout, 플레이리스트 필터는 chip
- * 가로 strip (이전엔 별도 사이드바였음 — 마스터 사이드바와 공간 충돌).
+ * 두 줄 chip strip (playlist + status) + sort 부재 (Phase 2 deferred per
+ * docs/results-page-overhaul-plan.md decision #15) + page-based pagination
+ * (decision #16). URL state via useSearchParams so filter/page deep-links
+ * survive reload + browser back/forward.
  */
 import { useCallback, useEffect, useMemo, useState, useRef } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { toast } from 'sonner';
-import { MoreHorizontal, Plus, Play } from 'lucide-react';
+import { MoreHorizontal, Plus, Play, Info, RotateCw } from 'lucide-react';
 import { AppLayout } from './AppLayout';
-import { Spinner } from '../components/spinner';
 import { EmptyState } from '../components/empty-state';
+import { Pagination } from '../components/pagination';
 import { videoTitle, formatCompactDate, formatDuration } from '../lib/format';
 import { startNewVideo } from '../lib/wizardNav';
 import { cn } from '@/lib/utils';
-import { fetchJSON, humanizeError } from '../api/http';
-import { schemas } from '../api/schemas-generated';
+import { humanizeError } from '../api/http';
+import {
+  fetchHistoryPage,
+  fetchHistoryCounts,
+  type HistoryStatus,
+  type HistoryCounts,
+} from '../api/history';
 import { ConfirmModal } from '../components/confirm-modal';
 import {
   createPlaylist,
@@ -34,37 +40,102 @@ import {
   DropdownMenuLabel,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from '@/components/ui/tooltip';
 
 interface HistoryItem {
   task_id: string;
-  timestamp?: string;
-  script_text?: string;
-  host_image?: string;
-  audio_source?: string;
-  output_path?: string;
-  file_size?: number;
+  type?: 'generate' | 'conversation' | null;
+  status?: 'completed' | 'error' | 'cancelled' | null;
+  public_error?: string | null;
+  timestamp?: string | null;
+  output_path?: string | null;
+  file_size?: number | null;
   video_url?: string;
-  generation_time?: number;
+  generation_time?: number | null;
 }
 
-interface HistoryResponse {
-  total: number;
-  videos: HistoryItem[];
+type PlaylistFilter = 'all' | 'unassigned' | string;
+
+const PAGE_SIZE = 24;
+
+const VALID_STATUSES = new Set<HistoryStatus>(['all', 'completed', 'error', 'cancelled']);
+
+function parseStatus(raw: string | null): HistoryStatus {
+  return raw && VALID_STATUSES.has(raw as HistoryStatus) ? (raw as HistoryStatus) : 'all';
 }
 
-type Filter = 'all' | 'unassigned' | string;
+function parsePage(raw: string | null): number {
+  const n = Number(raw);
+  return Number.isFinite(n) && n >= 1 ? Math.floor(n) : 1;
+}
 
 export function ResultsListPage() {
   const navigate = useNavigate();
-  const [filter, setFilter] = useState<Filter>('all');
+  const [searchParams, setSearchParams] = useSearchParams();
+
+  // URL-backed state.
+  const playlistFilter: PlaylistFilter = searchParams.get('playlist_id') || 'all';
+  const statusFilter: HistoryStatus = parseStatus(searchParams.get('status'));
+  const page = parsePage(searchParams.get('page'));
+
+  const updateParams = useCallback(
+    (updates: Record<string, string | null>) => {
+      setSearchParams(
+        (prev) => {
+          const next = new URLSearchParams(prev);
+          for (const [k, v] of Object.entries(updates)) {
+            if (v === null || v === '') next.delete(k);
+            else next.set(k, v);
+          }
+          return next;
+        },
+        { replace: false },
+      );
+    },
+    [setSearchParams],
+  );
+
+  const setPlaylistFilter = useCallback(
+    (next: PlaylistFilter) => {
+      updateParams({
+        playlist_id: next === 'all' ? null : next,
+        page: null,        // reset page on filter change
+      });
+    },
+    [updateParams],
+  );
+
+  const setStatusFilter = useCallback(
+    (next: HistoryStatus) => {
+      updateParams({ status: next === 'all' ? null : next, page: null });
+    },
+    [updateParams],
+  );
+
+  const setPage = useCallback(
+    (next: number) => {
+      updateParams({ page: next === 1 ? null : String(next) });
+    },
+    [updateParams],
+  );
+
+  // Fetched data.
   const [items, setItems] = useState<HistoryItem[] | null>(null);
+  const [total, setTotal] = useState(0);
   const [historyError, setHistoryError] = useState<string | null>(null);
+  const [counts, setCounts] = useState<HistoryCounts | null>(null);
   const [playlists, setPlaylists] = useState<PlaylistListResponse | null>(null);
   const [playlistsError, setPlaylistsError] = useState<string | null>(null);
 
   const [epoch, setEpoch] = useState(0);
   const refresh = useCallback(() => setEpoch((n) => n + 1), []);
 
+  // Playlists fetch (independent of filter changes).
   useEffect(() => {
     const ctl = new AbortController();
     setPlaylistsError(null);
@@ -82,45 +153,82 @@ export function ResultsListPage() {
     return () => ctl.abort();
   }, [epoch]);
 
+  // History list fetch — refires on any filter / page change.
   useEffect(() => {
     const ctl = new AbortController();
     setItems(null);
     setHistoryError(null);
-    const qs =
-      filter === 'all' ? '' : `&playlist_id=${encodeURIComponent(filter)}`;
-    fetchJSON(`/api/history?limit=200${qs}`, {
-      signal: ctl.signal,
-      label: '내 영상 목록',
-      schema: schemas.HistoryResponse,
-    })
-      .then((r) => setItems((r.videos ?? []) as HistoryItem[]))
+    fetchHistoryPage(
+      {
+        status: statusFilter,
+        offset: (page - 1) * PAGE_SIZE,
+        limit: PAGE_SIZE,
+        playlist_id: playlistFilter === 'all' ? undefined : playlistFilter,
+      },
+      { signal: ctl.signal },
+    )
+      .then((r) => {
+        setItems((r.videos ?? []) as HistoryItem[]);
+        setTotal(r.total);
+      })
       .catch((e) => {
         if ((e as { name?: string })?.name === 'AbortError') return;
         setHistoryError(humanizeError(e));
       });
     return () => ctl.abort();
-  }, [filter, epoch]);
+  }, [statusFilter, playlistFilter, page, epoch]);
 
+  // Counts fetch — depends on playlist scope only (not status/page).
+  useEffect(() => {
+    const ctl = new AbortController();
+    fetchHistoryCounts(
+      playlistFilter === 'all' ? undefined : playlistFilter,
+      { signal: ctl.signal },
+    )
+      .then((c) => setCounts(c))
+      .catch((e) => {
+        if ((e as { name?: string })?.name === 'AbortError') return;
+        // Counts failure is non-fatal — chips show "—" placeholders.
+        setCounts(null);
+      });
+    return () => ctl.abort();
+  }, [playlistFilter, epoch]);
+
+  // Stale playlist_id (deleted in another tab) → fall back to "all".
   useEffect(() => {
     if (!playlists) return;
-    if (filter === 'all' || filter === 'unassigned') return;
+    if (playlistFilter === 'all' || playlistFilter === 'unassigned') return;
     const stillExists = playlists.playlists.some(
-      (p) => p.playlist_id === filter,
+      (p) => p.playlist_id === playlistFilter,
     );
-    if (!stillExists) setFilter('all');
+    if (!stillExists) setPlaylistFilter('all');
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [playlists]);
 
-  const filterTitle = useMemo(() => {
-    if (filter === 'all') return '내 영상들';
-    if (filter === 'unassigned') return '미지정';
-    return playlists?.playlists.find((p) => p.playlist_id === filter)?.name
-      ?? '내 영상들';
-  }, [filter, playlists]);
+  // Beyond-last-page snap (per plan §10 failure mode).
+  useEffect(() => {
+    if (items === null) return;
+    const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+    if (page > totalPages) setPage(totalPages);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [items, total]);
 
-  const totalCount =
+  const filterTitle = useMemo(() => {
+    const playlistName =
+      playlistFilter === 'all'
+        ? '내 영상들'
+        : playlistFilter === 'unassigned'
+          ? '미지정'
+          : (playlists?.playlists.find((p) => p.playlist_id === playlistFilter)?.name
+              ?? '내 영상들');
+    return playlistName;
+  }, [playlistFilter, playlists]);
+
+  const playlistTotalCount =
     (playlists?.unassigned_count ?? 0) +
     (playlists?.playlists ?? []).reduce((s, p) => s + p.video_count, 0);
+
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
   return (
     <AppLayout active="results">
@@ -131,24 +239,55 @@ export function ResultsListPage() {
           <h1 className="headline-section m-0">{filterTitle}</h1>
           {items !== null && (
             <p className="m-0 mt-1 text-sm-tight text-muted-foreground">
-              {items.length}개의 영상
+              {total}개의 영상
             </p>
           )}
         </div>
 
-        {/* Playlist filter strip */}
+        {/* Row 1: Playlist chips */}
         <PlaylistChips
           playlists={playlists}
-          totalCount={totalCount}
-          selected={filter}
-          onSelect={setFilter}
+          totalCount={playlistTotalCount}
+          selected={playlistFilter}
+          onSelect={setPlaylistFilter}
           onChanged={refresh}
           onCreated={(p) => {
             refresh();
-            setFilter(p.playlist_id);
+            setPlaylistFilter(p.playlist_id);
           }}
           error={playlistsError}
         />
+
+        {/* Row 2: Status chips. Mobile: horizontal-scroll snap-x. */}
+        <div className="mt-3 flex items-center gap-2 overflow-x-auto scrollbar-none snap-x">
+          <StatusChip
+            label="전체"
+            count={counts?.all}
+            active={statusFilter === 'all'}
+            onClick={() => setStatusFilter('all')}
+          />
+          <StatusChip
+            label="완료"
+            count={counts?.completed}
+            active={statusFilter === 'completed'}
+            onClick={() => setStatusFilter('completed')}
+            tone="success"
+          />
+          <StatusChip
+            label="실패"
+            count={counts?.error}
+            active={statusFilter === 'error'}
+            onClick={() => setStatusFilter('error')}
+            tone="error"
+          />
+          <StatusChip
+            label="취소"
+            count={counts?.cancelled}
+            active={statusFilter === 'cancelled'}
+            onClick={() => setStatusFilter('cancelled')}
+            tone="muted"
+          />
+        </div>
 
         {historyError && (
           <div className="mt-4 px-4 py-3 text-sm-tight bg-destructive-soft text-destructive border border-destructive/30 rounded-md">
@@ -156,55 +295,189 @@ export function ResultsListPage() {
           </div>
         )}
 
+        {/* Loading: skeleton card grid (decision §13.5) */}
         {!historyError && items === null && (
-          <div className="mt-8 flex items-center gap-2 text-sm-tight text-muted-foreground">
-            <Spinner size="sm" /> 불러오는 중
+          <div className="mt-6 grid gap-4 grid-cols-[repeat(auto-fill,minmax(240px,1fr))]">
+            {Array.from({ length: 8 }).map((_, i) => (
+              <SkeletonCard key={i} />
+            ))}
           </div>
         )}
 
+        {/* Empty state per (playlistFilter, statusFilter) */}
         {!historyError && items !== null && items.length === 0 && (
           <div className="mt-6 surface-card animate-fade-in">
-            <EmptyState
-              kind={filter === 'all' ? 'no-videos' : 'no-playlist-items'}
-              title={
-                filter === 'all'
-                  ? '아직 만든 영상이 없어요'
-                  : '이 플레이리스트는 비어있어요'
-              }
-              description={
-                filter === 'all'
-                  ? '첫 영상을 만들어 라이브러리를 채워보세요.'
-                  : '결과 카드의 ⋯ 메뉴에서 이 플레이리스트로 옮겨보세요.'
-              }
-              action={
-                filter === 'all' ? (
-                  <button
-                    type="button"
-                    onClick={() => startNewVideo(navigate)}
-                    className="text-primary text-sm-tight font-semibold hover:underline cursor-pointer"
-                  >
-                    첫 영상 만들러 가기 →
-                  </button>
-                ) : undefined
-              }
+            <EmptyDispatch
+              playlistFilter={playlistFilter}
+              statusFilter={statusFilter}
+              onStartNew={() => startNewVideo(navigate)}
+              onShowAll={() => setStatusFilter('all')}
             />
           </div>
         )}
 
+        {/* Grid */}
         {!historyError && items !== null && items.length > 0 && (
-          <div className="mt-6 grid gap-4 grid-cols-[repeat(auto-fill,minmax(240px,1fr))]">
-            {items.map((it) => (
-              <ResultCard
-                key={it.task_id}
-                item={it}
-                playlists={playlists?.playlists ?? []}
-                onMoved={refresh}
-              />
-            ))}
-          </div>
+          <>
+            <div className="mt-6 grid gap-4 grid-cols-[repeat(auto-fill,minmax(240px,1fr))]">
+              {items.map((it) => (
+                <ResultCard
+                  key={it.task_id}
+                  item={it}
+                  playlists={playlists?.playlists ?? []}
+                  onMoved={refresh}
+                />
+              ))}
+            </div>
+            <Pagination page={page} totalPages={totalPages} onChange={setPage} />
+          </>
         )}
       </div>
     </AppLayout>
+  );
+}
+
+// ── Empty state per (playlist, status) — decision §13.9 ─────────────
+
+interface EmptyDispatchProps {
+  playlistFilter: PlaylistFilter;
+  statusFilter: HistoryStatus;
+  onStartNew: () => void;
+  onShowAll: () => void;
+}
+
+function EmptyDispatch({ playlistFilter, statusFilter, onStartNew, onShowAll }: EmptyDispatchProps) {
+  const inPlaylist = playlistFilter !== 'all';
+  if (inPlaylist) {
+    return (
+      <EmptyState
+        kind="no-playlist-items"
+        title="이 필터로는 영상이 없어요"
+        description={
+          statusFilter === 'all'
+            ? '결과 카드의 ⋯ 메뉴에서 이 플레이리스트로 옮겨보세요.'
+            : '다른 상태의 영상이 있는지 확인해 보세요.'
+        }
+        action={
+          statusFilter !== 'all' ? (
+            <button
+              type="button"
+              onClick={onShowAll}
+              className="text-primary text-sm-tight font-semibold hover:underline cursor-pointer"
+            >
+              전체 보기 →
+            </button>
+          ) : undefined
+        }
+      />
+    );
+  }
+  if (statusFilter === 'completed') {
+    return (
+      <EmptyState
+        kind="no-videos"
+        title="아직 완성된 영상이 없어요"
+        description="진행 중인 작업이 있는지 확인해 보세요."
+        action={
+          <button
+            type="button"
+            onClick={onStartNew}
+            className="text-primary text-sm-tight font-semibold hover:underline cursor-pointer"
+          >
+            첫 영상 만들러 가기 →
+          </button>
+        }
+      />
+    );
+  }
+  if (statusFilter === 'error') {
+    return (
+      <EmptyState
+        kind="no-videos"
+        title="실패한 영상이 없어요 🎉"
+        description="모든 영상이 잘 만들어졌어요."
+      />
+    );
+  }
+  if (statusFilter === 'cancelled') {
+    return (
+      <EmptyState
+        kind="no-videos"
+        title="취소한 영상이 없어요"
+        description=""
+      />
+    );
+  }
+  return (
+    <EmptyState
+      kind="no-videos"
+      title="아직 만든 영상이 없어요"
+      description="첫 영상을 만들어 라이브러리를 채워보세요."
+      action={
+        <button
+          type="button"
+          onClick={onStartNew}
+          className="text-primary text-sm-tight font-semibold hover:underline cursor-pointer"
+        >
+          첫 영상 만들러 가기 →
+        </button>
+      }
+    />
+  );
+}
+
+// ── Status filter chip ──────────────────────────────────────────────
+
+interface StatusChipProps {
+  label: string;
+  count: number | undefined;
+  active: boolean;
+  onClick: () => void;
+  tone?: 'default' | 'success' | 'error' | 'muted';
+}
+
+function StatusChip({ label, count, active, onClick, tone = 'default' }: StatusChipProps) {
+  const dot = tone === 'success'
+    ? 'bg-success'
+    : tone === 'error'
+      ? 'bg-destructive'
+      : tone === 'muted'
+        ? 'bg-muted-foreground'
+        : null;
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={active}
+      className={cn(
+        'inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition-colors cursor-pointer shrink-0 snap-start',
+        active
+          ? 'bg-foreground text-background'
+          : 'bg-card border border-border text-ink-2 hover:border-rule-strong hover:text-foreground',
+      )}
+    >
+      {dot && (
+        <span aria-hidden className={cn('size-1.5 rounded-full', dot, active && 'opacity-90')} />
+      )}
+      <span>{label}</span>
+      <span className={cn('text-2xs tabular-nums', active ? 'text-background/70' : 'text-muted-foreground')}>
+        {count ?? '—'}
+      </span>
+    </button>
+  );
+}
+
+// ── Skeleton card (loading state, decision §13.5) ───────────────────
+
+function SkeletonCard() {
+  return (
+    <div className="surface-card overflow-hidden">
+      <div className="w-full aspect-video skeleton-shimmer" />
+      <div className="p-3.5">
+        <div className="h-4 w-3/4 rounded bg-surface-2 animate-pulse mb-2" />
+        <div className="h-3 w-1/2 rounded bg-surface-2 animate-pulse" />
+      </div>
+    </div>
   );
 }
 
@@ -213,8 +486,8 @@ export function ResultsListPage() {
 interface PlaylistChipsProps {
   playlists: PlaylistListResponse | null;
   totalCount: number;
-  selected: Filter;
-  onSelect: (f: Filter) => void;
+  selected: PlaylistFilter;
+  onSelect: (f: PlaylistFilter) => void;
   onChanged: () => void;
   onCreated: (p: Playlist) => void;
   error: string | null;
@@ -352,6 +625,7 @@ function FilterChip({ label, count, active, onClick }: FilterChipProps) {
     <button
       type="button"
       onClick={onClick}
+      aria-pressed={active}
       className={cn(
         'inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition-colors cursor-pointer',
         active
@@ -441,6 +715,7 @@ function PlaylistChip({ playlist, active, onSelect, onChanged }: PlaylistChipPro
       <button
         type="button"
         onClick={onSelect}
+        aria-pressed={active}
         className={cn(
           'inline-flex items-center gap-1.5 pl-3 pr-2 py-1.5 rounded-l-full text-xs font-medium transition-colors cursor-pointer border',
           active
@@ -499,7 +774,7 @@ function PlaylistChip({ playlist, active, onSelect, onChanged }: PlaylistChipPro
   );
 }
 
-// ── Card ─────────────────────────────────────────────────────────────
+// ── ResultCard with status variants (decision §13.4) ─────────────────
 
 interface ResultCardProps {
   item: HistoryItem;
@@ -510,6 +785,11 @@ interface ResultCardProps {
 function ResultCard({ item, playlists, onMoved }: ResultCardProps) {
   const [busy, setBusy] = useState(false);
   const videoRef = useRef<HTMLVideoElement>(null);
+
+  const status = item.status ?? 'completed';
+  const isCompleted = status === 'completed';
+  const isError = status === 'error';
+  const isCancelled = status === 'cancelled';
 
   const move = async (playlistId: string | null, playlistName: string) => {
     setBusy(true);
@@ -524,14 +804,16 @@ function ResultCard({ item, playlists, onMoved }: ResultCardProps) {
     }
   };
 
-  // Hover preview — play muted video on hover, pause on leave.
+  // Hover preview only on completed cards.
   const onMouseEnter = () => {
+    if (!isCompleted) return;
     const v = videoRef.current;
     if (!v) return;
     v.currentTime = 0;
     v.play().catch(() => {});
   };
   const onMouseLeave = () => {
+    if (!isCompleted) return;
     const v = videoRef.current;
     if (!v) return;
     v.pause();
@@ -547,26 +829,50 @@ function ResultCard({ item, playlists, onMoved }: ResultCardProps) {
     <div className="relative group">
       <Link
         to={`/result/${item.task_id}`}
-        className="surface-card overflow-hidden no-underline text-foreground transition-all hover:translate-y-[-1px] hover:shadow-[var(--shadow-1)] hover:border-rule-strong block"
+        className={cn(
+          'surface-card overflow-hidden no-underline text-foreground transition-all block',
+          'hover:translate-y-[-1px] hover:shadow-[var(--shadow-1)] hover:border-rule-strong',
+        )}
         onMouseEnter={onMouseEnter}
         onMouseLeave={onMouseLeave}
       >
         <div className="relative w-full aspect-video bg-foreground overflow-hidden">
-          <video
-            ref={videoRef}
-            src={videoUrl}
-            preload="metadata"
-            muted
-            playsInline
-            loop
-            className="block w-full h-full object-cover"
-          />
-          <span className="absolute top-2 left-2 pill-success">완료</span>
-          <span className="absolute inset-0 grid place-items-center pointer-events-none opacity-0 group-hover:opacity-0 [&_.idle]:opacity-100 group-hover:[&_.idle]:opacity-0">
-            <span className="idle grid place-items-center size-10 rounded-full bg-background/85 text-foreground transition-opacity">
-              <Play className="size-4" fill="currentColor" />
-            </span>
+          {isCompleted ? (
+            <video
+              ref={videoRef}
+              src={videoUrl}
+              preload="metadata"
+              muted
+              playsInline
+              loop
+              className="block w-full h-full object-cover"
+            />
+          ) : (
+            // Failed/cancelled: no playable video. Dimmed thumbnail surface
+            // (decision §13.4) — a neutral gradient stands in for what would
+            // have been the video. Keeps grid alignment consistent.
+            <div
+              aria-hidden
+              className="block w-full h-full bg-gradient-to-br from-surface-2 to-bg-sunken opacity-70"
+            />
+          )}
+          <span
+            className={cn(
+              'absolute top-2 left-2',
+              isCompleted && 'pill-success',
+              isError && 'pill-error',
+              isCancelled && 'pill-muted',
+            )}
+          >
+            {isCompleted ? '완료' : isError ? '실패' : '취소됨'}
           </span>
+          {isCompleted && (
+            <span className="absolute inset-0 grid place-items-center pointer-events-none opacity-0 group-hover:opacity-0 [&_.idle]:opacity-100 group-hover:[&_.idle]:opacity-0">
+              <span className="idle grid place-items-center size-10 rounded-full bg-background/85 text-foreground transition-opacity">
+                <Play className="size-4" fill="currentColor" />
+              </span>
+            </span>
+          )}
         </div>
         <div className="p-3.5">
           <div className="font-semibold text-sm tracking-tight line-clamp-1 mb-1" title={title}>
@@ -575,6 +881,29 @@ function ResultCard({ item, playlists, onMoved }: ResultCardProps) {
           <div className="text-2xs text-muted-foreground tabular-nums">
             {ts}{ts && dur !== '—' && ' · '}{dur !== '—' ? dur : ''}
           </div>
+          {isError && item.public_error && (
+            <div className="mt-2 flex items-start gap-1 text-2xs text-ink-3">
+              <span className="text-destructive shrink-0" aria-hidden>⚠</span>
+              <span className="line-clamp-1 min-w-0">{item.public_error}</span>
+              <TooltipProvider delayDuration={150}>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      type="button"
+                      aria-label="자세한 실패 사유 보기"
+                      onClick={(e) => { e.preventDefault(); e.stopPropagation(); }}
+                      className="shrink-0 text-muted-foreground hover:text-foreground cursor-default"
+                    >
+                      <Info className="size-3" />
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent className="max-w-[240px] text-2xs leading-relaxed">
+                    {item.public_error}
+                  </TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
+            </div>
+          )}
         </div>
       </Link>
       <DropdownMenu>
@@ -594,6 +923,22 @@ function ResultCard({ item, playlists, onMoved }: ResultCardProps) {
           </button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="min-w-[180px] max-h-[320px] overflow-y-auto">
+          {isError && (
+            <>
+              <DropdownMenuItem
+                onSelect={() => {
+                  // "다시 만들기" — route to wizard with the failed task as a
+                  // template. Existing /result/:id surfaces the same retry
+                  // path; we just shortcut it from the grid.
+                  window.location.href = `/result/${item.task_id}`;
+                }}
+              >
+                <RotateCw className="size-3.5 mr-1.5" />
+                다시 만들기
+              </DropdownMenuItem>
+              <div className="my-1 h-px bg-border" />
+            </>
+          )}
           <DropdownMenuLabel className="text-2xs font-semibold text-muted-foreground">
             플레이리스트로 이동
           </DropdownMenuLabel>

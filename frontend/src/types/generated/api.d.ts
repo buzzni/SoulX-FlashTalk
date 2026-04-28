@@ -38,6 +38,60 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/auth/login": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Auth Login
+         * @description Studio login. Body: {user_id, password}. Returns access_token + user.
+         */
+        post: operations["auth_login_api_auth_login_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/auth/logout": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Auth Logout */
+        post: operations["auth_logout_api_auth_logout_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/auth/me": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Auth Me */
+        get: operations["auth_me_api_auth_me_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/upload/host-image": {
         parameters: {
             query?: never;
@@ -320,7 +374,7 @@ export interface paths {
         };
         /**
          * Progress Stream
-         * @description SSE endpoint for real-time progress.
+         * @description SSE endpoint for real-time progress. Owner-scoped (admins see all).
          */
         get: operations["progress_stream_api_progress__task_id__get"];
         put?: never;
@@ -346,6 +400,17 @@ export interface paths {
          *     EventSource while allowing ordinary fetch requests, leaving the render
          *     dashboard permanently stuck at the placeholder 0%. The polling path uses
          *     this endpoint; SSE stays in place for clients that can use it.
+         *
+         *     Fallback ordering:
+         *       1. in-memory `task_states` — the live, detailed state (has all
+         *          the sub-stage progress the worker emits)
+         *       2. persistent queue — if the task exists in the queue but hasn't
+         *          been picked up yet (e.g. right after a backend restart, when
+         *          `task_states` was wiped but `_recover_interrupted` flipped
+         *          running→pending), synthesize a minimal "queued/loading"
+         *          state so the frontend keeps polling instead of reporting the
+         *          task as failed after 8 consecutive 404s (~12s window).
+         *       3. only 404 if the task genuinely doesn't exist anywhere.
          */
         get: operations["task_state_snapshot_api_tasks__task_id__state_get"];
         put?: never;
@@ -371,7 +436,14 @@ export interface paths {
         get: operations["get_video_api_videos__task_id__head"];
         put?: never;
         post?: never;
-        delete?: never;
+        /**
+         * Delete Video
+         * @description Remove a generated video. Cascade-deletes any committed step1/step2
+         *     images linked exclusively to this video (see
+         *     studio_host_repo.cascade_delete_by_video). Also drops the result
+         *     manifest and history entry so the dashboard stops surfacing it.
+         */
+        delete: operations["delete_video_api_videos__task_id__delete"];
         options?: never;
         /**
          * Get Video
@@ -389,8 +461,53 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Get History */
+        /**
+         * Get History
+         * @description Return the authenticated user's terminal renders, paginated.
+         *
+         *     Plan decisions #5/#19/#20: includes completed + error + cancelled rows
+         *     (write path for the latter two added in
+         *     docs/results-page-overhaul-plan.md decision #20). Sort is fixed at
+         *     `completed_at DESC, task_id ASC` — name sort deferred to Phase 2
+         *     (decision #15).
+         *
+         *     Query params:
+         *         status:      "all" | "completed" | "error" | "cancelled"  (default "all")
+         *         offset:      pagination offset, ≥ 0                         (default 0)
+         *         limit:       page size, 1..100                              (default 24)
+         *         playlist_id: omitted | "unassigned" | <hex id>              (decision #12)
+         *
+         *     Returns `{total, videos}` where `total` is the total matching the filter
+         *     (NOT the page size) so the SPA can compute page count.
+         */
         get: operations["get_history_api_history_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/history/counts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get History Counts
+         * @description Return per-status counts for the status filter chips on /results.
+         *
+         *     Plan decision #14: separate endpoint, recomputed per request. Counts
+         *     change with every task completion / failure / cancellation / playlist
+         *     move, so caching with ETag invalidation isn't worth wiring up.
+         *
+         *     Response: `{all, completed, error, cancelled}` — the invariant
+         *     `all == completed + error + cancelled` is enforced by the repo.
+         */
+        get: operations["get_history_counts_api_history_counts_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -428,11 +545,33 @@ export interface paths {
         };
         /**
          * Get Queue Status
-         * @description Get current queue status: running, pending, and recent tasks.
+         * @description Get queue status scoped to the authenticated user (admin sees all).
          */
         get: operations["get_queue_status_api_queue_get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/tasks/{task_id}/retry": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Retry Failed Task
+         * @description Re-enqueue a finished (error/cancelled) task with the same params
+         *     under a new task_id. Owner-only (admin/master can retry any).
+         *     Returns the new task_id so the client can navigate to /render/:new_id.
+         */
+        post: operations["retry_failed_task_api_tasks__task_id__retry_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -451,7 +590,7 @@ export interface paths {
         post?: never;
         /**
          * Cancel Queued Task
-         * @description Cancel a pending task in the queue.
+         * @description Cancel a pending task. Owner-only (admins/masters can cancel any).
          */
         delete: operations["cancel_queued_task_api_queue__task_id__delete"];
         options?: never;
@@ -468,11 +607,10 @@ export interface paths {
         };
         /**
          * Get Result
-         * @description Return the result manifest for a completed task.
+         * @description Return the result manifest for a completed task. Owner-scoped.
          *
-         *     Reads outputs/results/{task_id}.json when present (written by the worker
-         *     at completion). Falls back to synthesizing from task_queue.json so
-         *     pre-manifest tasks remain viewable in the frontend /result/:taskId page.
+         *     PR5: reads from studio_results. Falls back to synthesizing from the
+         *     task_queue snapshot for in-flight tasks the worker hasn't yet upserted.
          */
         get: operations["get_result_api_results__task_id__get"];
         put?: never;
@@ -492,10 +630,16 @@ export interface paths {
         };
         /**
          * Get File
-         * @description Serve files from SAFE_ROOTS (UPLOADS/OUTPUTS/EXAMPLES). No PROJECT_ROOT fallback.
+         * @description Serve files. Accepts both legacy (bucket-less) and PR3 storage_key forms.
          *
-         *     Phase 0 CSO Critical #1 fix. Probes each safe root in order; rejects path
-         *     traversal via utils.security.safe_upload_path realpath containment.
+         *     Examples:
+         *       /api/files/outputs/hosts/saved/x.png   ← PR3 storage_key
+         *       /api/files/hosts/saved/x.png           ← legacy (still resolves)
+         *       /api/files/ref_img_abc.png             ← legacy (probes UPLOADS)
+         *
+         *     Bucket-prefixed keys go through `modules.storage` (rejects `..`).
+         *     Legacy filenames probe every bucket dir and pass through `safe_upload_path`
+         *     for the final realpath-containment check.
          */
         get: operations["get_file_api_files__filename__get"];
         put?: never;
@@ -606,7 +750,7 @@ export interface paths {
         };
         /**
          * List Saved Hosts
-         * @description List saved hosts (server-persisted). localStorage holds index on client.
+         * @description List saved hosts owned by the authenticated user.
          */
         get: operations["list_saved_hosts_api_hosts_get"];
         put?: never;
@@ -628,7 +772,7 @@ export interface paths {
         put?: never;
         /**
          * Save Host
-         * @description Persist a candidate image under HOSTS_DIR (V1 — no auth; protect via REQUIRE_API_KEY).
+         * @description Persist a candidate image as a long-lived saved host (PR4: DB-backed).
          */
         post: operations["save_host_api_hosts_save_post"];
         delete?: never;
@@ -649,9 +793,140 @@ export interface paths {
         post?: never;
         /**
          * Delete Host
-         * @description Remove a saved host and its metadata.
+         * @description Remove a saved host (DB row + backing file). Owner-scoped.
          */
         delete: operations["delete_host_api_hosts__host_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/playlists": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Playlists
+         * @description List the user's playlists with video counts + the synthetic 미지정 count.
+         *     Sidebar applies alphabetical sort in JS (plan decision #11).
+         */
+        get: operations["list_playlists_api_playlists_get"];
+        put?: never;
+        /**
+         * Create Playlist
+         * @description Create a new playlist. 409 on duplicate name (per-user, NFC+casefold).
+         */
+        post: operations["create_playlist_api_playlists_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/playlists/{playlist_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Delete Playlist
+         * @description Delete a playlist; cascades videos to 미지정. 404 if missing/cross-user.
+         */
+        delete: operations["delete_playlist_api_playlists__playlist_id__delete"];
+        options?: never;
+        head?: never;
+        /**
+         * Rename Playlist
+         * @description Rename. 404 if missing/cross-user, 409 on name dup.
+         */
+        patch: operations["rename_playlist_api_playlists__playlist_id__patch"];
+        trace?: never;
+    };
+    "/api/results/{task_id}/playlist": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Move Result To Playlist
+         * @description Move a video to a playlist (or empty/null = 미지정). 404 if result
+         *     missing/cross-user OR if playlist_id is non-empty and unknown/cross-user.
+         */
+        patch: operations["move_result_to_playlist_api_results__task_id__playlist_patch"];
+        trace?: never;
+    };
+    "/api/host/select": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Host Select
+         * @description Mark a Step1 candidate as the user's current selection. Idempotent.
+         */
+        post: operations["host_select_api_host_select_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/composite/select": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Composite Select
+         * @description Mark a Step2 candidate as the user's current selection. Idempotent.
+         */
+        post: operations["composite_select_api_composite_select_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/composites/{image_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Delete Composite
+         * @description Remove a single composite candidate. Refuses `committed` images —
+         *     delete the parent video instead so video_ids bookkeeping stays consistent.
+         */
+        delete: operations["delete_composite_api_composites__image_id__delete"];
         options?: never;
         head?: never;
         patch?: never;
@@ -771,6 +1046,16 @@ export interface components {
              */
             imageSize: string;
         };
+        /** Body_composite_select_api_composite_select_post */
+        Body_composite_select_api_composite_select_post: {
+            /** Image Id */
+            image_id: string;
+        };
+        /** Body_create_playlist_api_playlists_post */
+        Body_create_playlist_api_playlists_post: {
+            /** Name */
+            name: string;
+        };
         /** Body_generate_conversation_endpoint_api_generate_conversation_post */
         Body_generate_conversation_endpoint_api_generate_conversation_post: {
             /** Dialog Data */
@@ -797,6 +1082,8 @@ export interface components {
              * @default 1280x720
              */
             resolution: string;
+            /** Playlist Id */
+            playlist_id?: string | null;
         };
         /** Body_generate_elevenlabs_speech_api_elevenlabs_generate_post */
         Body_generate_elevenlabs_speech_api_elevenlabs_generate_post: {
@@ -889,6 +1176,8 @@ export interface components {
             queue_label?: string | null;
             /** Meta */
             meta?: string | null;
+            /** Playlist Id */
+            playlist_id?: string | null;
         };
         /** Body_host_generate_api_host_generate_post */
         Body_host_generate_api_host_generate_post: {
@@ -980,6 +1269,16 @@ export interface components {
             /** Temperature */
             temperature?: number | null;
         };
+        /** Body_host_select_api_host_select_post */
+        Body_host_select_api_host_select_post: {
+            /** Image Id */
+            image_id: string;
+        };
+        /** Body_move_result_to_playlist_api_results__task_id__playlist_patch */
+        Body_move_result_to_playlist_api_results__task_id__playlist_patch: {
+            /** Playlist Id */
+            playlist_id?: string | null;
+        };
         /** Body_preview_composite_api_preview_composite_post */
         Body_preview_composite_api_preview_composite_post: {
             /** Host Image Path */
@@ -1026,6 +1325,11 @@ export interface components {
              * @default []
              */
             reference_image_paths: string;
+        };
+        /** Body_rename_playlist_api_playlists__playlist_id__patch */
+        Body_rename_playlist_api_playlists__playlist_id__patch: {
+            /** Name */
+            name: string;
         };
         /** Body_save_host_api_hosts_save_post */
         Body_save_host_api_hosts_save_post: {
@@ -1277,13 +1581,25 @@ export interface components {
         };
         /**
          * VideoHistoryItem
-         * @description One row from `outputs/video_history.json` (see `add_to_history`).
+         * @description One row in `/api/history.videos[]`.
+         *
+         *     PR-results-overhaul (2026-04-28): added `status` and `public_error` so
+         *     the library page can render failed/cancelled cards with status pills
+         *     and Korean error tooltips. `script_text`/`host_image`/`audio_source`
+         *     are kept for backward compatibility but the new SPA derives titles
+         *     from `(task_id, type)` via `formatTaskTitle`.
          */
         VideoHistoryItem: {
             /** Task Id */
             task_id: string;
             /** Timestamp */
-            timestamp: string;
+            timestamp?: string | null;
+            /** Type */
+            type?: ("generate" | "conversation") | null;
+            /** Status */
+            status?: ("completed" | "error" | "cancelled") | null;
+            /** Public Error */
+            public_error?: string | null;
             /** Script Text */
             script_text?: string | null;
             /** Host Image */
@@ -1298,8 +1614,6 @@ export interface components {
             video_url: string;
             /** Generation Time */
             generation_time?: number | null;
-            /** Type */
-            type?: ("generate" | "conversation") | null;
         } & {
             [key: string]: unknown;
         };
@@ -1333,6 +1647,81 @@ export interface operations {
         };
     };
     get_config_api_config_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
+    auth_login_api_auth_login_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    [key: string]: unknown;
+                };
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    auth_logout_api_auth_logout_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
+    auth_me_api_auth_me_get: {
         parameters: {
             query?: never;
             header?: never;
@@ -1848,6 +2237,37 @@ export interface operations {
             };
         };
     };
+    delete_video_api_videos__task_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                task_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_video_api_videos__task_id__head: {
         parameters: {
             query?: {
@@ -1884,7 +2304,10 @@ export interface operations {
     get_history_api_history_get: {
         parameters: {
             query?: {
+                status?: string;
+                offset?: number;
                 limit?: number;
+                playlist_id?: string | null;
             };
             header?: never;
             path?: never;
@@ -1899,6 +2322,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HistoryResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_history_counts_api_history_counts_get: {
+        parameters: {
+            query?: {
+                playlist_id?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
                 };
             };
             /** @description Validation Error */
@@ -1961,6 +2415,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["QueueSnapshot"];
+                };
+            };
+        };
+    };
+    retry_failed_task_api_tasks__task_id__retry_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                task_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
@@ -2253,6 +2738,257 @@ export interface operations {
             header?: never;
             path: {
                 host_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_playlists_api_playlists_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
+    create_playlist_api_playlists_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/x-www-form-urlencoded": components["schemas"]["Body_create_playlist_api_playlists_post"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_playlist_api_playlists__playlist_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                playlist_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    rename_playlist_api_playlists__playlist_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                playlist_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/x-www-form-urlencoded": components["schemas"]["Body_rename_playlist_api_playlists__playlist_id__patch"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    move_result_to_playlist_api_results__task_id__playlist_patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                task_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/x-www-form-urlencoded": components["schemas"]["Body_move_result_to_playlist_api_results__task_id__playlist_patch"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    host_select_api_host_select_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/x-www-form-urlencoded": components["schemas"]["Body_host_select_api_host_select_post"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    composite_select_api_composite_select_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/x-www-form-urlencoded": components["schemas"]["Body_composite_select_api_composite_select_post"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_composite_api_composites__image_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                image_id: string;
             };
             cookie?: never;
         };

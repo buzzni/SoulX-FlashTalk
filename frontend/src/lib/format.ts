@@ -5,50 +5,25 @@
  */
 
 /**
- * Extract a human title from a raw video record.
+ * Canonical title for a video record. Delegates to `formatTaskTitle` so
+ * the library page reads identically to the queue popover, RenderDashboard,
+ * and ResultPage — "내 쇼호스트 영상 #ABCD" / "내 멀티 대화 #ABCD".
  *
- * Backend may give us:
- *  - `script_text` (clean prompt text — best signal)
- *  - `host_image` (filesystem path like /opt/home/jack/.../woman.png)
- *  - `output_path` (filesystem path)
- *  - `task_id` (UUID — last resort)
+ * Phase 2 (deferred per docs/results-page-overhaul-plan.md decision #15):
+ * once `display_name` ships, prefer it over the canonical fallback:
  *
- * Strategy: prefer script (truncated), then strip path → basename → strip
- * extension/timestamps, finally short task ID with prefix.
+ *     return item.display_name?.trim() || formatTaskTitle(item.task_id, item.type);
+ *
+ * Old script_text/filename derivation removed (Codex T2): the prompt
+ * preview was usually mid-sentence cut and read poorly.
  */
+import { formatTaskTitle } from '../studio/taskFormat';
+
 export function videoTitle(item: {
-  script_text?: string | null;
-  host_image?: string | null;
-  output_path?: string | null;
   task_id?: string | null;
+  type?: 'generate' | 'conversation' | null;
 }): string {
-  const script = (item.script_text || '').trim();
-  if (script) {
-    // Single-line, ~60 char preview
-    const oneLine = script.replace(/\s+/g, ' ');
-    return oneLine.length > 64 ? `${oneLine.slice(0, 60)}…` : oneLine;
-  }
-
-  for (const raw of [item.host_image, item.output_path]) {
-    if (!raw) continue;
-    const base = basename(raw);
-    if (!base) continue;
-    const cleaned = base
-      .replace(/\.[a-z0-9]+$/i, '') // ext
-      .replace(/^\d{4}-\d{2}-\d{2}[T_-]?\d{0,6}[_-]?/, '') // leading timestamp
-      .replace(/_/g, ' ')
-      .trim();
-    if (cleaned) return cleaned;
-  }
-
-  const id = item.task_id || '';
-  return id ? `영상 #${id.slice(0, 6).toUpperCase()}` : '영상';
-}
-
-function basename(p: string): string {
-  // Handle both POSIX and Windows separators just in case.
-  const i = Math.max(p.lastIndexOf('/'), p.lastIndexOf('\\'));
-  return i >= 0 ? p.slice(i + 1) : p;
+  return formatTaskTitle(item.task_id || '', item.type || 'generate');
 }
 
 /**

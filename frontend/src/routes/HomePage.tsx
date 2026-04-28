@@ -28,12 +28,12 @@ import { DraftBanner } from '../components/draft-banner';
 
 interface HistoryItem {
   task_id: string;
-  timestamp?: string;
-  script_text?: string;
-  host_image?: string;
-  output_path?: string;
+  type?: 'generate' | 'conversation' | null;
+  status?: 'completed' | 'error' | 'cancelled' | null;
+  timestamp?: string | null;
+  output_path?: string | null;
   video_url?: string;
-  generation_time?: number;
+  generation_time?: number | null;
 }
 
 interface HistoryResponse {

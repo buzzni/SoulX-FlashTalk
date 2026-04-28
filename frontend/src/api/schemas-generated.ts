@@ -102,7 +102,12 @@ const playlist_id = z.union([z.string(), z.null()]).optional();
 const VideoHistoryItem = z
   .object({
     task_id: z.string(),
-    timestamp: z.string(),
+    timestamp: z.union([z.string(), z.null()]).optional(),
+    type: z.union([z.enum(["generate", "conversation"]), z.null()]).optional(),
+    status: z
+      .union([z.enum(["completed", "error", "cancelled"]), z.null()])
+      .optional(),
+    public_error: z.union([z.string(), z.null()]).optional(),
     script_text: z.union([z.string(), z.null()]).optional(),
     host_image: z.union([z.string(), z.null()]).optional(),
     audio_source: z.union([z.string(), z.null()]).optional(),
@@ -110,7 +115,6 @@ const VideoHistoryItem = z
     file_size: z.union([z.number(), z.null()]).optional(),
     video_url: z.string(),
     generation_time: z.union([z.number(), z.null()]).optional(),
-    type: z.union([z.enum(["generate", "conversation"]), z.null()]).optional(),
   })
   .passthrough();
 const HistoryResponse = z

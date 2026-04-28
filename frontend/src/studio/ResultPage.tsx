@@ -85,10 +85,9 @@ function deriveResolutionLabel(
 
 interface RecentItem {
   task_id: string;
-  timestamp?: string;
-  script_text?: string;
-  host_image?: string;
-  generation_time?: number;
+  type?: 'generate' | 'conversation' | null;
+  timestamp?: string | null;
+  generation_time?: number | null;
   video_url?: string;
 }
 

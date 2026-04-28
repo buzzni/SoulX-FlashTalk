@@ -548,6 +548,26 @@
   letter-spacing: -0.005em;
 }
 
+@utility pill-error {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 2px 8px;
+  background: var(--destructive-soft);
+  color: var(--destructive);
+  border-radius: 99px;
+  font-size: 11px; font-weight: 600;
+  letter-spacing: -0.005em;
+}
+
+@utility pill-muted {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 2px 8px;
+  background: var(--surface-2);
+  color: var(--ink-3);
+  border-radius: 99px;
+  font-size: 11px; font-weight: 600;
+  letter-spacing: -0.005em;
+}
+
 /* Live indicator — pulsing primary dot */
 @utility signal-dot {
   display: inline-block;
