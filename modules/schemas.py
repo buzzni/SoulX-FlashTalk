@@ -167,6 +167,10 @@ class ResultManifest(_ExtraAllowBase):
     params: ResultParams = Field(default_factory=ResultParams)
     meta: Optional[dict[str, Any]] = None
     error: Optional[str] = None
+    # eng-review 1A — D3A retry-aware primary depends on this field. The
+    # frontend reads it to decide between 재시도 (retried_from=null) and
+    # 수정해서 다시 만들기 (retried_from non-null) on the result page.
+    retried_from: Optional[str] = None
     synthesized: bool = False
 
 
@@ -190,6 +194,10 @@ class VideoHistoryItem(_ExtraAllowBase):
     type: Optional[TaskType] = None
     status: Optional[Literal["completed", "error", "cancelled"]] = None
     public_error: Optional[str] = None
+    # eng-review 1A — D3A retry lineage. Carried in /api/history rows so a
+    # follow-up phase can render "다시 만든 영상" badges in the grid; the
+    # result page already reads it via /api/results/{id}.
+    retried_from: Optional[str] = None
     script_text: Optional[str] = None
     host_image: Optional[str] = None
     audio_source: Optional[str] = None

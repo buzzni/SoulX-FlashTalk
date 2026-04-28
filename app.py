@@ -512,6 +512,7 @@ async def generate_video_task(
     reference_image_paths: list = None,
     meta: Optional[dict] = None,
     playlist_id: Optional[str] = None,
+    retried_from: Optional[str] = None,
 ):
     """Run SoulX-FlashTalk video generation in background"""
     global pipeline, pipeline_lock
@@ -826,6 +827,7 @@ async def generate_video_task(
                 },
                 "meta": meta,
                 "playlist_id": playlist_id,
+                "retried_from": retried_from,    # eng-review 1A — D3A lineage
             }
             if user_id:
                 try:
@@ -900,6 +902,7 @@ async def generate_video_task(
                         playlist_id=playlist_id,
                         started_at=datetime.fromtimestamp(start_time, tz=timezone.utc),
                         created_at=datetime.fromtimestamp(start_time, tz=timezone.utc),
+                        retried_from=retried_from,
                     )
                 except Exception as persist_err:
                     logger.warning(
@@ -964,6 +967,7 @@ async def _queue_generate_handler(task_id: str, user_id: str, **params):
         reference_image_paths=params.get("reference_image_paths"),
         meta=params.get("meta"),
         playlist_id=params.get("playlist_id"),
+        retried_from=params.get("retried_from"),
     )
 
 
@@ -979,6 +983,7 @@ async def _queue_conversation_handler(task_id: str, user_id: str, **params):
         cpu_offload=params["cpu_offload"],
         resolution=params.get("resolution", "1280x720"),
         playlist_id=params.get("playlist_id"),
+        retried_from=params.get("retried_from"),
     )
 
 
@@ -1786,6 +1791,7 @@ def _project_history_row(r: dict) -> dict:
         "type": r.get("type", "generate"),
         "status": r.get("status", "completed"),
         "public_error": r.get("public_error"),
+        "retried_from": r.get("retried_from"),
         "timestamp": (r.get("completed_at").isoformat()
                       if hasattr(r.get("completed_at"), "isoformat")
                       else r.get("completed_at")),
@@ -1881,6 +1887,7 @@ async def generate_conversation_task(
     user_id: Optional[str] = None,
     resolution: str = "1280x720",
     playlist_id: Optional[str] = None,
+    retried_from: Optional[str] = None,
 ):
     """Run multi-agent conversation video generation in background."""
     global pipeline, pipeline_lock
@@ -2111,6 +2118,7 @@ async def generate_conversation_task(
                 },
                 "meta": None,
                 "playlist_id": playlist_id,
+                "retried_from": retried_from,    # eng-review 1A — D3A lineage
             }
             if user_id:
                 try:
@@ -2158,6 +2166,7 @@ async def generate_conversation_task(
                         playlist_id=playlist_id,
                         started_at=datetime.fromtimestamp(start_time, tz=timezone.utc),
                         created_at=datetime.fromtimestamp(start_time, tz=timezone.utc),
+                        retried_from=retried_from,
                     )
                 except Exception as persist_err:
                     logger.warning(
@@ -2357,6 +2366,7 @@ def _synthesize_result_from_queue(entry: dict) -> dict:
         },
         "meta": meta,
         "error": entry.get("error"),
+        "retried_from": entry.get("retried_from"),
         "synthesized": True,
     }
 

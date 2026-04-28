@@ -142,6 +142,7 @@ async def persist_terminal_failure(
     playlist_id: Optional[str] = None,
     started_at: Optional[datetime] = None,
     created_at: Optional[datetime] = None,
+    retried_from: Optional[str] = None,
 ) -> None:
     """Write a studio_results row for a terminal failure or cancellation.
 
@@ -154,6 +155,11 @@ async def persist_terminal_failure(
 
     Guarantees `completed_at` is set so the latest-sort index serves these
     rows (decision #19 — no coalesce needed).
+
+    `retried_from` (eng-review 1A) is the original task_id when this row
+    represents a retried task that itself failed. Threads through to the
+    manifest so /api/results/:id and /api/history projections expose it.
+    Frontend reads it for the D3A retry-aware primary swap.
 
     Failures here are swallowed and logged: never let a manifest write
     derail the original error/cancel path.
@@ -186,6 +192,7 @@ async def persist_terminal_failure(
             "params": params_clean,
             "meta": meta,
             "playlist_id": playlist_id,
+            "retried_from": retried_from,          # eng-review 1A — D3A lineage
             "created_at": created_at or _now(),
             "started_at": started_at,
             "completed_at": _now(),                # always set (decision #19)

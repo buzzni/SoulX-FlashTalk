@@ -640,3 +640,89 @@ async def test_list_completed_wrapper_unchanged_behavior(repo_db):
     )
     rows = await repo.list_completed("u1")
     assert [r["task_id"] for r in rows] == ["done"]
+
+
+# ── retried_from lineage (eng-review 1A — D3A) ──────────────────────
+
+
+async def test_persist_terminal_failure_carries_retried_from(repo_db):
+    """The retried_from kwarg lands on the manifest row so the result
+    page can swap 재시도 → 수정해서 다시 만들기 on the second failure."""
+    await repo.persist_terminal_failure(
+        user_id="u1",
+        task_id="retry_attempt",
+        type="generate",
+        status="error",
+        error="boom again",
+        params={},
+        retried_from="original_failed",
+    )
+    doc = await repo.get("u1", "retry_attempt")
+    assert doc is not None
+    assert doc["retried_from"] == "original_failed"
+
+
+async def test_persist_terminal_failure_default_retried_from_is_none(repo_db):
+    """First-failure rows have retried_from=None — frontend treats this as
+    depth=0 and shows the 재시도 primary."""
+    await repo.persist_terminal_failure(
+        user_id="u1",
+        task_id="first_failure",
+        type="generate",
+        status="error",
+        error="boom",
+        params={},
+    )
+    doc = await repo.get("u1", "first_failure")
+    assert doc is not None
+    assert doc.get("retried_from") is None
+
+
+async def test_upsert_passes_retried_from_through_to_manifest(repo_db):
+    """The success-path manifest write keeps retried_from; the field flows
+    from the queue entry → handler kwarg → manifest dict → studio_results."""
+    m = _manifest("t_success")
+    m["retried_from"] = "earlier_failed"
+    await repo.upsert("u1", m)
+    fresh = await repo.get("u1", "t_success")
+    assert fresh["retried_from"] == "earlier_failed"
+
+
+async def test_chain_walking_three_deep(repo_db):
+    """Walk a 3-level retry chain: c.retried_from=b, b.retried_from=a,
+    a.retried_from=None. Frontend's heuristic only needs one-deep
+    (`retriedFrom != null`), but the chain itself must resolve cleanly."""
+    # a — first failure, no parent
+    await repo.persist_terminal_failure(
+        user_id="u1", task_id="a", type="generate",
+        status="error", error="x", params={},
+    )
+    # b — retried from a, also failed
+    await repo.persist_terminal_failure(
+        user_id="u1", task_id="b", type="generate",
+        status="error", error="x", params={}, retried_from="a",
+    )
+    # c — retried from b, also failed
+    await repo.persist_terminal_failure(
+        user_id="u1", task_id="c", type="generate",
+        status="error", error="x", params={}, retried_from="b",
+    )
+    doc_c = await repo.get("u1", "c")
+    doc_b = await repo.get("u1", "b")
+    doc_a = await repo.get("u1", "a")
+    assert doc_c["retried_from"] == "b"
+    assert doc_b["retried_from"] == "a"
+    assert doc_a.get("retried_from") is None
+
+
+async def test_retried_from_survives_upsert_update(repo_db):
+    """Updating an existing row keeps retried_from from the new manifest
+    (not stale from the original write)."""
+    m1 = _manifest("t1", status="running")
+    m1["retried_from"] = None
+    await repo.upsert("u1", m1)
+    m2 = _manifest("t1", status="completed")
+    m2["retried_from"] = "earlier"
+    await repo.upsert("u1", m2)
+    fresh = await repo.get("u1", "t1")
+    assert fresh["retried_from"] == "earlier"

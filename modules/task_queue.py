@@ -129,6 +129,7 @@ class TaskQueue:
                     "params": entry.get("params") or {},
                     "playlist_id": (entry.get("params") or {}).get("playlist_id"),
                     "created_at_iso": entry.get("created_at"),
+                    "retried_from": entry.get("retried_from"),
                 }
                 break
             else:
@@ -159,6 +160,7 @@ class TaskQueue:
                     playlist_id=_persist_args["playlist_id"],
                     started_at=None,
                     created_at=created_at,
+                    retried_from=_persist_args["retried_from"],
                 )
             except Exception as e:
                 logger.warning(
@@ -173,6 +175,12 @@ class TaskQueue:
         (None, reason) where reason is "not_found" / "forbidden" / "not_finished".
         Owner-only unless is_admin. The original entry is untouched so users
         can still see what failed and what replaced it side by side.
+
+        Lineage (eng-review 1A): the new entry carries a `retried_from` field
+        pointing back at the original task_id. The frontend reads this to
+        decide whether the next failure should suggest 재시도 (depth 0) or
+        수정해서 다시 만들기 (depth ≥ 1) — see plan §"Smart retry-aware
+        primary (D3A)".
         """
         async with self._lock:
             entry = next((e for e in self._queue if e["task_id"] == task_id), None)
@@ -199,6 +207,7 @@ class TaskQueue:
                 "started_at": None,
                 "completed_at": None,
                 "error": None,
+                "retried_from": task_id,
             }
             self._queue.append(new_entry)
             self._save()
@@ -312,10 +321,15 @@ class TaskQueue:
             try:
                 # PR2: pass owner through to the handler so downstream code
                 # (lifecycle commit, manifest write) can scope by user_id.
+                # Lineage: `retried_from` (eng-review 1A) flows alongside
+                # user_id so the manifest write path can record D3A depth.
+                handler_kwargs = dict(entry["params"])
+                if entry.get("retried_from") is not None:
+                    handler_kwargs["retried_from"] = entry["retried_from"]
                 await handler(
                     task_id=task_id,
                     user_id=entry.get("user_id"),
-                    **entry["params"],
+                    **handler_kwargs,
                 )
                 await self._mark_done(task_id)
             except Exception as e:
