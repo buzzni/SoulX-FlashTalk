@@ -61,6 +61,15 @@ async def _backfill(queue_file: Path, dry_run: bool) -> int:
         print(f"  no queue file at {queue_file}; nothing to backfill.")
         return 0
 
+    await db_module.init()
+    try:
+        return await _backfill_impl(queue_file, dry_run, db_module, _result_repo)
+    finally:
+        await db_module.close()
+
+
+async def _backfill_impl(queue_file: Path, dry_run: bool, db_module, _result_repo) -> int:
+
     raw = json.loads(queue_file.read_text(encoding="utf-8"))
     queue = raw.get("queue", [])
     candidates = [
