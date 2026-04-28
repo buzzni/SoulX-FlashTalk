@@ -321,6 +321,170 @@ def test_history_filter_unknown_id_returns_empty(client):
     assert r.json() == {"total": 0, "videos": []}
 
 
+# ── /api/history status filter (decision #5/#20) ──────────────────
+
+
+def _seed_failed_for_user(client, user_id: str, *, task_id: str):
+    """Insert a fake failed studio_results row with public_error mapped."""
+    from datetime import datetime, timezone
+    from pymongo import MongoClient
+    import config
+    mc = MongoClient(config.MONGO_URL, serverSelectionTimeoutMS=2000)
+    mc[config.DB_NAME].studio_results.update_one(
+        {"user_id": user_id, "task_id": task_id},
+        {"$set": {
+            "user_id": user_id, "task_id": task_id,
+            "type": "generate", "status": "error",
+            "error": "audio file not found",
+            "public_error": "음성 파일을 찾을 수 없어요. 파일이 삭제됐을 수 있어요.",
+            "completed_at": datetime.now(timezone.utc),
+            "video_path": None, "video_bytes": 0,
+            "params": {"prompt": "p", "seed": 1},
+        }}, upsert=True,
+    )
+    mc.close()
+    return task_id
+
+
+def _seed_cancelled_for_user(client, user_id: str, *, task_id: str):
+    from datetime import datetime, timezone
+    from pymongo import MongoClient
+    import config
+    mc = MongoClient(config.MONGO_URL, serverSelectionTimeoutMS=2000)
+    mc[config.DB_NAME].studio_results.update_one(
+        {"user_id": user_id, "task_id": task_id},
+        {"$set": {
+            "user_id": user_id, "task_id": task_id,
+            "type": "generate", "status": "cancelled",
+            "error": None, "public_error": "사용자가 취소했어요.",
+            "completed_at": datetime.now(timezone.utc),
+            "video_path": None, "video_bytes": 0,
+            "params": {},
+        }}, upsert=True,
+    )
+    mc.close()
+    return task_id
+
+
+def test_history_status_all_includes_terminal_states(client):
+    """Decision #5: 'all' default returns completed + error + cancelled."""
+    _seed_result_for_user(client, "testuser", task_id="ok" + "0" * 30)
+    _seed_failed_for_user(client, "testuser", task_id="fail" + "0" * 28)
+    _seed_cancelled_for_user(client, "testuser", task_id="cncl" + "0" * 28)
+    r = client.get("/api/history")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["total"] == 3
+    statuses = sorted(v["status"] for v in body["videos"])
+    assert statuses == ["cancelled", "completed", "error"]
+
+
+def test_history_status_filter_completed(client):
+    _seed_result_for_user(client, "testuser", task_id="ok" + "0" * 30)
+    _seed_failed_for_user(client, "testuser", task_id="fail" + "0" * 28)
+    r = client.get("/api/history?status=completed")
+    assert r.status_code == 200
+    assert r.json()["total"] == 1
+    assert r.json()["videos"][0]["status"] == "completed"
+
+
+def test_history_status_filter_error_returns_public_error(client):
+    """Decision #22: response includes public_error, not raw error."""
+    _seed_failed_for_user(client, "testuser", task_id="fail" + "0" * 28)
+    r = client.get("/api/history?status=error")
+    body = r.json()
+    assert body["total"] == 1
+    v = body["videos"][0]
+    assert v["status"] == "error"
+    assert v["public_error"] == "음성 파일을 찾을 수 없어요. 파일이 삭제됐을 수 있어요."
+    # Raw `error` from the worker MUST NOT be in the projected response.
+    assert "error" not in v or v.get("error") is None
+
+
+def test_history_status_invalid_value_400(client):
+    r = client.get("/api/history?status=bogus")
+    assert r.status_code == 400
+
+
+def test_history_pagination_offset_limit(client):
+    for i in range(5):
+        _seed_result_for_user(client, "testuser", task_id=f"t{i:031d}")
+    r = client.get("/api/history?offset=0&limit=2")
+    body = r.json()
+    assert body["total"] == 5
+    assert len(body["videos"]) == 2
+    r = client.get("/api/history?offset=4&limit=2")
+    assert len(r.json()["videos"]) == 1
+
+
+def test_history_beyond_last_page_returns_empty_with_total(client):
+    """Plan §10 failure mode: stale page after deletion."""
+    _seed_result_for_user(client, "testuser", task_id="t" + "0" * 31)
+    r = client.get("/api/history?offset=999&limit=24")
+    body = r.json()
+    assert body["total"] == 1
+    assert body["videos"] == []
+
+
+# ── /api/history/counts (decision #14) ────────────────────────────
+
+
+def test_history_counts_sum_invariant(client):
+    """all == completed + error + cancelled."""
+    _seed_result_for_user(client, "testuser", task_id="c1" + "0" * 30)
+    _seed_result_for_user(client, "testuser", task_id="c2" + "0" * 30)
+    _seed_failed_for_user(client, "testuser", task_id="e1" + "0" * 30)
+    _seed_cancelled_for_user(client, "testuser", task_id="x1" + "0" * 30)
+    r = client.get("/api/history/counts")
+    assert r.status_code == 200
+    counts = r.json()
+    assert counts == {"all": 4, "completed": 2, "error": 1, "cancelled": 1}
+    assert counts["all"] == counts["completed"] + counts["error"] + counts["cancelled"]
+
+
+def test_history_counts_empty(client):
+    r = client.get("/api/history/counts")
+    assert r.status_code == 200
+    assert r.json() == {"all": 0, "completed": 0, "error": 0, "cancelled": 0}
+
+
+def test_history_counts_scoped_by_playlist(client):
+    pid = client.post("/api/playlists", data={"name": "A"}).json()["playlist_id"]
+    t1 = _seed_result_for_user(client, "testuser", task_id="aaa" + "0" * 29)
+    _seed_result_for_user(client, "testuser", task_id="bbb" + "0" * 29)
+    client.patch(f"/api/results/{t1}/playlist", data={"playlist_id": pid})
+    r = client.get(f"/api/history/counts?playlist_id={pid}")
+    assert r.json()["all"] == 1
+    assert r.json()["completed"] == 1
+
+
+def test_history_counts_unassigned(client):
+    pid = client.post("/api/playlists", data={"name": "A"}).json()["playlist_id"]
+    t1 = _seed_result_for_user(client, "testuser", task_id="aaa" + "0" * 29)
+    _seed_result_for_user(client, "testuser", task_id="bbb" + "0" * 29)  # unassigned
+    client.patch(f"/api/results/{t1}/playlist", data={"playlist_id": pid})
+    r = client.get("/api/history/counts?playlist_id=unassigned")
+    assert r.json()["completed"] == 1
+
+
+# ── playlist count semantics regression (decision #21) ────────────
+
+
+def test_playlist_count_includes_failed_and_cancelled(client):
+    """Decision #21: playlist video_count covers all terminal rows so it
+    aligns with status filter chip totals when the user scopes to a playlist."""
+    pid = client.post("/api/playlists", data={"name": "A"}).json()["playlist_id"]
+    t_ok = _seed_result_for_user(client, "testuser", task_id="ok" + "0" * 30)
+    t_fail = _seed_failed_for_user(client, "testuser", task_id="fl" + "0" * 30)
+    t_cncl = _seed_cancelled_for_user(client, "testuser", task_id="cn" + "0" * 30)
+    for t in [t_ok, t_fail, t_cncl]:
+        client.patch(f"/api/results/{t}/playlist", data={"playlist_id": pid})
+    r = client.get("/api/playlists")
+    body = r.json()
+    by_id = {p["playlist_id"]: p for p in body["playlists"]}
+    assert by_id[pid]["video_count"] == 3
+
+
 # ── /api/generate accepts playlist_id Form param ──────────────────
 
 

@@ -351,3 +351,292 @@ async def test_count_for_user(repo_db):
     await repo.upsert("u2", _manifest("u2t1"))
     assert await repo.count_for_user("u1") == 2
     assert await repo.count_for_user("u2") == 1
+
+
+# ── _map_public_error (decision #22) ──
+
+@pytest.mark.parametrize("raw, expected_substring", [
+    ("CUDA out of memory", "서버가 바쁜"),
+    ("Some prefix - CUDA OOM detected", "서버가 바쁜"),
+    ("audio file not found at /tmp/x.wav", "음성 파일을 찾을 수 없"),
+    ("audio is too long: 60s exceeds 30s", "음성 파일이 너무 길"),
+    ("host_image is missing", "쇼호스트 이미지를 찾을 수 없"),
+    ("Output mp4 not generated", "영상 생성에 실패"),
+    ("operation timeout after 600s", "처리 시간이 너무 오래"),
+    ("cancelled by user", "사용자가 취소"),
+    ("validation failed: empty prompt", "입력 값이 올바르지 않"),
+])
+def test_map_public_error_pattern_matches(raw, expected_substring):
+    msg = repo._map_public_error(raw)
+    assert expected_substring in msg, f"raw={raw!r} → {msg!r}"
+
+
+def test_map_public_error_fallback_for_none():
+    assert repo._map_public_error(None) == "알 수 없는 이유로 실패했어요."
+
+
+def test_map_public_error_fallback_for_empty():
+    assert repo._map_public_error("") == "알 수 없는 이유로 실패했어요."
+
+
+def test_map_public_error_fallback_for_unknown():
+    assert repo._map_public_error("entirely random text") == "알 수 없는 이유로 실패했어요."
+
+
+def test_map_public_error_strips_paths():
+    """Even when a known pattern matches, the returned text must NOT contain
+    file paths or stack-trace fragments from the raw input. The mapping
+    table is the security boundary."""
+    raw = "CUDA out of memory at /opt/home/jack/secret/leak.py:123"
+    msg = repo._map_public_error(raw)
+    assert "/opt" not in msg
+    assert "leak.py" not in msg
+
+
+# ── persist_terminal_failure (decision #20) ──
+
+async def test_persist_terminal_failure_writes_error_row(repo_db):
+    await repo.persist_terminal_failure(
+        user_id="u1",
+        task_id="failed_t1",
+        type="generate",
+        status="error",
+        error="CUDA out of memory",
+        params={"prompt": "p", "seed": 42},
+        playlist_id=None,
+    )
+    doc = await repo.get("u1", "failed_t1")
+    assert doc is not None
+    assert doc["status"] == "error"
+    assert doc["type"] == "generate"
+    assert doc["error"] == "CUDA out of memory"  # raw preserved
+    assert "서버가 바쁜" in doc["public_error"]    # mapped
+    assert doc["completed_at"] is not None        # always set per decision #19
+    assert doc["params"] == {"prompt": "p", "seed": 42}
+    assert doc["video_path"] is None
+    assert doc["video_bytes"] == 0
+
+
+async def test_persist_terminal_failure_writes_cancelled_row(repo_db):
+    await repo.persist_terminal_failure(
+        user_id="u1",
+        task_id="cancel_t1",
+        type="generate",
+        status="cancelled",
+        error=None,
+        params={},
+    )
+    doc = await repo.get("u1", "cancel_t1")
+    assert doc["status"] == "cancelled"
+    assert doc["error"] is None
+    assert doc["public_error"] == "사용자가 취소했어요."
+    assert doc["completed_at"] is not None
+
+
+async def test_persist_terminal_failure_rejects_invalid_status(repo_db):
+    with pytest.raises(ValueError, match="error.*cancelled"):
+        await repo.persist_terminal_failure(
+            user_id="u1", task_id="t1", type="generate",
+            status="completed",
+            error=None, params={},
+        )
+
+
+async def test_persist_terminal_failure_swallows_db_errors(repo_db):
+    """If the manifest write fails (e.g., Mongo down mid-cancel), the
+    function must NOT propagate — original error/cancel path keeps working."""
+    # Force upsert failure by passing an oversized doc that violates BSON limits.
+    # Easier path: monkey-pass user_id="" which makes upsert raise ValueError;
+    # persist_terminal_failure should catch and log without re-raising.
+    await repo.persist_terminal_failure(
+        user_id="",  # invalid → upsert raises → persist catches
+        task_id="t1",
+        type="generate",
+        status="error",
+        error="boom",
+        params={},
+    )
+    # No assertion needed — test passes if no exception escapes.
+
+
+async def test_persist_terminal_failure_preserves_playlist_id(repo_db):
+    from modules.repositories import studio_playlist_repo
+    p = await studio_playlist_repo.create("u1", name="A")
+    await repo.persist_terminal_failure(
+        user_id="u1", task_id="failed_in_p", type="generate",
+        status="error", error="boom",
+        params={}, playlist_id=p["playlist_id"],
+    )
+    doc = await repo.get("u1", "failed_in_p")
+    assert doc["playlist_id"] == p["playlist_id"]
+
+
+# ── list_for_user (replaces list_completed) ──
+
+async def test_list_for_user_default_includes_all_statuses(repo_db):
+    await repo.upsert("u1", _manifest("done"))
+    await repo.persist_terminal_failure(
+        user_id="u1", task_id="failed", type="generate",
+        status="error", error="x", params={},
+    )
+    await repo.persist_terminal_failure(
+        user_id="u1", task_id="cancelled", type="generate",
+        status="cancelled", error=None, params={},
+    )
+    rows, total = await repo.list_for_user("u1")
+    assert total == 3
+    assert {r["task_id"] for r in rows} == {"done", "failed", "cancelled"}
+
+
+async def test_list_for_user_filters_by_single_status(repo_db):
+    await repo.upsert("u1", _manifest("done"))
+    await repo.persist_terminal_failure(
+        user_id="u1", task_id="failed", type="generate",
+        status="error", error="x", params={},
+    )
+    rows, total = await repo.list_for_user("u1", statuses=["error"])
+    assert total == 1
+    assert rows[0]["task_id"] == "failed"
+
+
+async def test_list_for_user_pagination(repo_db):
+    base = datetime(2026, 4, 25, tzinfo=timezone.utc)
+    for i in range(5):
+        await repo.upsert("u1", _manifest(f"t{i}",
+                                            completed_at=base + timedelta(seconds=i)))
+    # Page 1: 2 newest.
+    rows, total = await repo.list_for_user("u1", offset=0, limit=2)
+    assert total == 5
+    assert [r["task_id"] for r in rows] == ["t4", "t3"]
+    # Page 2.
+    rows, total = await repo.list_for_user("u1", offset=2, limit=2)
+    assert [r["task_id"] for r in rows] == ["t2", "t1"]
+    # Page 3 (last, partial).
+    rows, total = await repo.list_for_user("u1", offset=4, limit=2)
+    assert [r["task_id"] for r in rows] == ["t0"]
+
+
+async def test_list_for_user_beyond_last_page_returns_empty(repo_db):
+    """Plan §10 failure mode: stale page after deletion returns 200 [] with
+    correct total. Frontend snaps to last valid page on this signal."""
+    await repo.upsert("u1", _manifest("t1"))
+    rows, total = await repo.list_for_user("u1", offset=100, limit=24)
+    assert rows == []
+    assert total == 1
+
+
+async def test_list_for_user_empty_result_set(repo_db):
+    rows, total = await repo.list_for_user("ghost_user")
+    assert rows == []
+    assert total == 0
+
+
+async def test_list_for_user_combines_status_and_playlist(repo_db):
+    from modules.repositories import studio_playlist_repo
+    p = await studio_playlist_repo.create("u1", name="A")
+    # Completed in playlist:
+    m1 = _manifest("ok_in_p")
+    m1["playlist_id"] = p["playlist_id"]
+    await repo.upsert("u1", m1)
+    # Error in playlist:
+    await repo.persist_terminal_failure(
+        user_id="u1", task_id="err_in_p", type="generate",
+        status="error", error="x", params={},
+        playlist_id=p["playlist_id"],
+    )
+    # Error not in playlist:
+    await repo.persist_terminal_failure(
+        user_id="u1", task_id="err_unassigned", type="generate",
+        status="error", error="x", params={},
+    )
+    # Filter status=error AND playlist=p → only err_in_p.
+    rows, total = await repo.list_for_user(
+        "u1", statuses=["error"], playlist_id=p["playlist_id"],
+    )
+    assert total == 1
+    assert rows[0]["task_id"] == "err_in_p"
+
+
+async def test_list_for_user_clamps_limit(repo_db):
+    """limit must be 1..100. Repo clamps defensively."""
+    for i in range(3):
+        await repo.upsert("u1", _manifest(f"t{i}"))
+    # Over-large → clamped to 100 (still returns all 3).
+    rows, _ = await repo.list_for_user("u1", limit=999)
+    assert len(rows) == 3
+    # Zero → clamped to 1.
+    rows, _ = await repo.list_for_user("u1", limit=0)
+    assert len(rows) == 1
+
+
+# ── counts_for_user (decision #14) ──
+
+async def test_counts_for_user_sum_invariant(repo_db):
+    """all == completed + error + cancelled — across all queries."""
+    await repo.upsert("u1", _manifest("c1"))
+    await repo.upsert("u1", _manifest("c2"))
+    await repo.persist_terminal_failure(
+        user_id="u1", task_id="e1", type="generate",
+        status="error", error="x", params={},
+    )
+    await repo.persist_terminal_failure(
+        user_id="u1", task_id="x1", type="generate",
+        status="cancelled", error=None, params={},
+    )
+    counts = await repo.counts_for_user("u1")
+    assert counts == {"all": 4, "completed": 2, "error": 1, "cancelled": 1}
+    assert counts["all"] == counts["completed"] + counts["error"] + counts["cancelled"]
+
+
+async def test_counts_for_user_empty(repo_db):
+    counts = await repo.counts_for_user("ghost")
+    assert counts == {"all": 0, "completed": 0, "error": 0, "cancelled": 0}
+
+
+async def test_counts_for_user_scoped_by_playlist(repo_db):
+    from modules.repositories import studio_playlist_repo
+    p = await studio_playlist_repo.create("u1", name="A")
+    # 1 completed in p, 1 cancelled in p, 1 completed unassigned.
+    m1 = _manifest("c_in_p"); m1["playlist_id"] = p["playlist_id"]
+    await repo.upsert("u1", m1)
+    await repo.upsert("u1", _manifest("c_unassigned"))
+    await repo.persist_terminal_failure(
+        user_id="u1", task_id="cancelled_in_p", type="generate",
+        status="cancelled", error=None, params={},
+        playlist_id=p["playlist_id"],
+    )
+    counts = await repo.counts_for_user("u1", playlist_id=p["playlist_id"])
+    assert counts == {"all": 2, "completed": 1, "error": 0, "cancelled": 1}
+
+
+async def test_counts_for_user_scoped_unassigned(repo_db):
+    from modules.repositories import studio_playlist_repo
+    p = await studio_playlist_repo.create("u1", name="A")
+    m1 = _manifest("c_in_p"); m1["playlist_id"] = p["playlist_id"]
+    await repo.upsert("u1", m1)
+    await repo.upsert("u1", _manifest("c_unassigned"))
+    counts = await repo.counts_for_user("u1", playlist_id="unassigned")
+    assert counts["all"] == 1
+    assert counts["completed"] == 1
+
+
+async def test_counts_for_user_ignores_other_users(repo_db):
+    await repo.upsert("alice", _manifest("a1"))
+    await repo.upsert("bob", _manifest("b1"))
+    counts = await repo.counts_for_user("alice")
+    assert counts["all"] == 1
+
+
+# ── list_completed thin wrapper preserves backward compat (regression) ──
+
+async def test_list_completed_wrapper_unchanged_behavior(repo_db):
+    """Iron rule: existing /api/history callers using list_completed must
+    still receive only completed rows. Persistence write-path must not
+    leak error/cancelled rows into legacy callers."""
+    await repo.upsert("u1", _manifest("done"))
+    await repo.persist_terminal_failure(
+        user_id="u1", task_id="failed", type="generate",
+        status="error", error="x", params={},
+    )
+    rows = await repo.list_completed("u1")
+    assert [r["task_id"] for r in rows] == ["done"]

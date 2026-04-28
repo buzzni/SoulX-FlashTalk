@@ -175,14 +175,18 @@ async def list_for_user(user_id: str) -> list[dict]:
     """List all playlists for user with video_count via $group aggregation.
     Sidebar applies alphabetical sort in JS (plan decision #11).
 
-    video_count counts only completed videos (matches /api/history filter
-    behavior — sidebar count == what the filtered list would show).
+    video_count counts ALL terminal rows (completed/error/cancelled), not
+    just completed — see decision #21 in
+    docs/results-page-overhaul-plan.md. This keeps playlist chip counts
+    aligned with the new status filter chips on /results: when a user
+    scopes to a playlist and adds up the per-status counts, the total
+    matches the playlist chip's number.
     """
     playlists = [d async for d in _coll().find({"user_id": user_id})]
     pipeline = [
         {"$match": {
             "user_id": user_id,
-            "status": "completed",
+            "status": {"$in": ["completed", "error", "cancelled"]},
             "playlist_id": {"$ne": None},
         }},
         {"$group": {"_id": "$playlist_id", "count": {"$sum": 1}}},
@@ -198,10 +202,13 @@ async def count_for_user(user_id: str) -> int:
 
 
 async def unassigned_count(user_id: str) -> int:
-    """Count of completed videos with no playlist (playlist_id null or absent).
-    Powers the synthetic "미지정" sidebar count."""
+    """Count of all terminal videos with no playlist (decision #21).
+
+    Aligned with `list_for_user` — counts completed/error/cancelled rows,
+    not just completed. Powers the "미지정" chip count.
+    """
     return await db_module.get_db().studio_results.count_documents({
         "user_id": user_id,
-        "status": "completed",
+        "status": {"$in": ["completed", "error", "cancelled"]},
         "playlist_id": None,  # mongo: matches both null and missing field
     })

@@ -176,10 +176,20 @@ class ResultManifest(_ExtraAllowBase):
 
 
 class VideoHistoryItem(_ExtraAllowBase):
-    """One row from `outputs/video_history.json` (see `add_to_history`)."""
+    """One row in `/api/history.videos[]`.
+
+    PR-results-overhaul (2026-04-28): added `status` and `public_error` so
+    the library page can render failed/cancelled cards with status pills
+    and Korean error tooltips. `script_text`/`host_image`/`audio_source`
+    are kept for backward compatibility but the new SPA derives titles
+    from `(task_id, type)` via `formatTaskTitle`.
+    """
 
     task_id: str
-    timestamp: str
+    timestamp: Optional[str] = None
+    type: Optional[TaskType] = None
+    status: Optional[Literal["completed", "error", "cancelled"]] = None
+    public_error: Optional[str] = None
     script_text: Optional[str] = None
     host_image: Optional[str] = None
     audio_source: Optional[str] = None
@@ -187,7 +197,6 @@ class VideoHistoryItem(_ExtraAllowBase):
     file_size: Optional[int] = None
     video_url: str
     generation_time: Optional[float] = None
-    type: Optional[TaskType] = None
 
 
 class HistoryResponse(_ExtraAllowBase):

@@ -119,8 +119,52 @@ class TaskQueue:
                 entry["completed_at"] = datetime.now().isoformat()
                 self._save()
                 logger.info(f"Cancelled task {task_id} (by user={requesting_user_id})")
-                return "ok"
-        return "not_found"
+                # Capture entry-fields-for-persist before releasing the lock —
+                # decision #20: cancellation must produce a studio_results row
+                # so /results status=cancelled has data to show.
+                _persist_args = {
+                    "user_id": entry.get("user_id"),
+                    "task_id": task_id,
+                    "type": entry.get("type", "generate"),
+                    "params": entry.get("params") or {},
+                    "playlist_id": (entry.get("params") or {}).get("playlist_id"),
+                    "created_at_iso": entry.get("created_at"),
+                }
+                break
+            else:
+                return "not_found"
+
+        # Outside the lock: write the cancellation row. Failures are swallowed
+        # (persist_terminal_failure logs + ignores) so cancel() always succeeds
+        # from the user's perspective even if Mongo is briefly unreachable.
+        if _persist_args["user_id"]:
+            try:
+                from modules.repositories import studio_result_repo as _result_repo
+                from datetime import datetime as _dt, timezone as _tz
+                created_at = None
+                if _persist_args["created_at_iso"]:
+                    try:
+                        created_at = _dt.fromisoformat(_persist_args["created_at_iso"])
+                        if created_at.tzinfo is None:
+                            created_at = created_at.replace(tzinfo=_tz.utc)
+                    except ValueError:
+                        created_at = None
+                await _result_repo.persist_terminal_failure(
+                    user_id=_persist_args["user_id"],
+                    task_id=_persist_args["task_id"],
+                    type=_persist_args["type"],
+                    status="cancelled",
+                    error=None,
+                    params=_persist_args["params"],
+                    playlist_id=_persist_args["playlist_id"],
+                    started_at=None,
+                    created_at=created_at,
+                )
+            except Exception as e:
+                logger.warning(
+                    f"cancel_task {task_id}: terminal-failure persist failed: {e}"
+                )
+        return "ok"
 
     async def retry_task(self, task_id: str, *, requesting_user_id: Optional[str] = None,
                           is_admin: bool = False) -> tuple[Optional[str], str]:

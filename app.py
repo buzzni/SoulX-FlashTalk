@@ -12,7 +12,7 @@ import json
 import time
 from pathlib import Path
 from typing import Optional, List
-from datetime import datetime
+from datetime import datetime, timezone
 
 from fastapi import FastAPI, File, UploadFile, Form, HTTPException, Request
 from fastapi.responses import FileResponse, StreamingResponse, JSONResponse
@@ -853,6 +853,40 @@ async def generate_video_task(
             import traceback
             traceback.print_exc()
             set_task_error(task_id, f"비디오 생성 실패: {str(e)}")
+
+            # Persist a terminal-failure row so /results status filter has
+            # data to show — see decision #20 in
+            # docs/results-page-overhaul-plan.md. Without this, status=error
+            # filter returns an empty grid even when tasks are clearly failing.
+            if user_id:
+                try:
+                    from modules.repositories import studio_result_repo as _result_repo
+                    await _result_repo.persist_terminal_failure(
+                        user_id=user_id,
+                        task_id=task_id,
+                        type="generate",
+                        status="error",
+                        error=str(e),
+                        params={
+                            "host_image": host_image,
+                            "audio_path": audio_path,
+                            "audio_source_label": audio_source_label,
+                            "prompt": prompt,
+                            "seed": seed,
+                            "cpu_offload": cpu_offload,
+                            "script_text": script_text,
+                            "resolution_requested": resolution,
+                            "scene_prompt": scene_prompt,
+                            "reference_image_paths": reference_image_paths or [],
+                        },
+                        playlist_id=playlist_id,
+                        started_at=datetime.fromtimestamp(start_time, tz=timezone.utc),
+                        created_at=datetime.fromtimestamp(start_time, tz=timezone.utc),
+                    )
+                except Exception as persist_err:
+                    logger.warning(
+                        f"Task {task_id}: terminal-failure persist failed: {persist_err}"
+                    )
 
             try:
                 import torch
@@ -1719,46 +1753,100 @@ async def get_video(task_id: str, download: bool = False):
     raise HTTPException(status_code=404, detail="Video not found")
 
 
+_VALID_HISTORY_STATUSES = {"all", "completed", "error", "cancelled"}
+
+
+def _project_history_row(r: dict) -> dict:
+    """Convert a studio_results doc to the legacy /api/history row shape.
+
+    Adds `type`, `status`, `public_error` (decisions #20/#22) — the SPA
+    reads them to render status pills and error tooltips. Existing clients
+    that ignored these new fields keep working (extra='allow' on schema).
+    """
+    return {
+        "task_id": r["task_id"],
+        "type": r.get("type", "generate"),
+        "status": r.get("status", "completed"),
+        "public_error": r.get("public_error"),
+        "timestamp": (r.get("completed_at").isoformat()
+                      if hasattr(r.get("completed_at"), "isoformat")
+                      else r.get("completed_at")),
+        "script_text": (r.get("params") or {}).get("script_text", ""),
+        "host_image": (r.get("params") or {}).get("host_image", ""),
+        "audio_source": (r.get("params") or {}).get("audio_source_label", ""),
+        "output_path": r.get("video_path"),
+        "file_size": r.get("video_bytes", 0),
+        "video_url": r.get("video_url") or f"/api/videos/{r['task_id']}",
+        "generation_time": r.get("generation_time_sec"),
+    }
+
+
 @app.get("/api/history", response_model=HistoryResponse)
 async def get_history(
     request: Request,
-    limit: int = 50,
+    status: str = "all",
+    offset: int = 0,
+    limit: int = 24,
     playlist_id: Optional[str] = None,
 ):
-    """Return the authenticated user's recent completed renders.
+    """Return the authenticated user's terminal renders, paginated.
 
-    PR5 cutover: was outputs/video_history.json (global), now studio_results
-    scoped to the calling user (admin/master sees all).
+    Plan decisions #5/#19/#20: includes completed + error + cancelled rows
+    (write path for the latter two added in
+    docs/results-page-overhaul-plan.md decision #20). Sort is fixed at
+    `completed_at DESC, task_id ASC` — name sort deferred to Phase 2
+    (decision #15).
 
-    Optional `playlist_id` query param filters results (plan decision #12):
-        omitted        → all renders
-        "unassigned"   → only renders with no playlist
-        <hex id>       → exact playlist match. Unknown / deleted id returns
-                         200 [] so cross-tab playlist deletion doesn't break
-                         filter-UI restoration.
+    Query params:
+        status:      "all" | "completed" | "error" | "cancelled"  (default "all")
+        offset:      pagination offset, ≥ 0                         (default 0)
+        limit:       page size, 1..100                              (default 24)
+        playlist_id: omitted | "unassigned" | <hex id>              (decision #12)
+
+    Returns `{total, videos}` where `total` is the total matching the filter
+    (NOT the page size) so the SPA can compute page count.
     """
     from modules.repositories import studio_result_repo as _result_repo
     user = auth_module.get_request_user(request)
-    rows = await _result_repo.list_completed(
-        user["user_id"], limit=limit, playlist_id=playlist_id
+
+    if status not in _VALID_HISTORY_STATUSES:
+        raise HTTPException(status_code=400, detail=f"invalid status: {status!r}")
+    statuses = None if status == "all" else [status]
+
+    # Clamp pagination defensively — Mongo .skip/.limit will reject negatives.
+    offset = max(0, offset)
+    limit = max(1, min(100, limit))
+
+    rows, total = await _result_repo.list_for_user(
+        user["user_id"],
+        statuses=statuses,
+        playlist_id=playlist_id,
+        offset=offset,
+        limit=limit,
     )
-    # Project the legacy `videos` shape so the SPA's existing parser keeps working.
-    videos = []
-    for r in rows:
-        videos.append({
-            "task_id": r["task_id"],
-            "timestamp": (r.get("completed_at").isoformat()
-                          if hasattr(r.get("completed_at"), "isoformat")
-                          else r.get("completed_at")),
-            "script_text": (r.get("params") or {}).get("script_text", ""),
-            "host_image": (r.get("params") or {}).get("host_image", ""),
-            "audio_source": (r.get("params") or {}).get("audio_source_label", ""),
-            "output_path": r.get("video_path"),
-            "file_size": r.get("video_bytes", 0),
-            "video_url": r.get("video_url") or f"/api/videos/{r['task_id']}",
-            "generation_time": r.get("generation_time_sec"),
-        })
-    return {"total": len(videos), "videos": videos}
+    videos = [_project_history_row(r) for r in rows]
+    return {"total": total, "videos": videos}
+
+
+@app.get("/api/history/counts")
+async def get_history_counts(
+    request: Request,
+    playlist_id: Optional[str] = None,
+):
+    """Return per-status counts for the status filter chips on /results.
+
+    Plan decision #14: separate endpoint, recomputed per request. Counts
+    change with every task completion / failure / cancellation / playlist
+    move, so caching with ETag invalidation isn't worth wiring up.
+
+    Response: `{all, completed, error, cancelled}` — the invariant
+    `all == completed + error + cancelled` is enforced by the repo.
+    """
+    from modules.repositories import studio_result_repo as _result_repo
+    user = auth_module.get_request_user(request)
+    return await _result_repo.counts_for_user(
+        user["user_id"], playlist_id=playlist_id
+    )
 
 
 # ========================================
@@ -2028,6 +2116,35 @@ async def generate_conversation_task(
             import traceback
             traceback.print_exc()
             set_task_error(task_id, f"대화 영상 생성 실패: {str(e)}")
+
+            # Persist a terminal-failure row so /results status filter has
+            # data (decision #20). Mirror of generate_video_task path with
+            # type="conversation" + the conversation-specific params.
+            if user_id:
+                try:
+                    from modules.repositories import studio_result_repo as _result_repo
+                    await _result_repo.persist_terminal_failure(
+                        user_id=user_id,
+                        task_id=task_id,
+                        type="conversation",
+                        status="error",
+                        error=str(e),
+                        params={
+                            "dialog_data": dialog_data,
+                            "layout": layout,
+                            "prompt": prompt,
+                            "seed": seed,
+                            "cpu_offload": cpu_offload,
+                            "resolution_requested": resolution,
+                        },
+                        playlist_id=playlist_id,
+                        started_at=datetime.fromtimestamp(start_time, tz=timezone.utc),
+                        created_at=datetime.fromtimestamp(start_time, tz=timezone.utc),
+                    )
+                except Exception as persist_err:
+                    logger.warning(
+                        f"Conversation task {task_id}: terminal-failure persist failed: {persist_err}"
+                    )
 
             try:
                 import torch

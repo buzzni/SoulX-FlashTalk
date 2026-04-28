@@ -100,6 +100,15 @@ async def init_indexes() -> None:
         [("user_id", 1), ("status", 1), ("completed_at", -1)],
         name="user_status_completed",
     )
+    # Latest sort across all statuses — decision #19 in
+    # docs/results-page-overhaul-plan.md. Serves
+    # `find({user_id, status: {$in: [...]}}).sort(completed_at)` without
+    # bucket merge. All terminal rows guaranteed to have completed_at
+    # set via persist_terminal_failure (decision #20).
+    await db.studio_results.create_index(
+        [("user_id", 1), ("completed_at", -1)],
+        name="user_completed",
+    )
     # Playlist filter index — see docs/playlist-feature-plan.md §3.
     await db.studio_results.create_index(
         [("user_id", 1), ("playlist_id", 1), ("completed_at", -1)],

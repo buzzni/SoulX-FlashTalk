@@ -157,18 +157,25 @@ async def test_list_for_user_excludes_other_users(repo_db):
     assert items[0]["name"] == "x"
 
 
-async def test_list_for_user_counts_only_completed(repo_db):
+async def test_list_for_user_counts_all_terminal_statuses(repo_db):
+    """Plan decision #21 (results-page-overhaul): video_count covers all
+    terminal rows (completed/error/cancelled), not only completed. This
+    keeps playlist chip counts aligned with status filter chip totals on
+    /results — when a user scopes to a playlist, summing per-status counts
+    matches the playlist's number."""
     db = repo_db
     p = await repo.create("u1", name="A")
     pid = p["playlist_id"]
     docs = [
         {"user_id": "u1", "task_id": "t0", "status": "completed", "playlist_id": pid},
-        {"user_id": "u1", "task_id": "t1", "status": "failed", "playlist_id": pid},
-        {"user_id": "u1", "task_id": "t2", "status": "running", "playlist_id": pid},
+        {"user_id": "u1", "task_id": "t1", "status": "error", "playlist_id": pid},
+        {"user_id": "u1", "task_id": "t2", "status": "cancelled", "playlist_id": pid},
+        {"user_id": "u1", "task_id": "t3", "status": "running", "playlist_id": pid},  # excluded
+        {"user_id": "u1", "task_id": "t4", "status": "pending", "playlist_id": pid},  # excluded
     ]
     await db.studio_results.insert_many(docs)
     listed = await repo.list_for_user("u1")
-    assert listed[0]["video_count"] == 1
+    assert listed[0]["video_count"] == 3  # completed + error + cancelled, not running/pending
 
 
 async def test_list_for_user_empty(repo_db):
@@ -289,17 +296,22 @@ async def test_count_for_user(repo_db):
 
 
 async def test_unassigned_count_includes_null_and_missing(repo_db):
+    """Plan decision #21: counts all terminal rows (completed/error/cancelled)
+    where playlist_id is null or absent. Aligned with list_for_user video_count."""
     db = repo_db
     p = await repo.create("u1", name="A")
     docs = [
         {"user_id": "u1", "task_id": "t1", "status": "completed", "playlist_id": None},
         {"user_id": "u1", "task_id": "t2", "status": "completed", "playlist_id": None},
         {"user_id": "u1", "task_id": "t3", "status": "completed"},  # field missing
-        {"user_id": "u1", "task_id": "t4", "status": "completed", "playlist_id": p["playlist_id"]},
-        {"user_id": "u1", "task_id": "t5", "status": "failed", "playlist_id": None},
+        {"user_id": "u1", "task_id": "t4", "status": "completed", "playlist_id": p["playlist_id"]},  # in playlist
+        {"user_id": "u1", "task_id": "t5", "status": "error", "playlist_id": None},      # NEW: counted
+        {"user_id": "u1", "task_id": "t6", "status": "cancelled", "playlist_id": None},  # NEW: counted
+        {"user_id": "u1", "task_id": "t7", "status": "running", "playlist_id": None},    # excluded
     ]
     await db.studio_results.insert_many(docs)
-    assert await repo.unassigned_count("u1") == 3
+    # 3 completed unassigned + 1 error unassigned + 1 cancelled unassigned = 5
+    assert await repo.unassigned_count("u1") == 5
 
 
 async def test_unassigned_count_per_user(repo_db):
