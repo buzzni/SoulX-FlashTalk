@@ -177,4 +177,76 @@ describe('QueueStatus click-to-navigate', () => {
     expect(retry).toBeTruthy();
     expect(retry.tagName.toLowerCase()).toBe('button');
   });
+
+  // Regressions for the popover/trigger lockout we shipped fixes for:
+  // a persistent fetchQueue failure used to leave the trigger disabled
+  // forever (loading=!queueData) and the panel rendered nothing
+  // (`{queueData && <QueuePanel/>}`). Now the trigger is enabled once
+  // an error lands and the panel renders an error fallback with a
+  // manual retry that calls refresh().
+  it('opens the popover and surfaces an error + retry when initial fetch fails', async () => {
+    fetchQueue.mockReset();
+    // First call rejects so the store lands in the error+null-data state
+    // (the lockout this test exists to regress against). Subsequent calls
+    // succeed — the panel-open tier promotion fires another poll, and the
+    // manual retry button fires yet another. Default-resolve covers both.
+    fetchQueue.mockRejectedValueOnce(new Error('queue offline'));
+    fetchQueue.mockResolvedValue({
+      running: [],
+      pending: [],
+      recent: [],
+      total_running: 0,
+      total_pending: 0,
+    });
+
+    render(
+      <MemoryRouter initialEntries={["/"]}>
+        <QueueStatus />
+        <LocationSpy />
+      </MemoryRouter>,
+    );
+    // Drain the rejected initial fetch.
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+
+    // Trigger should be enabled despite the failure (loading clears once
+    // an error is set in the store).
+    const trigger = screen.getByTitle('작업 목록 보기');
+    expect(trigger.disabled).toBe(false);
+    fireEvent.click(trigger);
+
+    // Error message is visible inside the popover, not silently swallowed.
+    expect(screen.getByText('queue offline')).toBeTruthy();
+    const retryBtn = screen.getByRole('button', { name: '다시 시도' });
+    expect(retryBtn).toBeTruthy();
+
+    // Retry button must fire at least one additional fetchQueue call —
+    // proving the user has a working escape hatch out of the failure
+    // state. We snapshot the call count first because opening the
+    // popover already triggers an active-tier promotion poll.
+    const callsBeforeRetry = fetchQueue.mock.calls.length;
+    await act(async () => { fireEvent.click(retryBtn); await Promise.resolve(); });
+    expect(fetchQueue.mock.calls.length).toBeGreaterThan(callsBeforeRetry);
+  });
+
+  it('confirm modal double-click only fires the cancel API once', async () => {
+    cancelQueuedTask.mockResolvedValue({ message: 'cancelled', task_id: 'pend-1' });
+    vi.useRealTimers();
+
+    await renderAndExpand();
+    const cancelBtns = screen.getAllByLabelText('작업 취소');
+    await act(async () => { fireEvent.click(cancelBtns[0]); await Promise.resolve(); });
+
+    const confirmBtn = await screen.findByRole('button', { name: '취소하기' });
+    // Two clicks in the same tick — the inFlightRef guard must collapse
+    // these into a single API call. Without the guard, both invocations
+    // of runPending see `pending` as truthy via stale closure and both
+    // fire cancelQueuedTask.
+    await act(async () => {
+      fireEvent.click(confirmBtn);
+      fireEvent.click(confirmBtn);
+      await Promise.resolve();
+    });
+    expect(cancelQueuedTask).toHaveBeenCalledTimes(1);
+    expect(cancelQueuedTask).toHaveBeenCalledWith('pend-1');
+  });
 });

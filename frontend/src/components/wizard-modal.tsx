@@ -29,7 +29,14 @@ export function WizardModal({
 }: WizardModalProps) {
   return (
     <Dialog open={open} onOpenChange={(o) => { if (!o) onClose?.(); }}>
-      <DialogContent className="sm:max-w-lg">
+      {/* aria-describedby={undefined} — explicit opt-out of Radix's
+          DialogDescription warning. WAI-ARIA requires aria-labelledby
+          (DialogTitle covers it) but description is optional. Our modals
+          render rich body content (paragraphs, line breaks) that doesn't
+          map cleanly to a single description string, and forwarding via
+          DialogDescription would nest <p> in <p>. Title alone meets the
+          minimum a11y bar. */}
+      <DialogContent className="sm:max-w-lg" aria-describedby={undefined}>
         {title && (
           <DialogHeader>
             <DialogTitle>{title}</DialogTitle>

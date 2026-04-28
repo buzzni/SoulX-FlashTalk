@@ -15,7 +15,7 @@
  *   - completed → `/result/:taskId`
  *   - error/cancelled → no target
  */
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQueue, usePolling } from '../stores/queueStore';
 import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover';
@@ -52,6 +52,14 @@ export default function QueueStatus() {
   // action; null means no modal open. Row click → set pending →
   // ConfirmModal renders → confirm runs the hook action.
   const [pending, setPending] = useState<PendingAction | null>(null);
+  // Double-click guard. The modal closes synchronously inside runPending
+  // (setPending(null) before await), but two click events in the same
+  // event-loop tick share the same closure — both see `pending` as
+  // truthy and both fire the API call. A ref flips on entry and blocks
+  // the second invocation, since refs read the live value not the
+  // closed-over state. Cancellingds/retryingIds only dedupe per task,
+  // not per modal instance.
+  const inFlightRef = useRef(false);
 
   // Wrappers the rows call. These don't run the action — they queue
   // a confirm. ConfirmModal's onConfirm runs the real hook function.
@@ -63,23 +71,34 @@ export default function QueueStatus() {
   };
 
   const runPending = async () => {
+    if (inFlightRef.current) return;
     if (!pending) return;
+    inFlightRef.current = true;
     const { type, taskId, label } = pending;
     setPending(null);
-    if (type === 'cancel') {
-      await cancel(taskId, label);
-      return;
-    }
-    // Retry returns the new task_id; navigate to it so the user lands
-    // on the new attempt instead of staring at the popover.
-    const newId = await retry(taskId, label);
-    if (newId) {
-      setOpen(false);
-      navigate(`/render/${encodeURIComponent(newId)}`);
+    try {
+      if (type === 'cancel') {
+        await cancel(taskId, label);
+        return;
+      }
+      // Retry returns the new task_id; navigate to it so the user lands
+      // on the new attempt instead of staring at the popover.
+      const newId = await retry(taskId, label);
+      if (newId) {
+        setOpen(false);
+        navigate(`/render/${encodeURIComponent(newId)}`);
+      }
+    } finally {
+      inFlightRef.current = false;
     }
   };
 
-  const loading = !queueData;
+  // Loading only while the very first fetch is in flight (no data, no
+  // error yet). Once an error lands we want the trigger enabled so the
+  // user can open the panel and see the error + a manual retry — the
+  // alternative (disabled forever on persistent backend failure) leaves
+  // the user with no channel to learn the queue is broken.
+  const loading = !queueData && !error;
   const totalActive = queueData
     ? (queueData.total_running || 0) + (queueData.total_pending || 0)
     : 0;
@@ -112,7 +131,7 @@ export default function QueueStatus() {
         sideOffset={6}
         className="w-[340px] p-3.5 max-h-[70vh] overflow-y-auto overflow-x-hidden"
       >
-        {queueData && (
+        {queueData ? (
           <QueuePanel
             queueData={queueData}
             error={error}
@@ -127,6 +146,38 @@ export default function QueueStatus() {
             onCancel={askCancel}
             onRetry={askRetry}
           />
+        ) : (
+          // No snapshot yet — either the first fetch is still in flight
+          // (loading) or it failed (error). Without this branch, opening
+          // the panel mid-failure showed a blank box; the user had no way
+          // to see what went wrong or trigger another attempt.
+          <div className="py-2">
+            <div className="flex justify-between items-center mb-2">
+              <strong className="text-sm-tight">작업 목록</strong>
+              <button
+                type="button"
+                onClick={() => setOpen(false)}
+                aria-label="닫기"
+                className="bg-transparent border-0 cursor-pointer text-ink-3"
+              >
+                ✕
+              </button>
+            </div>
+            {error ? (
+              <div className="space-y-2">
+                <div className="text-destructive text-xs">{error}</div>
+                <button
+                  type="button"
+                  onClick={() => { void refresh(); }}
+                  className="w-full px-2 py-1.5 border border-border rounded-sm text-xs hover:bg-secondary cursor-pointer"
+                >
+                  다시 시도
+                </button>
+              </div>
+            ) : (
+              <div className="text-ink-3 text-xs py-2.5">불러오는 중…</div>
+            )}
+          </div>
         )}
       </PopoverContent>
     </Popover>
