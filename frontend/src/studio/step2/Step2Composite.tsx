@@ -268,13 +268,12 @@ export default function Step2Composite({ state }: Step2CompositeProps) {
           <StepHeading
             step={2}
             title="제품과 배경 합성하기"
-            description="쇼호스트·제품·배경을 한 장의 사진으로 합쳐요. 이 스틸 이미지가 다음 단계(음성·영상)의 바탕이 돼요."
+            description="이 한 장이 다음 단계 음성·영상의 바탕이 돼요"
             eyebrow="영상 위저드"
           />
 
           <Card
             title="소개할 상품"
-            subtitle="여러 개 추가할 수 있어요. 구도 지시에서 ①②③ 번호로 지칭해요"
             action={
               <div className="flex gap-1.5">
                 <Button icon="file" size="sm" onClick={() => setPickerFor('products')}>
@@ -289,14 +288,11 @@ export default function Step2Composite({ state }: Step2CompositeProps) {
             <ProductList />
           </Card>
 
-          <Card title="배경" subtitle="어디서 촬영한 느낌으로 보이게 할지 골라주세요">
+          <Card title="배경">
             <BackgroundPicker onPickServerFile={() => setPickerFor('bg')} />
           </Card>
 
-          <Card
-            title="구도 — 어떻게 놓여있게 할까요?"
-            subtitle="쇼호스트 자세·제품 위치를 자유롭게 적어주세요. 배경에 있는 가구·공간에 맞춰 합성돼요."
-          >
+          <Card title="구도" subtitle="쇼호스트 자세·제품 위치를 적어주세요">
             <CompositionControls
               generating={gen.isLoading}
               errorMsg={gen.error}

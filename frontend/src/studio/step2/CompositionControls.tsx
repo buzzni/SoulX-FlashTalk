@@ -12,12 +12,18 @@
 
 import { useRef } from 'react';
 import { Controller, useFormContext, useWatch } from 'react-hook-form';
-import { Sparkles as SparklesIcon } from 'lucide-react';
+import { Sparkles as SparklesIcon, Info as InfoIcon } from 'lucide-react';
 import { Chip } from '@/components/chip';
 import { Field } from '@/components/field';
 import { Segmented } from '@/components/segmented';
 import { Spinner } from '@/components/spinner';
 import { WizardErrorBanner } from '@/components/wizard-error-banner';
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from '@/components/ui/tooltip';
 import type { CompositionAngle, CompositionShot, Product } from '@/wizard/schema';
 import type { Step2FormValues } from '@/wizard/form-mappers';
 import { productPreviewUrl } from './ProductList';
@@ -93,8 +99,8 @@ export function CompositionControls({
   const directionRegister = register('settings.direction');
 
   return (
-    <>
-      <Field label="구도 지시" hint="한 문장으로 적어도 되고, 여러 제품을 따로 적어도 돼요">
+    <TooltipProvider>
+      <Field label="구도 지시">
         <div className="hl-textarea">
           <div className="hl-textarea__mirror" aria-hidden>
             {(() => {
@@ -164,7 +170,7 @@ export function CompositionControls({
         </div>
       )}
 
-      <div className="text-xs text-tertiary mt-3.5 mb-1.5">예시 · 클릭하면 통째로 입력돼요</div>
+      <div className="text-xs text-tertiary mt-3.5 mb-1.5">예시</div>
       <div className="flex flex-wrap gap-1.5">
         {DIRECTION_EXAMPLES.map((ex) => (
           <Chip
@@ -183,14 +189,39 @@ export function CompositionControls({
           control={control}
           name="settings.shot"
           render={({ field }) => (
-            <Field label="샷 크기">
+            <Field
+              label={
+                <span className="inline-flex items-center gap-1">
+                  샷 크기
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <button
+                        type="button"
+                        className="inline-flex items-center justify-center text-muted-foreground hover:text-foreground transition-colors"
+                        aria-label="샷 크기 옵션 설명"
+                      >
+                        <InfoIcon className="size-3.5" />
+                      </button>
+                    </TooltipTrigger>
+                    <TooltipContent side="top" align="start" className="max-w-[260px]">
+                      <ul className="flex-col gap-0.5">
+                        {SHOT_OPTS.map((o) => (
+                          <li key={o.v}>
+                            <strong>{o.label}</strong> · {o.desc}
+                          </li>
+                        ))}
+                      </ul>
+                    </TooltipContent>
+                  </Tooltip>
+                </span>
+              }
+            >
               <div className="flex flex-wrap gap-1.5">
                 {SHOT_OPTS.map((o) => (
                   <Chip
                     key={o.v}
                     on={field.value === o.v}
                     onClick={() => field.onChange(o.v)}
-                    title={o.desc}
                   >
                     {o.label}
                   </Chip>
@@ -203,14 +234,39 @@ export function CompositionControls({
           control={control}
           name="settings.angle"
           render={({ field }) => (
-            <Field label="카메라 앵글">
+            <Field
+              label={
+                <span className="inline-flex items-center gap-1">
+                  카메라 앵글
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <button
+                        type="button"
+                        className="inline-flex items-center justify-center text-muted-foreground hover:text-foreground transition-colors"
+                        aria-label="카메라 앵글 옵션 설명"
+                      >
+                        <InfoIcon className="size-3.5" />
+                      </button>
+                    </TooltipTrigger>
+                    <TooltipContent side="top" align="start" className="max-w-[260px]">
+                      <ul className="flex-col gap-0.5">
+                        {ANGLE_OPTS.map((o) => (
+                          <li key={o.v}>
+                            <strong>{o.label}</strong> · {o.desc}
+                          </li>
+                        ))}
+                      </ul>
+                    </TooltipContent>
+                  </Tooltip>
+                </span>
+              }
+            >
               <div className="flex flex-wrap gap-1.5">
                 {ANGLE_OPTS.map((o) => (
                   <Chip
                     key={o.v}
                     on={field.value === o.v}
                     onClick={() => field.onChange(o.v)}
-                    title={o.desc}
                   >
                     {o.label}
                   </Chip>
@@ -225,7 +281,7 @@ export function CompositionControls({
 
       <Field
         label="변동성"
-        hint="같은 입력으로도 결과를 얼마나 다양하게 뽑을지 — 안정적이면 4장이 비슷, 창의적이면 제각각"
+        hint="안정적이면 4장이 비슷, 창의적이면 제각각"
       >
         <Controller
           control={control}
@@ -248,7 +304,7 @@ export function CompositionControls({
 
       <div className="flex justify-between items-center gap-3 pt-1">
         <div className="text-xs text-muted-foreground">
-          버튼을 누르면 아래에 4장의 합성 후보가 나타나요. 마음에 드는 걸 하나 고르세요.
+          4장의 후보 중 하나를 골라요
         </div>
         <button
           type="button"
@@ -271,6 +327,6 @@ export function CompositionControls({
       {!canGenerate && missingReason && (
         <div className="text-xs text-tertiary mt-1.5">{missingReason}</div>
       )}
-    </>
+    </TooltipProvider>
   );
 }

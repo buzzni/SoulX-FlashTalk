@@ -123,14 +123,14 @@
 }
 .step-pill.active { color: var(--text); background: var(--accent-soft); }
 .step-pill.active .dot {
-  background: var(--accent); border-color: var(--accent); color: #fff;
+  background: var(--primary); border-color: var(--primary); color: #fff;
 }
 .step-pill.active .step-pill-label { font-weight: 700; }
 .step-pill.done { color: var(--text-secondary); }
 .step-pill.done .dot {
   background: var(--accent-soft);
-  border-color: var(--accent);
-  color: var(--accent);
+  border-color: var(--primary);
+  color: var(--primary);
 }
 .step-arrow {
   width: 16px; height: 1px;
@@ -466,8 +466,8 @@
 }
 .input::placeholder, .textarea::placeholder { color: var(--text-placeholder); }
 .input:focus, .textarea:focus, .select:focus {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 3px color-mix(in oklch, var(--accent) 16%, transparent);
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px color-mix(in oklch, var(--primary) 16%, transparent);
 }
 .input.invalid, .textarea.invalid { border-color: var(--danger); box-shadow: 0 0 0 3px color-mix(in oklch, var(--danger) 14%, transparent); }
 .textarea { min-height: 84px; resize: vertical; line-height: 1.5; }
@@ -476,11 +476,14 @@
 .hl-textarea { position: relative; }
 .hl-textarea__mirror {
   position: absolute; inset: 0;
-  padding: var(--pad-field);
+  /* Must match `.textarea` exactly so the highlight overlay tracks the
+   * caret. The textarea declares 9px 12px padding, 14px font, 1.5
+   * line-height, -0.012em letter-spacing — mirror these one-for-one. */
+  padding: 9px 12px;
   font-family: inherit;
-  font-size: 13px;
+  font-size: 14px;
   line-height: 1.5;
-  letter-spacing: inherit;
+  letter-spacing: -0.012em;
   white-space: pre-wrap;
   word-wrap: break-word;
   overflow: hidden;
@@ -527,7 +530,7 @@
   color: var(--text-secondary);
 }
 .upload-tile:hover {
-  border-color: var(--accent);
+  border-color: var(--primary);
   background: var(--accent-soft);
   color: var(--accent-text);
   transform: translateY(-1px);
@@ -601,9 +604,7 @@
 .file-btn:hover { background: var(--bg-sunken); color: var(--text-primary); border-color: var(--border-strong); }
 .file-btn-danger:hover { background: var(--danger-soft); color: var(--danger); border-color: var(--danger); }
 
-/* Slider */
 /* Preset tiles — soft cards with hover lift, active blue ring */
-.preset-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
 .preset-tile {
   border: 1px solid var(--border); border-radius: var(--r-md); padding: 0; cursor: pointer;
   background: var(--bg-elev); overflow: hidden;
@@ -616,8 +617,8 @@
   box-shadow: var(--shadow-sm);
 }
 .preset-tile.on {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 3px color-mix(in oklch, var(--accent) 18%, transparent), var(--shadow-sm);
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px color-mix(in oklch, var(--primary) 18%, transparent), var(--shadow-sm);
   transform: translateY(-1px);
 }
 .preset-tile .swatch { aspect-ratio: 9/16; background: var(--bg-sunken); display: flex; align-items: center; justify-content: center; }
@@ -628,62 +629,10 @@
 }
 .preset-tile.on .name { color: var(--text); font-weight: 700; background: var(--accent-soft); }
 
-/* Background preset tiles (Step 2 추천 장소). Distinct from .preset-tile
- * (which is used by host/composite candidate grids that show real
- * generated images): bg presets describe a *kind of place* the AI
- * will create from scratch — there's no honest preview we can show,
- * so the tile is icon + label, no fake gradient swatch. */
-.bg-preset-tile {
-  display: flex; flex-direction: column; align-items: flex-start; gap: 8px;
-  padding: 12px 12px 11px;
-  border: 1px solid var(--border);
-  border-radius: var(--r-md);
-  background: var(--bg-elev);
-  cursor: pointer;
-  text-align: left;
-  font-family: inherit;
-  transition: border-color .15s, background-color .15s, box-shadow .15s;
-}
-.bg-preset-tile:hover {
-  border-color: var(--border-strong);
-  background: var(--bg);
-}
-.bg-preset-tile--on,
-.bg-preset-tile--on:hover {
-  /* :hover branch needed because the BEM modifier `--on` is one class
-   * (specificity 0,1,0) but `.bg-preset-tile:hover` is class+pseudo
-   * (0,2,0) — hovering an active tile would otherwise revert to the
-   * unselected hover bg and look unselected. */
-  border-color: var(--accent);
-  background: var(--accent-soft);
-  box-shadow: 0 0 0 3px color-mix(in oklch, var(--accent) 14%, transparent);
-}
-.bg-preset-tile__icon {
-  width: 18px; height: 18px;
-  color: var(--text-secondary);
-  flex-shrink: 0;
-}
-.bg-preset-tile--on .bg-preset-tile__icon {
-  color: var(--accent-text);
-}
-.bg-preset-tile__text {
-  display: flex; flex-direction: column; gap: 2px;
-}
-.bg-preset-tile__label {
-  font-size: 12.5px; font-weight: 700;
-  letter-spacing: -0.012em;
-  color: var(--text);
-  line-height: 1.3;
-}
-.bg-preset-tile--on .bg-preset-tile__label {
-  color: var(--accent-text);
-}
-.bg-preset-tile__desc {
-  font-size: 11px; font-weight: 500;
-  color: var(--text-tertiary);
-  letter-spacing: -0.005em;
-  line-height: 1.35;
-}
+/* Background preset tiles moved to inline Tailwind utilities in
+ * BackgroundPicker.tsx — easier to reason about than nested CSS where
+ * a forgotten variant on `.studio-root button` would silently override
+ * the BEM rules. */
 
 /* Badge */
 /* Divider */
@@ -800,7 +749,7 @@
 .product-tag .pt-thumb { width: 32px; height: 32px; border-radius: 4px; background: var(--bg-sunken); overflow: hidden; flex-shrink: 0; }
 .product-tag .pt-thumb img { width: 100%; height: 100%; object-fit: cover; }
 .product-tag .pt-name { font-size: 10px; font-weight: 600; color: #111; line-height: 1.2; }
-.product-tag .pt-price { font-size: 11px; font-weight: 700; color: var(--accent); margin-top: 2px; }
+.product-tag .pt-price { font-size: 11px; font-weight: 700; color: var(--primary); margin-top: 2px; }
 
 /* Host silhouette placeholder (SVG bg) */
 .host-placeholder {
@@ -829,7 +778,7 @@
 .progress {
   width: 100%; height: 6px; background: var(--border); border-radius: 99px; overflow: hidden;
 }
-.progress-bar { height: 100%; background: var(--accent); border-radius: 99px; transition: width .4s; }
+.progress-bar { height: 100%; background: var(--primary); border-radius: 99px; transition: width .4s; }
 
 /* Resolution tiles — soft cards with hover lift, active fills with soft accent */
 .res-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
@@ -845,9 +794,9 @@
   box-shadow: var(--shadow-sm);
 }
 .res-tile.on {
-  border-color: var(--accent);
+  border-color: var(--primary);
   background: var(--accent-soft);
-  box-shadow: 0 0 0 3px color-mix(in oklch, var(--accent) 16%, transparent);
+  box-shadow: 0 0 0 3px color-mix(in oklch, var(--primary) 16%, transparent);
   transform: translateY(-1px);
 }
 .res-tile .res-label { font-size: 14px; font-weight: 700; letter-spacing: -0.018em; }
@@ -874,9 +823,9 @@
   background: var(--bg-sunken);
 }
 .voice-item.on {
-  border-color: var(--accent);
+  border-color: var(--primary);
   background: var(--accent-soft);
-  box-shadow: 0 0 0 3px color-mix(in oklch, var(--accent) 14%, transparent);
+  box-shadow: 0 0 0 3px color-mix(in oklch, var(--primary) 14%, transparent);
 }
 .voice-item--skeleton { cursor: default; pointer-events: none; }
 .voice-item--skeleton:hover { border-color: var(--border); background: var(--bg-elev); }
@@ -891,9 +840,9 @@
 }
 .voice-item:hover .voice-avatar { border-color: var(--border-strong); }
 .voice-item.on .voice-avatar {
-  background: var(--accent);
+  background: var(--primary);
   color: #fff;
-  border-color: var(--accent);
+  border-color: var(--primary);
 }
 .voice-info { flex: 1; min-width: 0; }
 .voice-name { font-size: 13px; font-weight: 600; line-height: 1.35; letter-spacing: -0.014em; }
@@ -913,12 +862,12 @@
 .audio-player__toggle {
   width: 30px; height: 30px; flex-shrink: 0;
   border: 0; border-radius: 50%;
-  background: var(--accent); color: #fff;
+  background: var(--primary); color: #fff;
   cursor: pointer;
   display: grid; place-items: center;
   transition: background .12s;
 }
-.audio-player__toggle:hover { background: var(--accent-strong, var(--accent)); filter: brightness(1.05); }
+.audio-player__toggle:hover { background: var(--accent-strong, var(--primary)); filter: brightness(1.05); }
 .audio-player__progress {
   position: relative;
   flex: 1; min-width: 0;
@@ -934,13 +883,13 @@
 .audio-player__bar {
   position: relative;
   height: 4px; border-radius: 2px;
-  background: var(--accent);
+  background: var(--primary);
   pointer-events: none;
 }
 .audio-player__thumb {
   position: absolute; top: 50%;
   width: 12px; height: 12px; border-radius: 50%;
-  background: var(--accent);
+  background: var(--primary);
   transform: translate(-50%, -50%);
   pointer-events: none;
   box-shadow: 0 1px 3px oklch(0 0 0 / 0.2);
@@ -958,7 +907,7 @@
 }
 .audio-player__volume input[type="range"] {
   width: 72px;
-  accent-color: var(--accent);
+  accent-color: var(--primary);
 }
 
 /* Product list — soft rows with shadow, draggable handle */
@@ -1001,7 +950,7 @@
   flex-shrink: 0;
   width: 26px; height: 26px;
   display: grid; place-items: center;
-  background: var(--accent); color: white;
+  background: var(--primary); color: white;
   border-radius: 50%;
   font-size: 15px; font-weight: 600;
   line-height: 1;
@@ -1045,15 +994,15 @@
 }
 .product-ref-text strong {
   font-weight: 700;
-  color: var(--accent);
+  color: var(--primary);
   font-size: 13px;
 }
 .product-ref-badge {
   display: grid; place-items: center;
   width: 18px; height: 18px;
   background: transparent;
-  color: var(--accent);
-  border: 1px solid var(--accent);
+  color: var(--primary);
+  border: 1px solid var(--primary);
   border-radius: 50%;
   font-size: 11px; font-weight: 600;
   line-height: 1;
@@ -1084,7 +1033,7 @@
 
 /* Animations */
 @keyframes spin { to { transform: rotate(360deg) } }
-.spinner { width: 14px; height: 14px; border: 2px solid var(--bg-subtle); border-top-color: var(--accent); border-radius: 99px; animation: spin .7s linear infinite; }
+.spinner { width: 14px; height: 14px; border: 2px solid var(--bg-subtle); border-top-color: var(--primary); border-radius: 99px; animation: spin .7s linear infinite; }
 
 /* Utility */
 .flex { display: flex; }
@@ -1170,14 +1119,14 @@
 /* Add-paragraph button — prominent, accent-tinted */
 .add-paragraph-btn {
   background: var(--accent-soft) !important;
-  color: var(--accent) !important;
+  color: var(--primary) !important;
   border-color: var(--accent-soft-border) !important;
   font-weight: 600;
 }
 .add-paragraph-btn:not(:disabled):hover {
-  background: var(--accent) !important;
+  background: var(--primary) !important;
   color: #fff !important;
-  border-color: var(--accent) !important;
+  border-color: var(--primary) !important;
 }
 .breath-tag-inline {
   font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
@@ -1201,7 +1150,7 @@
 .studio-root .spinner {
   width: 14px; height: 14px;
   border: 2px solid var(--bg-subtle);
-  border-top-color: var(--accent);
+  border-top-color: var(--primary);
   border-radius: 99px;
   animation: studio-spin .7s linear infinite;
 }

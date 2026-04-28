@@ -156,7 +156,7 @@ export function UploadTile({
   return (
     <div
       className="upload-tile"
-      style={dragOver ? { borderColor: 'var(--accent)', background: 'var(--accent-soft)' } : undefined}
+      style={dragOver ? { borderColor: 'var(--primary)', background: 'var(--accent-soft)' } : undefined}
       tabIndex={0}
       onClick={() => openPicker()}
       onDragOver={(e) => {

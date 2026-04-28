@@ -21,7 +21,6 @@ import { useFieldArray, useFormContext, useWatch } from 'react-hook-form';
 import Icon from '../Icon.jsx';
 import { cn } from '@/lib/utils';
 import { Field } from '@/components/field';
-import { Segmented } from '@/components/segmented';
 import { UploadTile } from '@/components/upload-tile';
 import { localAssetFromUploadFile } from '@/components/upload-tile-bridge';
 import { OptionCard } from '@/components/option-card';
@@ -42,39 +41,24 @@ export function productPreviewUrl(p: Product): string | null {
     case 'uploaded':
       return p.source.asset.url ?? null;
     case 'url':
+      // URL source kind retired from the UI in Step 2 — preserved in
+      // the schema so legacy persisted state still parses.
       return p.source.url || null;
   }
 }
 
 export function ProductList() {
   const { control, setValue } = useFormContext<Step2FormValues>();
-  // `append` lives in the parent (Card header has its own "제품 추가"
-  // button that calls form.setValue directly) — we only need fields,
-  // update, remove, move here.
   const { fields, update, remove, move } = useFieldArray<Step2FormValues, 'products', 'id'>({
     control,
     name: 'products',
     keyName: 'id',
   });
-  // useFieldArray's `fields` snapshots row order via the internal `id`
-  // key, but each row's `source` discriminator changes don't bubble
-  // through `fields` — read live values via `useWatch` so the source
-  // toggle re-renders immediately on swap.
   const watched = useWatch({ control, name: 'products' });
   const products = (watched ?? []) as Product[];
   const rembgKeep = !useWatch({ control, name: 'settings.rembg' });
 
   const [dragIdx, setDragIdx] = useState<number | null>(null);
-
-  const setSource = (idx: number, kind: 'upload' | 'url') => {
-    const cur = products[idx];
-    if (!cur) return;
-    if (kind === 'upload') {
-      update(idx, { ...cur, source: { kind: 'empty' } });
-    } else {
-      update(idx, { ...cur, source: { kind: 'url', url: '', urlInput: '' } });
-    }
-  };
 
   const onDragStart = (idx: number) => setDragIdx(idx);
   const onDragOver = (e: React.DragEvent, idx: number) => {
@@ -94,9 +78,6 @@ export function ProductList() {
           onFile={(f) => {
             const asset = localAssetFromUploadFile(f);
             if (!asset) return;
-            // Replace the entire products array — this is the empty
-            // first-product flow and any leftover empty rows are
-            // placeholders the user hasn't engaged with.
             setValue(
               'products',
               [{ id: Date.now().toString(36), name: asset.name, source: { kind: 'localFile', asset } }],
@@ -104,7 +85,6 @@ export function ProductList() {
             );
           }}
           label="제품 사진 올리기"
-          sub="배경이 없는 PNG가 제일 깔끔해요"
         />
       ) : (
         <div className="product-list">
@@ -112,7 +92,6 @@ export function ProductList() {
             const p = products[idx];
             if (!p) return null;
             const url = productPreviewUrl(p);
-            const sourceKind: 'upload' | 'url' = p.source.kind === 'url' ? 'url' : 'upload';
             return (
               <div
                 key={field.id}
@@ -130,77 +109,42 @@ export function ProductList() {
                     <img src={url} alt="" />
                   ) : (
                     <div className="striped-placeholder text-[9px]">
-                      상품 {idx + 1}
+                      {idx + 1}번
                     </div>
                   )}
                 </div>
                 <div className="product-info flex-col gap-2">
                   <div className="product-label text-xs">
-                    상품 {idx + 1}
-                    <span className="text-tertiary ml-1.5 font-normal">
-                      · 구도 지시에서{' '}
-                      <strong className="text-accent font-semibold">{idx + 1}번</strong>
-                    </span>
+                    <strong className="text-primary font-semibold">{idx + 1}번</strong> 상품
                   </div>
-                  <Segmented
-                    value={sourceKind}
-                    onChange={(v: 'upload' | 'url') => setSource(idx, v)}
-                    options={[
-                      { value: 'upload', label: '사진 올리기', icon: 'upload' },
-                      { value: 'url', label: '쇼핑몰 주소', icon: 'link' },
-                    ]}
-                  />
-                  {p.source.kind === 'url' && (
-                    <div className="input-group">
-                      <span className="prefix">
-                        <Icon name="link" size={12} />
-                      </span>
-                      <input
-                        className="input has-prefix"
-                        placeholder="예) https://smartstore.naver.com/..."
-                        value={p.source.urlInput}
-                        onChange={(e) => {
-                          const next = e.target.value;
+                  <label className="self-start inline-flex items-center gap-1.5 h-8 px-3 rounded-md text-xs font-medium border border-input bg-card text-foreground hover:bg-secondary cursor-pointer transition-colors">
+                    <Icon name={url ? 'swap' : 'upload'} size={12} />
+                    {url ? '사진 교체' : '사진 올리기'}
+                    <input
+                      type="file"
+                      accept="image/*"
+                      className="hidden"
+                      onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        if (!file) return;
+                        const reader = new FileReader();
+                        reader.onload = (ev) =>
                           update(idx, {
                             ...p,
-                            source: { kind: 'url', url: next, urlInput: next },
-                          });
-                        }}
-                      />
-                    </div>
-                  )}
-                  {(p.source.kind === 'empty' ||
-                    p.source.kind === 'localFile' ||
-                    p.source.kind === 'uploaded') && (
-                    <label className="self-start inline-flex items-center gap-1.5 h-8 px-3 rounded-md text-xs font-medium border border-input bg-card text-foreground hover:bg-secondary cursor-pointer transition-colors">
-                      <Icon name={url ? 'swap' : 'upload'} size={12} />
-                      {url ? '사진 교체' : '사진 올리기'}
-                      <input
-                        type="file"
-                        accept="image/*"
-                        className="hidden"
-                        onChange={(e) => {
-                          const file = e.target.files?.[0];
-                          if (!file) return;
-                          const reader = new FileReader();
-                          reader.onload = (ev) =>
-                            update(idx, {
-                              ...p,
-                              name: file.name,
-                              source: {
-                                kind: 'localFile',
-                                asset: {
-                                  file,
-                                  previewUrl: (ev.target?.result as string) || '',
-                                  name: file.name,
-                                },
+                            name: file.name,
+                            source: {
+                              kind: 'localFile',
+                              asset: {
+                                file,
+                                previewUrl: (ev.target?.result as string) || '',
+                                name: file.name,
                               },
-                            });
-                          reader.readAsDataURL(file);
-                        }}
-                      />
-                    </label>
-                  )}
+                            },
+                          });
+                        reader.readAsDataURL(file);
+                      }}
+                    />
+                  </label>
                 </div>
                 <button
                   type="button"
@@ -219,7 +163,7 @@ export function ProductList() {
       {products.length > 0 && (
         <Field
           label="제품 사진 배경 처리"
-          hint="합성할 때 제품 사진의 원래 배경을 어떻게 다룰지 정해요"
+          hint="제품 사진의 원래 배경을 어떻게 다룰지"
         >
           <div className="grid grid-cols-2 gap-2">
             <OptionCard
@@ -233,14 +177,14 @@ export function ProductList() {
                   </span>
                 </>
               }
-              desc="화장품·패션·기기 등 깔끔한 컷에 — 배경 다 지우고 새 배경에 얹음"
+              desc="화장품·패션·기기 등 깔끔한 컷에"
               onClick={() => setValue('settings.rembg', true, { shouldDirty: true })}
             />
             <OptionCard
               dense
               active={rembgKeep}
               title="사진 그대로 쓰기"
-              desc="음식 플레이팅·가구 인테리어처럼 배경이 분위기에 도움 되는 사진에"
+              desc="음식·인테리어처럼 배경이 분위기에 도움될 때"
               onClick={() => setValue('settings.rembg', false, { shouldDirty: true })}
             />
           </div>

@@ -25,7 +25,15 @@
   --text-placeholder: var(--ink-3);
   --text-primary: var(--ink);
 
-  --accent: var(--primary);
+  /* `--accent`는 글로벌 :root에서 `var(--primary-soft)` (light tint)로
+   * 정의되어 있다. studio scope에서 같은 이름을 deep blue로 재매핑하면
+   * `bg-accent` Tailwind utility가 화면마다 다른 색을 갖는다 — 2026-04
+   * Step2 BackgroundPicker 사고의 root cause. studio가 deep blue가
+   * 필요한 곳은 app.css에서 `var(--primary)`를 직접 참조한다.
+   *
+   * 아래 alias들은 글로벌에 같은 이름이 *없으므로* studio-only로 유지.
+   * 삭제하면 OptionCard / BackgroundPicker 등의 `bg-accent-soft`,
+   * `text-accent-text` Tailwind utility가 fallback 없이 깨진다. */
   --accent-hover: var(--primary-hover);
   --accent-soft: var(--primary-soft);
   --accent-soft-border: var(--primary-soft);

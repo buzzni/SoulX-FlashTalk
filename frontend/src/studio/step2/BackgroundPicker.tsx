@@ -17,7 +17,6 @@
 
 import { useFormContext } from 'react-hook-form';
 import Icon from '../Icon.jsx';
-import { Field } from '@/components/field';
 import { UploadTile } from '@/components/upload-tile';
 import {
   uploadFileFromAsset,
@@ -31,7 +30,6 @@ import {
   Sparkles,
   Frame,
   Upload,
-  Link as LinkIcon,
   Sun,
   Sofa,
   ChefHat,
@@ -61,7 +59,7 @@ export interface BackgroundPickerProps {
   onPickServerFile: () => void;
 }
 
-type PickSubMode = 'preset' | 'upload' | 'url';
+type PickSubMode = 'preset' | 'upload';
 
 function pickSubModeFor(bg: Background): PickSubMode {
   switch (bg.kind) {
@@ -70,7 +68,9 @@ function pickSubModeFor(bg: Background): PickSubMode {
     case 'upload':
       return 'upload';
     case 'url':
-      return 'url';
+      // URL source kind retired from the UI; legacy state still parses
+      // and falls back to the upload tab.
+      return 'upload';
     case 'prompt':
       return 'preset'; // shouldn't render this branch (prompt mode hides tier 2)
   }
@@ -93,8 +93,7 @@ export function BackgroundPicker({ onPickServerFile }: BackgroundPickerProps) {
           active={!isAi}
           icon={<ImageIcon className="size-4" />}
           title="이미 있는 이미지 쓰기"
-          desc="추천 장소 · 내 사진 · 링크 중에서 골라요"
-          meta="즉시 적용"
+          desc="추천 장소나 내 사진에서 골라요"
           onClick={() => {
             if (background.kind === 'prompt') swap({ kind: 'preset', presetId: null });
           }}
@@ -119,8 +118,7 @@ export function BackgroundPicker({ onPickServerFile }: BackgroundPickerProps) {
               onValueChange={(v) => {
                 const next = v as PickSubMode;
                 if (next === 'preset') swap({ kind: 'preset', presetId: null });
-                else if (next === 'upload') swap({ kind: 'upload', asset: null });
-                else swap({ kind: 'url', url: '' });
+                else swap({ kind: 'upload', asset: null });
               }}
               className="mb-3"
             >
@@ -130,27 +128,49 @@ export function BackgroundPicker({ onPickServerFile }: BackgroundPickerProps) {
               <WizardTab value="upload" icon={<Upload className="size-3.5" />}>
                 내 사진
               </WizardTab>
-              <WizardTab value="url" icon={<LinkIcon className="size-3.5" />}>
-                링크
-              </WizardTab>
             </WizardTabs>
 
-            {background.kind === 'preset' && (
-              <div className="preset-grid">
+            {(background.kind === 'preset' || background.kind === 'url') && (
+              <div className="grid grid-cols-[repeat(auto-fill,minmax(130px,1fr))] gap-2.5">
                 {BG_PRESETS.map((p) => {
                   const PresetIcon = p.icon;
-                  const on = background.presetId === p.id;
+                  const on = background.kind === 'preset' && background.presetId === p.id;
                   return (
                     <button
                       key={p.id}
                       type="button"
-                      className={cn('bg-preset-tile', on && 'bg-preset-tile--on')}
                       onClick={() => swap({ kind: 'preset', presetId: p.id })}
+                      className={cn(
+                        'relative flex flex-col items-start gap-2 p-3 rounded-md border text-left transition-colors',
+                        on
+                          ? 'border-primary bg-accent-soft text-accent-text shadow-[0_0_0_3px_color-mix(in_oklch,var(--primary)_14%,transparent)] z-[1]'
+                          : 'border-border bg-card hover:border-foreground/30',
+                      )}
                     >
-                      <PresetIcon className="bg-preset-tile__icon" strokeWidth={1.6} />
-                      <div className="bg-preset-tile__text">
-                        <div className="bg-preset-tile__label">{p.label}</div>
-                        <div className="bg-preset-tile__desc">{p.desc}</div>
+                      <PresetIcon
+                        className={cn(
+                          'size-[18px] shrink-0',
+                          on ? 'text-primary' : 'text-muted-foreground',
+                        )}
+                        strokeWidth={1.6}
+                      />
+                      <div className="flex flex-col gap-0.5">
+                        <div
+                          className={cn(
+                            'text-[12.5px] font-bold leading-tight tracking-tight',
+                            on ? 'text-accent-text' : 'text-foreground',
+                          )}
+                        >
+                          {p.label}
+                        </div>
+                        <div
+                          className={cn(
+                            'text-[11px] font-medium leading-snug',
+                            on ? 'text-accent-text/75' : 'text-muted-foreground',
+                          )}
+                        >
+                          {p.desc}
+                        </div>
                       </div>
                     </button>
                   );
@@ -165,35 +185,17 @@ export function BackgroundPicker({ onPickServerFile }: BackgroundPickerProps) {
                 onPickServerFile={onPickServerFile}
               />
             )}
-
-            {background.kind === 'url' && (
-              <Field label="이미지 주소">
-                <div className="input-group">
-                  <span className="prefix">
-                    <Icon name="link" size={12} />
-                  </span>
-                  <input
-                    className="input has-prefix"
-                    placeholder="예) https://... 로 시작하는 이미지 링크"
-                    value={background.url}
-                    onChange={(e) => swap({ kind: 'url', url: e.target.value })}
-                  />
-                </div>
-              </Field>
-            )}
           </>
         )}
 
         {isAi && background.kind === 'prompt' && (
           <div className="flex-col gap-3">
-            <Field label="어떤 배경이 필요한가요?" hint="장소·분위기를 적어주세요">
-              <textarea
-                className="textarea min-h-[120px]"
-                placeholder="예) 밝고 깨끗한 모던 주방, 큰 창문으로 자연광이 들어오는 느낌"
-                value={background.prompt}
-                onChange={(e) => swap({ kind: 'prompt', prompt: e.target.value })}
-              />
-            </Field>
+            <textarea
+              className="textarea min-h-[120px]"
+              placeholder="예) 밝고 깨끗한 모던 주방, 큰 창문으로 자연광이 들어오는 느낌"
+              value={background.prompt}
+              onChange={(e) => swap({ kind: 'prompt', prompt: e.target.value })}
+            />
             <div className="flex items-center gap-2 text-xs text-tertiary">
               <Sparkles className="size-3.5 text-primary" />
               <span>"합성 이미지 만들기"를 누르면 이 설명으로 배경까지 같이 만들어줘요</span>
