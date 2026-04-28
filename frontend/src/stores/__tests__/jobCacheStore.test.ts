@@ -3,6 +3,8 @@
  */
 import { describe, it, expect, beforeEach } from 'vitest';
 import {
+  EMPTY_ENTRY,
+  selectJobEntry,
   type JobSnapshot,
   useJobCacheStore,
 } from '../jobCacheStore';
@@ -182,5 +184,49 @@ describe('jobCacheStore', () => {
     useJobCacheStore.getState().setSnapshot('job-2', makeSnapshot(), 5);
     useJobCacheStore.getState().clear();
     expect(useJobCacheStore.getState().jobs).toEqual({});
+  });
+
+  // ── Regression nets for /simplify P1 fixes ──────────────────────
+  //
+  // Both behaviors are perf-critical: zustand's Object.is comparator
+  // re-renders every selector subscriber when the returned reference
+  // changes. A regression in either is silent — all 14 logical-state
+  // tests above pass — but every component using useJobSnapshot for a
+  // missing or unchanged-snapshot job thrashes on every store write.
+
+  it('selectJobEntry returns the same EMPTY_ENTRY across calls (no re-render storm)', () => {
+    const sel = selectJobEntry('not-cached');
+    const s1 = useJobCacheStore.getState();
+    // An unrelated mutation must not change the empty-entry reference
+    // returned for a different jobId.
+    useJobCacheStore.getState().setSnapshot('other', makeSnapshot(), 1);
+    const s2 = useJobCacheStore.getState();
+    expect(sel(s1)).toBe(EMPTY_ENTRY);
+    expect(sel(s2)).toBe(EMPTY_ENTRY);
+    expect(sel(s1)).toBe(sel(s2));
+  });
+
+  it('selectJobEntry(null) === EMPTY_ENTRY (stable null path)', () => {
+    const sel = selectJobEntry(null);
+    expect(sel(useJobCacheStore.getState())).toBe(EMPTY_ENTRY);
+  });
+
+  it('setSnapshot with the same seq is a no-op — store reference stays stable', () => {
+    const snap = makeSnapshot();
+    useJobCacheStore.getState().setSnapshot('job-1', snap, 7);
+    const ref1 = useJobCacheStore.getState().jobs;
+    useJobCacheStore.getState().setSnapshot('job-1', snap, 7); // replay
+    const ref2 = useJobCacheStore.getState().jobs;
+    expect(ref1).toBe(ref2);
+  });
+
+  it('setSnapshot at seq=0 lands when no prior snapshot exists', () => {
+    // The idempotent guard (`seq <= entry.lastSeq && entry.snapshot !== null`)
+    // must NOT block the initial snapshot when the cache is empty —
+    // the entry's lastSeq starts at 0 and the very first snapshot can
+    // legitimately land at seq=0 (e.g., a job with no events yet).
+    useJobCacheStore.getState().beginLoading('job-1');
+    useJobCacheStore.getState().setSnapshot('job-1', makeSnapshot(), 0);
+    expect(useJobCacheStore.getState().jobs['job-1']!.snapshot).not.toBeNull();
   });
 });

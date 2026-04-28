@@ -157,6 +157,99 @@ describe('migrateWizardEnvelope — v8 → v9 (HostGeneration collapse)', () => 
     expect(host.generation.state).toBe('attached');
     expect(host.generation.jobId).toBe('job-x');
   });
+
+  // ── Data preservation: eng-spec §7 lift contract ─────────────────
+  // v8 carried the user-picked variant under host.generation.selected.
+  // v9 collapses generation to {idle | attached(jobId)} and moves the
+  // pick to host.selected. The migrate code lifts the snapshot so a
+  // user upgrading mid-wizard doesn't lose their pick. These tests
+  // pin the lift behavior — without them, a regression silently drops
+  // every reload-time selection.
+
+  it('lifts a v8 ready host.generation.selected onto host.selected', () => {
+    const picked = { seed: 7, imageId: 'h-pick', url: '/u/h-pick.png', path: '/p/h-pick.png' };
+    const before = {
+      ...v8Base,
+      host: {
+        ...v8Base.host,
+        generation: {
+          state: 'ready',
+          batchId: 'b2',
+          variants: [picked],
+          selected: picked,
+          prevSelected: null,
+        },
+      },
+    };
+    const after = migrateWizardEnvelope(before, 8) as unknown as Record<string, unknown>;
+    const host = after.host as {
+      generation: { state: string };
+      selected: { imageId: string; path: string; url: string; seed: number } | null;
+    };
+    expect(host.generation.state).toBe('idle');
+    expect(host.selected).toEqual({
+      imageId: 'h-pick', path: '/p/h-pick.png', url: '/u/h-pick.png', seed: 7,
+    });
+  });
+
+  it('lifts a v8 ready composition.generation.selected onto composition.selected', () => {
+    const picked = { seed: 3, imageId: 'c-pick', url: '/u/c.png', path: '/p/c.png' };
+    const before = {
+      ...v8Base,
+      composition: {
+        ...v8Base.composition,
+        generation: {
+          state: 'ready',
+          batchId: 'cb',
+          variants: [picked],
+          selected: picked,
+          prevSelected: null,
+        },
+      },
+    };
+    const after = migrateWizardEnvelope(before, 8) as unknown as Record<string, unknown>;
+    const comp = after.composition as {
+      generation: { state: string };
+      selected: { imageId: string; path: string; url: string; seed: number } | null;
+    };
+    expect(comp.generation.state).toBe('idle');
+    expect(comp.selected).toEqual({
+      imageId: 'c-pick', path: '/p/c.png', url: '/u/c.png', seed: 3,
+    });
+  });
+
+  it('skips the lift when legacy selected is missing path or url', () => {
+    // Pre-Lane-D corrupt blobs lacked path/url. The lift guard
+    // (host.path && host.url) drops the lift; selected falls back to
+    // null so the safeParse gate doesn't reject the whole blob.
+    const before = {
+      ...v8Base,
+      host: {
+        ...v8Base.host,
+        generation: {
+          state: 'ready',
+          variants: [],
+          selected: { imageId: 'orphan', seed: 1 }, // no path/url
+          prevSelected: null,
+        },
+      },
+    };
+    const after = migrateWizardEnvelope(before, 8) as unknown as Record<string, unknown>;
+    const host = after.host as { selected: unknown };
+    expect(host.selected).toBeNull();
+  });
+
+  it('defaults host.selected to null when the v8 blob has no selected field at all', () => {
+    // Most persisted v8 blobs predate the host.selected schema and hit
+    // the `else if (host.selected === undefined)` branch — without the
+    // default, safeParse rejects the whole blob and the user lands in
+    // INITIAL_WIZARD_STATE on every reload.
+    const before = JSON.parse(JSON.stringify(v8Base)); // deep clone, no defaults
+    delete before.host.selected;
+    const after = migrateWizardEnvelope(before, 8) as unknown as Record<string, unknown>;
+    const host = after.host as { selected: unknown };
+    expect(host.selected).toBeNull();
+  });
 });
 
 describe('migrateWizardEnvelope — older shapes still compose', () => {
