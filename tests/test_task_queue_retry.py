@@ -4,40 +4,81 @@ Eng-review 1A: retry_task must stamp `retried_from: <original_task_id>`
 on the new entry so the frontend can decide whether the next failure
 suggests 재시도 (depth 0) or 수정해서 다시 만들기 (depth ≥ 1).
 
-These tests instantiate a fresh TaskQueue against an isolated JSON file
-in tmp_path so the dev `outputs/task_queue.json` is never touched.
+Post PR-5: TaskQueue persists to Mongo `generation_jobs` instead of a
+JSON file. Tests run against an isolated per-test collection in the
+test DB so the production singleton is never touched.
 """
 from __future__ import annotations
 
-import pytest
+import os
+import uuid
 
+import pytest
+import pytest_asyncio
+from motor.motor_asyncio import AsyncIOMotorClient
+
+import config
+from modules import db as db_module
 from modules import task_queue as task_queue_module
 
 
-@pytest.fixture
-def isolated_queue(tmp_path, monkeypatch):
-    """A fresh TaskQueue backed by tmp_path/queue.json.
+def _test_db_name() -> str:
+    worker = os.environ.get("PYTEST_XDIST_WORKER", "main")
+    return f"ai_showhost_test_{worker}_taskqueue"
 
-    The module-level singleton is left alone — these tests construct
-    their own instance against an isolated file.
+
+@pytest_asyncio.fixture
+async def isolated_queue(monkeypatch):
+    """Fresh TaskQueue against an isolated Mongo collection.
+
+    Per-test collection name (`test_queue_<uuid>`) means parallel tests
+    don't interleave, and the production `generation_jobs` collection
+    isn't touched.
     """
-    qfile = tmp_path / "queue.json"
-    monkeypatch.setattr(task_queue_module, "QUEUE_FILE", str(qfile))
-    return task_queue_module.TaskQueue()
+    monkeypatch.setattr(config, "MONGO_URL", "mongodb://localhost:27017")
+    monkeypatch.setattr(config, "DB_NAME", _test_db_name())
+
+    pre = AsyncIOMotorClient("mongodb://localhost:27017", serverSelectionTimeoutMS=2000)
+    pre_db = pre[_test_db_name()]
+    for c in await pre_db.list_collection_names():
+        await pre_db[c].drop()
+    pre.close()
+
+    await db_module.init()
+    coll_name = f"test_queue_{uuid.uuid4().hex[:8]}"
+    q = task_queue_module.TaskQueue(collection_name=coll_name)
+    await q._ensure_indexes()
+    yield q
+    # Cleanup
+    try:
+        await db_module.get_db()[coll_name].drop()
+    except Exception:
+        pass
+    await db_module.close()
+
+
+async def _set_status(q, task_id: str, **fields):
+    """Helper: directly mutate an entry's status/error in Mongo. Tests
+    use this to simulate a finished task without going through the
+    worker loop."""
+    await q._coll().update_one({"task_id": task_id}, {"$set": fields})
+
+
+async def _find(q, task_id: str) -> dict:
+    entry = await q._coll().find_one({"task_id": task_id})
+    assert entry is not None, f"task {task_id} not found"
+    return entry
 
 
 async def test_retry_task_adds_retried_from_to_new_entry(isolated_queue):
     """The new entry's retried_from points back at the original task_id."""
     q = isolated_queue
     await q.enqueue("orig", "generate", {"prompt": "p"}, user_id="u1")
-    # Mark it errored so retry_task accepts it.
-    async with q._lock:
-        q._queue[0]["status"] = "error"
-        q._queue[0]["error"] = "boom"
+    await _set_status(q, "orig", status="error", error="boom")
     new_id, status = await q.retry_task("orig", requesting_user_id="u1")
     assert status == "ok"
     assert new_id is not None
-    new_entry = next(e for e in q._queue if e["task_id"] == new_id)
+    new_entry = await _find(q, new_id)
     assert new_entry["retried_from"] == "orig"
     assert new_entry["status"] == "pending"
 
@@ -47,61 +88,52 @@ async def test_retry_task_leaves_original_entry_untouched(isolated_queue):
     still need to see what failed and what replaced it side by side."""
     q = isolated_queue
     await q.enqueue("orig", "generate", {"prompt": "p"}, user_id="u1")
-    async with q._lock:
-        q._queue[0]["status"] = "error"
-        q._queue[0]["error"] = "boom"
-    snapshot_before = dict(q._queue[0])
+    await _set_status(q, "orig", status="error", error="boom")
+    snapshot_before = await _find(q, "orig")
     await q.retry_task("orig", requesting_user_id="u1")
-    original = next(e for e in q._queue if e["task_id"] == "orig")
+    original = await _find(q, "orig")
     assert original["status"] == "error"
     assert original["error"] == "boom"
-    assert "retried_from" not in original
-    # All preserved fields unchanged:
+    # PR-5: retried_from is now always present (None on a non-retried
+    # entry); the original was never a retry, so it must stay None.
+    assert original.get("retried_from") is None
     for k in ("task_id", "user_id", "type", "params", "status", "error"):
         assert original[k] == snapshot_before[k]
 
 
 async def test_retry_task_chain_two_deep(isolated_queue):
-    """A retry of a retry: each link's retried_from points one step back.
-
-    Frontend's depth-walk heuristic only needs one-deep (`retriedFrom != null`),
-    but the chain itself must still resolve cleanly when something walks it.
-    """
+    """A retry of a retry: each link's retried_from points one step back."""
     q = isolated_queue
     await q.enqueue("a", "generate", {"prompt": "p"}, user_id="u1")
-    async with q._lock:
-        q._queue[0]["status"] = "error"
+    await _set_status(q, "a", status="error")
     new_b, _ = await q.retry_task("a", requesting_user_id="u1")
-    # Mark b errored too, then retry it.
-    async with q._lock:
-        next(e for e in q._queue if e["task_id"] == new_b)["status"] = "error"
+    await _set_status(q, new_b, status="error")
     new_c, _ = await q.retry_task(new_b, requesting_user_id="u1")
-    entry_b = next(e for e in q._queue if e["task_id"] == new_b)
-    entry_c = next(e for e in q._queue if e["task_id"] == new_c)
+    entry_b = await _find(q, new_b)
+    entry_c = await _find(q, new_c)
     assert entry_b["retried_from"] == "a"
     assert entry_c["retried_from"] == new_b
 
 
-async def test_retry_task_persists_retried_from_to_disk(isolated_queue, tmp_path):
-    """The new entry survives a reload — retried_from is JSON-serialized."""
+async def test_retry_task_persists_retried_from_across_instances(isolated_queue):
+    """The new entry survives a TaskQueue rebind — retried_from is on
+    the Mongo doc, not in-memory state."""
     q = isolated_queue
     await q.enqueue("orig", "generate", {"prompt": "p"}, user_id="u1")
-    async with q._lock:
-        q._queue[0]["status"] = "error"
+    await _set_status(q, "orig", status="error")
     new_id, _ = await q.retry_task("orig", requesting_user_id="u1")
 
-    # Fresh instance reading the same file should see the field.
-    q2 = task_queue_module.TaskQueue()
-    reloaded = next(e for e in q2._queue if e["task_id"] == new_id)
+    # Fresh instance against the same collection should see the field.
+    q2 = task_queue_module.TaskQueue(collection_name=q._collection_name)
+    reloaded = await q2._coll().find_one({"task_id": new_id})
+    assert reloaded is not None
     assert reloaded["retried_from"] == "orig"
 
 
 async def test_retry_task_unfinished_returns_not_finished(isolated_queue):
-    """Regression: pending/running tasks remain non-retryable. retried_from
-    is only stamped on the success path."""
+    """Regression: pending/running tasks remain non-retryable."""
     q = isolated_queue
     await q.enqueue("orig", "generate", {"prompt": "p"}, user_id="u1")
-    # Default status is pending — retry should reject.
     new_id, status = await q.retry_task("orig", requesting_user_id="u1")
     assert status == "not_finished"
     assert new_id is None
