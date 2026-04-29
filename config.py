@@ -167,6 +167,31 @@ MULTITALK_ENABLED = True
 COMPOSITE_MODE = "alpha"  # Use MultiTalk for split layout with 2 agents
 
 # ========================================
+# S3 Storage (PR S3+) — see specs/s3-migration/plan.md
+# ========================================
+# Bucket layout: <S3_BUCKET>/<S3_ENV_PREFIX>/<S3_PROJECT_NAME>/<storage_key>
+# storage_key shape: outputs/..., uploads/..., examples/...
+S3_BUCKET = os.environ.get("S3_BUCKET", "ailab-demo")
+S3_REGION = os.environ.get("S3_REGION", "ap-northeast-2")
+S3_ACCESS_KEY = os.environ.get("S3_ACCESS_KEY", "")
+S3_SECRET_KEY = os.environ.get("S3_SECRET_KEY", "")
+S3_ENV_PREFIX = os.environ.get("S3_ENV_PREFIX", "dev")
+S3_PROJECT_NAME = os.environ.get("S3_PROJECT_NAME", "soulx-flashtalk")
+
+# Presigned URL TTL (seconds). Video TTL = 6h to cover long byte-range seek
+# sessions; image/audio = 1h is enough for wizard preview.
+S3_PRESIGN_TTL_IMAGE = int(os.environ.get("S3_PRESIGN_TTL_IMAGE", "3600"))
+S3_PRESIGN_TTL_VIDEO = int(os.environ.get("S3_PRESIGN_TTL_VIDEO", "21600"))
+
+# boto3 client tuning. Pool size 50 covers concurrent uploads + GPU
+# inference downloads; retries=5 + standard mode handles throttling.
+S3_MAX_POOL_CONNECTIONS = int(os.environ.get("S3_MAX_POOL_CONNECTIONS", "50"))
+S3_MULTIPART_THRESHOLD = int(os.environ.get("S3_MULTIPART_THRESHOLD", str(8 * 1024 * 1024)))
+S3_MAX_RETRY_ATTEMPTS = int(os.environ.get("S3_MAX_RETRY_ATTEMPTS", "5"))
+S3_CONNECT_TIMEOUT = int(os.environ.get("S3_CONNECT_TIMEOUT", "10"))
+S3_READ_TIMEOUT = int(os.environ.get("S3_READ_TIMEOUT", "300"))
+
+# ========================================
 # Logging
 # ========================================
 LOG_LEVEL = "INFO"
