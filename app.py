@@ -1272,6 +1272,42 @@ async def startup_event():
     # (per docs/db-integration-plan.md decision #15).
     await db_module.init()
 
+    # PR S3+ C13 cutover: swap media_store from LocalDisk to S3 when
+    # credentials are present. Putting this in the startup hook (not
+    # at module top-level) avoids the circular import storage.py ↔
+    # storage_s3.py ↔ config.py would otherwise create.
+    #
+    # Hybrid policy (review-findings C8):
+    #   * Both S3_ACCESS_KEY and S3_SECRET_KEY set → S3 backend.
+    #     head_bucket() runs as a sanity check so a typo in the
+    #     credential / region surfaces here, not on the first user
+    #     upload.
+    #   * Either credential missing → LocalDisk stays (dev / CI
+    #     ergonomics; CI runs without AWS access).
+    if config.S3_ACCESS_KEY and config.S3_SECRET_KEY:
+        try:
+            from modules.storage_s3 import make_default_s3_store
+            from modules import storage as _storage
+            s3_store = make_default_s3_store()
+            # Touch the bucket to verify creds + region + permissions
+            # before flipping the singleton — catches typos early.
+            s3_store.s3.head_bucket(Bucket=config.S3_BUCKET)
+            _storage.media_store = s3_store
+            logger.info(
+                "PR S3+ cutover: media_store swapped to S3 (bucket=%s, "
+                "prefix=%s/%s)",
+                config.S3_BUCKET, config.S3_ENV_PREFIX, config.S3_PROJECT_NAME,
+            )
+        except Exception as e:
+            # Boot fail-fast — a missing bucket / bad creds shouldn't
+            # silently fall back to LocalDisk in production.
+            logger.error("S3 cutover failed: %s", e)
+            raise
+    else:
+        logger.info(
+            "PR S3+: S3 credentials not set, staying on LocalDiskMediaStore"
+        )
+
     # Register queue handlers and start worker
     task_queue.register_handler("generate", _queue_generate_handler)
     task_queue.register_handler("conversation", _queue_conversation_handler)
