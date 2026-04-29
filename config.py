@@ -188,7 +188,7 @@ S3_REGION = os.environ.get("S3_REGION", "ap-northeast-2")
 S3_ACCESS_KEY = os.environ.get("S3_ACCESS_KEY", "")
 S3_SECRET_KEY = os.environ.get("S3_SECRET_KEY", "")
 S3_ENV_PREFIX = os.environ.get("S3_ENV_PREFIX", "dev")
-S3_PROJECT_NAME = os.environ.get("S3_PROJECT_NAME", "soulx-flashtalk")
+S3_PROJECT_NAME = os.environ.get("S3_PROJECT_NAME", "imseller-studio")
 
 # Presigned URL TTL (seconds). Video TTL = 6h to cover long byte-range seek
 # sessions; image/audio = 1h is enough for wizard preview.
