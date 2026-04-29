@@ -100,8 +100,11 @@ def test_tts_rejects_missing_api_key(client, monkeypatch):
         "/api/elevenlabs/generate",
         data={"text": "안녕", "voice_id": "v1"},
     )
-    assert r.status_code == 400
-    assert "API key" in r.json()["detail"]
+    # 503 — operator misconfig surfaced as service-unavailable. The
+    # message intentionally omits the vendor name (implementation
+    # detail, not user concern).
+    assert r.status_code == 503
+    assert "음성" in r.json()["detail"]
 
 
 def test_tts_rejects_out_of_range_speed(client):

@@ -1852,7 +1852,10 @@ async def list_elevenlabs_voices(request: Request):
     """
     user = auth_module.get_request_user(request)
     if not config.ELEVENLABS_API_KEY:
-        raise HTTPException(status_code=400, detail="ElevenLabs API key not configured. Set ELEVENLABS_API_KEY env var.")
+        # Operator-facing problem (env var missing). Don't leak the
+        # vendor name to end users — they just see that voice features
+        # aren't available right now.
+        raise HTTPException(status_code=503, detail="음성 기능을 사용할 수 없어요")
 
     from modules.repositories import elevenlabs_voice_repo
     stock = await _elevenlabs_stock_cache.get()
@@ -1889,7 +1892,7 @@ async def generate_elevenlabs_speech(
         raise HTTPException(status_code=404, detail="Voice not found")
 
     if not config.ELEVENLABS_API_KEY:
-        raise HTTPException(status_code=400, detail="ElevenLabs API key not configured")
+        raise HTTPException(status_code=503, detail="음성 기능을 사용할 수 없어요")
 
     if not 0.5 <= speed <= 1.8:
         raise HTTPException(status_code=400, detail=f"speed must be in [0.5, 1.8], got {speed}")
@@ -1937,10 +1940,10 @@ async def generate_elevenlabs_speech(
         return result
     except ElevenLabsQuotaExceeded as e:
         logger.warning(f"ElevenLabs quota exceeded: {e}")
-        raise HTTPException(status_code=402, detail=f"ElevenLabs 크레딧이 부족합니다. {e}")
+        raise HTTPException(status_code=402, detail="음성 합성 한도에 도달했어요")
     except ElevenLabsAPIError as e:
         logger.error(f"ElevenLabs API error: {e}")
-        raise HTTPException(status_code=502, detail=f"ElevenLabs 호출 실패: {e}")
+        raise HTTPException(status_code=502, detail="음성 합성에 실패했어요. 잠시 후 다시 시도해주세요")
     except Exception as e:
         logger.error(f"ElevenLabs TTS failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -1966,7 +1969,7 @@ async def clone_voice(
     """
     user = auth_module.get_request_user(request)
     if not config.ELEVENLABS_API_KEY:
-        raise HTTPException(status_code=400, detail="ElevenLabs API key not configured")
+        raise HTTPException(status_code=503, detail="음성 기능을 사용할 수 없어요")
 
     ext = os.path.splitext(file.filename or "")[1] or ".wav"
     fd, ref_tmp = tempfile.mkstemp(suffix=ext, dir=_tempfile_dir())
@@ -2047,7 +2050,7 @@ async def delete_elevenlabs_voice(voice_id: str, request: Request):
         raise HTTPException(status_code=404, detail="Voice not found")
 
     if not config.ELEVENLABS_API_KEY:
-        raise HTTPException(status_code=400, detail="ElevenLabs API key not configured")
+        raise HTTPException(status_code=503, detail="음성 기능을 사용할 수 없어요")
 
     from modules.elevenlabs_tts import ElevenLabsTTS
     tts = ElevenLabsTTS(api_key=config.ELEVENLABS_API_KEY)
@@ -2056,9 +2059,9 @@ async def delete_elevenlabs_voice(voice_id: str, request: Request):
         ok = await loop.run_in_executor(None, lambda: tts.delete_voice(voice_id))
     except Exception as e:
         logger.warning("ElevenLabs delete failed for %s: %s", voice_id, e)
-        raise HTTPException(status_code=502, detail="ElevenLabs delete failed; please retry")
+        raise HTTPException(status_code=502, detail="보이스 삭제에 실패했어요. 잠시 후 다시 시도해주세요")
     if not ok:
-        raise HTTPException(status_code=502, detail="ElevenLabs delete returned non-200")
+        raise HTTPException(status_code=502, detail="보이스 삭제에 실패했어요. 잠시 후 다시 시도해주세요")
 
     # Owner-scoped delete on the DB row. Admin override sends user_id of
     # the actual owner so the row matches.
@@ -2152,7 +2155,7 @@ async def generate_video(
         if not voice_id:
             raise HTTPException(status_code=400, detail="Voice ID required for ElevenLabs TTS")
         if not config.ELEVENLABS_API_KEY:
-            raise HTTPException(status_code=400, detail="ElevenLabs API key not configured")
+            raise HTTPException(status_code=503, detail="음성 기능을 사용할 수 없어요")
         if not await _validate_voice_access(user["user_id"], voice_id, is_admin=is_admin):
             raise HTTPException(status_code=404, detail="Voice not found")
 
@@ -2178,10 +2181,10 @@ async def generate_video(
             )
         except ElevenLabsQuotaExceeded as e:
             logger.warning(f"ElevenLabs quota exceeded: {e}")
-            raise HTTPException(status_code=402, detail=f"ElevenLabs 크레딧이 부족합니다. {e}")
+            raise HTTPException(status_code=402, detail="음성 합성 한도에 도달했어요")
         except ElevenLabsAPIError as e:
             logger.error(f"ElevenLabs API error: {e}")
-            raise HTTPException(status_code=502, detail=f"ElevenLabs 호출 실패: {e}")
+            raise HTTPException(status_code=502, detail="음성 합성에 실패했어요. 잠시 후 다시 시도해주세요")
         audio_source_label = f"elevenlabs:{voice_id}"
 
     elif audio_source == "upload":

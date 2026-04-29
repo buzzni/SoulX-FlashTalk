@@ -235,9 +235,7 @@ export function VoicePicker({ remoteVoices, loadError, onAfterDelete }: VoicePic
             <p className="m-0 leading-relaxed">
               {pendingDelete.name}
               <br />
-              <span className="text-muted-foreground">
-                ElevenLabs 계정에서도 함께 지워지며 되돌릴 수 없어요.
-              </span>
+              <span className="text-muted-foreground">되돌릴 수 없어요.</span>
             </p>
           ) : null
         }
