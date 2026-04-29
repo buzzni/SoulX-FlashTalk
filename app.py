@@ -557,7 +557,7 @@ def _upload_local_to_storage(
     cleanup_local: bool = True,
 ) -> dict:
     """Upload a generator's local output to storage; return the standard
-    response shape {filename, path, storage_key, url}. Deletes the local
+    response shape {filename, key, url}. Deletes the local
     source on success (cleanup_local=True default) to keep the LocalDisk
     staging dirs from growing unbounded — the canonical copy is in S3.
 
@@ -976,7 +976,7 @@ async def generate_video_task(
                                 "composites",
                                 cleanup_local=False,
                             )
-                            host_image_key_for_manifest = promoted.get("storage_key")
+                            host_image_key_for_manifest = promoted["key"]
                         except Exception as upload_err:
                             # Storage promotion is best-effort. If it fails the
                             # video still gets generated — manifest just won't
@@ -2229,12 +2229,8 @@ async def generate_video(
         except ElevenLabsAPIError as e:
             logger.error(f"ElevenLabs API error: {e}")
             raise HTTPException(status_code=502, detail="음성 합성에 실패했어요. 잠시 후 다시 시도해주세요")
-        # _upload_local_to_storage always returns a `storage_key` in
-        # outputs/<filename> form (or raises). No need for an absolute-path
-        # fallback — that would re-introduce the temp-path-in-queue bug
-        # we just fixed.
         promoted = _upload_local_to_storage(audio_local_path)
-        audio_path = promoted["storage_key"]
+        audio_path = promoted["key"]
         audio_source_label = f"elevenlabs:{voice_id}"
 
     elif audio_source == "upload":
