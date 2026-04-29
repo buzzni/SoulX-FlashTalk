@@ -534,6 +534,7 @@ export default function Step3Audio({ state, update }: Step3AudioProps) {
                   <VoicePicker
                     remoteVoices={voiceList.isLoading ? null : voiceList.voices}
                     loadError={voiceList.error}
+                    onAfterDelete={voiceList.refresh}
                   />
                 )}
                 {watchedSource === 'clone' && <VoiceCloner />}
