@@ -3319,6 +3319,11 @@ async def host_generate_stream(
                         )
                         evt["storage_key"] = extras["storage_key"]
                         evt["url"] = extras["url"]
+                        # record_batch persists storage_keys to DB —
+                        # swap the last entry so lifecycle bookkeeping
+                        # uses the bucket-prefixed key, not the local
+                        # disk path that S3 backend can't reverse-map.
+                        saved_paths[-1] = extras["storage_key"]
                     except Exception as ue:
                         logger.warning(
                             "host stream storage promote failed for %s: %s",
@@ -3443,7 +3448,15 @@ async def composite_generate(
         from modules.repositories import studio_host_repo as host_repo
         user = auth_module.get_request_user(request)
         user_id = user["user_id"]
-        saved_paths = [c.get("path") for c in (result.get("candidates") or []) if c.get("path")]
+        # Prefer storage_key (PR S3+ contract); fall back to path for
+        # candidates whose promote_to_storage failed (the legacy
+        # absolute-path branch in record_batch will pick those up on
+        # LocalDisk and silently miss them on S3).
+        saved_paths = [
+            c.get("storage_key") or c.get("path")
+            for c in (result.get("candidates") or [])
+            if c.get("storage_key") or c.get("path")
+        ]
         if saved_paths:
             try:
                 batch_id = f"batch_{uuid.uuid4().hex[:8]}"
@@ -3546,6 +3559,9 @@ async def composite_generate_stream(
                         )
                         evt["storage_key"] = extras["storage_key"]
                         evt["url"] = extras["url"]
+                        # Same swap as host stream — record_batch wants
+                        # storage_keys, not absolute paths, post-cutover.
+                        saved_paths[-1] = extras["storage_key"]
                     except Exception as ue:
                         logger.warning(
                             "composite stream storage promote failed for %s: %s",
