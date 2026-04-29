@@ -273,13 +273,22 @@ export default function ResultPage() {
       (typeof metaVoice.script === 'string' && metaVoice.script) ||
       (typeof params.script_text === 'string' ? params.script_text : '');
     const paragraphs = scriptText ? splitScript(scriptText) : [];
-    const audioPath = typeof params.audio_path === 'string' ? params.audio_path : '';
+    // Audio key resolution. Pre-fix manifests stored a temp absolute path
+    // in `audio_path` (the worker shadowed the storage_key with the
+    // download-to-temp result). Those rows can't be rehydrated as a real
+    // asset — feeding `/opt/.../temp/...wav` back into a dispatch would
+    // 404. Validate the prefix and only keep storage-shaped values; anything
+    // else falls through to a blank voice slice so step 3 lands in idle
+    // state and the user re-clicks "음성 만들기".
+    const looksLikeStorageKey = (s: unknown): s is string =>
+      typeof s === 'string' && /^(outputs|uploads|examples)\//.test(s);
+    const audioKey =
+      (typeof params.audio_key === 'string' && params.audio_key) ||
+      (looksLikeStorageKey(params.audio_path) ? params.audio_path : '');
     const audioUrl = typeof params.audio_url === 'string' ? params.audio_url : '';
-    const audioName = audioPath ? (audioPath.split('/').pop() ?? '') : '';
-    // audio_url comes from backend /api/results enrichment (PR-1).
-    // Fallback empty string on a stale row — element shows empty state.
-    const audioAsset = audioPath
-      ? { key: audioPath, url: audioUrl, name: audioName }
+    const audioName = audioKey ? (audioKey.split('/').pop() ?? '') : '';
+    const audioAsset = audioKey
+      ? { key: audioKey, url: audioUrl, name: audioName }
       : null;
     const voiceSource = strOr(metaVoice.source, 'tts');
     const advancedFromMeta = {
