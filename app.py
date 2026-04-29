@@ -271,6 +271,76 @@ def _path_field_for_backwards_compat(key: str) -> str:
     return _storage.legacy_path_for(key)
 
 
+def _input_path_or_key_valid(value: str | None) -> bool:
+    """Existence check that handles both legacy absolute paths and PR
+    S3+ storage_keys.
+
+    storage_key form: head segment in `{uploads, outputs, examples}`.
+    Returns True after `validate_key` has accepted the shape — the
+    worker (`_resolve_input_to_local`) does the real existence check
+    via `media_store.download_to` and fails-fast if the object is
+    missing. Endpoint-level `os.path.exists` would always return False
+    on a relative path like `uploads/host_xxx.png` and cause `/api/generate`
+    to silently fall back to `DEFAULT_HOST_IMAGE` — that was the C9
+    BLOCKER bug cc Plan agent caught.
+
+    absolute path form: standard `os.path.exists`.
+    """
+    if not value:
+        return False
+    head, _, _ = value.partition("/")
+    if head in ("uploads", "outputs", "examples"):
+        return True  # shape valid; worker validates existence on download
+    return os.path.exists(value)
+
+
+def _cleanup_input_tempfiles(paths: list[str]) -> None:
+    """Unlink the temp files `_resolve_input_to_local` created.
+
+    Errors are swallowed (with a debug log) — the OS will GC the temp
+    dir eventually anyway, and a failed unlink shouldn't poison the
+    task's success/failure result."""
+    for p in paths:
+        try:
+            os.unlink(p)
+        except OSError as e:
+            logger.debug("input tempfile cleanup skipped %s: %s", p, e)
+
+
+def _resolve_input_to_local(value: str | None, cleanup_list: list) -> str | None:
+    """Resolve a generate-task input (host_image / audio_path / etc.)
+    to a local filesystem path the GPU pipeline can consume.
+
+    Accepts both shapes the frontend may send:
+
+      * storage_key form (`uploads/host_xxx.png`, `outputs/...`,
+        `examples/...`) — downloads to a tempfile under config.TEMP_DIR
+        and appends the tempfile path to `cleanup_list`. The caller MUST
+        unlink everything in `cleanup_list` only after every subprocess
+        that uses these paths has finished (review-findings #C7) — the
+        S3 backend's own `open_local()` ctx unlinks on exit, so we
+        manage temp lifetime manually here to keep the file alive across
+        torchrun + ffmpeg + apply_hybrid.
+
+      * absolute filesystem path (legacy) — returned as-is. `safe_input_value`
+        on the API edge has already validated it's inside SAFE_ROOTS.
+
+    `None` / empty value passes through as `None`.
+    """
+    if not value:
+        return None
+    head, _, _ = value.partition("/")
+    if head not in ("uploads", "outputs", "examples"):
+        return value
+    from modules import storage as _storage
+    suffix = Path(value).suffix
+    fd, tmp = tempfile.mkstemp(prefix="job-input-", suffix=suffix, dir=_tempfile_dir())
+    os.close(fd)
+    _storage.media_store.download_to(value, Path(tmp))
+    cleanup_list.append(tmp)
+    return tmp
+
+
 def _tempfile_dir() -> str | None:
     """Return config.TEMP_DIR for tempfile.mkstemp(dir=...) so we don't
     depend on /tmp (which is often a small tmpfs partition that fills
@@ -731,6 +801,31 @@ async def generate_video_task(
 
     start_time = time.time()
 
+    # Resolve storage_key inputs to local files. The cleanup loop at
+    # the bottom of the function unlinks temp files only after every
+    # subprocess (torchrun / ffmpeg / apply_hybrid) has finished
+    # reading them — this is the contract review-findings #C7 wanted
+    # the S3 backend's open_local() to honour but couldn't, so we
+    # manage temp lifetime manually here. The except branch below
+    # also runs cleanup before re-raising, so an early failure still
+    # doesn't leak the tempfiles.
+    #
+    # Each download is run via `asyncio.to_thread` so a multi-MB
+    # audio fetch from S3 doesn't block the event loop while other
+    # SSE / status / queue requests wait.
+    input_cleanup: list[str] = []
+    host_image = await asyncio.to_thread(
+        _resolve_input_to_local, host_image, input_cleanup
+    )
+    audio_path = await asyncio.to_thread(
+        _resolve_input_to_local, audio_path, input_cleanup
+    )
+    if reference_image_paths:
+        reference_image_paths = [
+            await asyncio.to_thread(_resolve_input_to_local, p, input_cleanup)
+            for p in reference_image_paths
+        ]
+
     async with pipeline_lock:
         logger.info(f"Task {task_id} acquired lock, starting generation...")
 
@@ -1080,6 +1175,13 @@ async def generate_video_task(
             except Exception:
                 pass
 
+            # Cleanup input tempfiles (S3-downloaded host_image / audio).
+            # All subprocesses are guaranteed done by the time we reach
+            # this point: torchrun returned, ffmpeg merged, apply_hybrid
+            # finished. Safe to unlink. The except branch below also
+            # cleans up before re-raising.
+            _cleanup_input_tempfiles(input_cleanup)
+
         except Exception as e:
             logger.error(f"Task {task_id} failed: {e}")
             import traceback
@@ -1128,6 +1230,12 @@ async def generate_video_task(
                     torch.cuda.empty_cache()
             except Exception:
                 pass
+
+            # Cleanup input tempfiles before re-raising — same
+            # invariant as the success path: every subprocess has
+            # already returned by the time we enter the except block,
+            # so unlinking is safe.
+            _cleanup_input_tempfiles(input_cleanup)
 
             # Re-raise so the queue worker's outer handler records status="error"
             # in task_queue.json. Without this, swallowed exceptions looked like
@@ -1758,24 +1866,32 @@ async def generate_video(
     # manifest upsert path (decision #9: silent coerce on miss/cross-user).
     playlist_id: Optional[str] = Form(None),
 ):
-    """Generate video from host image + audio"""
-    from utils.security import safe_upload_path
+    """Generate video from host image + audio.
+
+    PR S3+ C9: `host_image_path`/`audio_path`/`reference_image_paths`
+    each accept either a legacy absolute filesystem path (pre-cutover)
+    or a bucket-prefixed storage_key (post-C9 frontend, post-cutover).
+    `safe_input_value` validates both shapes; the worker
+    (generate_video_task) downloads storage_keys to a temp file and
+    cleans them up at end of task.
+    """
+    from utils.security import safe_input_value
 
     # Resolve + guard host image (body-field path traversal fix)
     if host_image_path:
         try:
-            host_image_path = safe_upload_path(host_image_path)
+            host_image_path = safe_input_value(host_image_path)
         except HTTPException:
             host_image_path = None
-    if not host_image_path or not os.path.exists(host_image_path):
+    if not _input_path_or_key_valid(host_image_path):
         host_image_path = config.DEFAULT_HOST_IMAGE
-    if not os.path.exists(host_image_path):
+    if not _input_path_or_key_valid(host_image_path):
         raise HTTPException(status_code=404, detail=f"Host image not found: {host_image_path}")
 
     # Guard reference_image_paths too
     try:
         _ref_list = json.loads(reference_image_paths) if reference_image_paths else []
-        reference_image_paths = json.dumps([safe_upload_path(p) for p in _ref_list])
+        reference_image_paths = json.dumps([safe_input_value(p) for p in _ref_list])
     except (json.JSONDecodeError, HTTPException) as e:
         if isinstance(e, HTTPException):
             raise
@@ -1823,12 +1939,12 @@ async def generate_video(
         # Guard body-field audio_path (was: attacker could set audio_path="/etc/passwd")
         if audio_path:
             try:
-                audio_path = safe_upload_path(audio_path)
+                audio_path = safe_input_value(audio_path)
             except HTTPException:
                 audio_path = None
-        if not audio_path or not os.path.exists(audio_path):
+        if not _input_path_or_key_valid(audio_path):
             audio_path = config.DEFAULT_AUDIO
-        if not os.path.exists(audio_path):
+        if not _input_path_or_key_valid(audio_path):
             raise HTTPException(status_code=404, detail="Audio file not found")
     else:
         raise HTTPException(status_code=400, detail=f"Invalid audio_source: {audio_source}")

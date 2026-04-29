@@ -12,6 +12,38 @@ from fastapi import HTTPException
 import config
 
 
+def safe_input_value(value: str, roots: Optional[Iterable[str]] = None) -> str:
+    """Accept either an absolute filesystem path (legacy) or a
+    bucket-prefixed storage_key (PR S3+) and return it unchanged after
+    validation.
+
+    Storage_key form (`uploads/...`, `outputs/...`, `examples/...`):
+        validates shape via `modules.storage.validate_key`. Resolution
+        to a real local Path happens later, inside an `open_local()`
+        ctx in the worker so the file lifetime tracks the subprocess
+        (review-findings #C7).
+
+    Absolute path form (legacy frontend, pre-C9 cutover):
+        falls through to `safe_upload_path` — same SAFE_ROOTS guard
+        as before.
+
+    Raises HTTPException(400) on traversal / unknown bucket / unsafe
+    path.
+    """
+    if not value:
+        raise HTTPException(status_code=400, detail="Empty path")
+    head, _, _ = value.partition("/")
+    if head in ("uploads", "outputs", "examples"):
+        # storage_key — validate shape, return as-is.
+        from modules.storage import validate_key
+        try:
+            validate_key(value)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=f"Invalid storage_key: {e}")
+        return value
+    return safe_upload_path(value, roots=roots)
+
+
 def safe_upload_path(path: str, roots: Optional[Iterable[str]] = None) -> str:
     """Return realpath if it resolves inside one of the allowed roots.
 
