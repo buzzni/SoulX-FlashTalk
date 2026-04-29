@@ -43,12 +43,16 @@ export function discardDraft(): void {
 // this task this session".
 // ────────────────────────────────────────────────────────────────────
 
-const DISPATCHED_KEY = storageKey('justDispatched');
+// These resolve through storageKey() at *call time*, not module init,
+// because userScope changes after module load (login/logout). If we
+// captured them as module constants the keys would freeze on the
+// pre-login (global) scope and never re-bind for the logged-in user.
+const dispatchedKey = () => storageKey('justDispatched');
 // Stores {taskId, signature, at} so /render-dispatch can detect a
 // duplicate POST (same wizard intent + still-live task) on refresh /
-// fast double-click / back-and-click. The legacy DISPATCHED_KEY remains
-// in lockstep so clearDraftIfDispatched stays a one-liner.
-const DISPATCH_SNAPSHOT_KEY = storageKey('dispatchSnapshot');
+// fast double-click / back-and-click. Lives in lockstep with
+// dispatchedKey() so clearDraftIfDispatched stays a one-liner.
+const dispatchSnapshotKey = () => storageKey('dispatchSnapshot');
 
 export interface DispatchSnapshot {
   taskId: string;
@@ -61,14 +65,14 @@ export function markDispatched(
   options?: { signature?: string },
 ): void {
   try {
-    sessionStorage.setItem(DISPATCHED_KEY, taskId);
+    sessionStorage.setItem(dispatchedKey(), taskId);
     if (options?.signature) {
       const snap: DispatchSnapshot = {
         taskId,
         signature: options.signature,
         at: Date.now(),
       };
-      sessionStorage.setItem(DISPATCH_SNAPSHOT_KEY, JSON.stringify(snap));
+      sessionStorage.setItem(dispatchSnapshotKey(), JSON.stringify(snap));
     }
   } catch {
     /* sessionStorage unavailable — auto-reset just won't trigger */
@@ -77,7 +81,7 @@ export function markDispatched(
 
 export function getDispatchSnapshot(): DispatchSnapshot | null {
   try {
-    const raw = sessionStorage.getItem(DISPATCH_SNAPSHOT_KEY);
+    const raw = sessionStorage.getItem(dispatchSnapshotKey());
     if (!raw) return null;
     const parsed: unknown = JSON.parse(raw);
     if (!parsed || typeof parsed !== 'object') return null;
@@ -95,7 +99,7 @@ export function getDispatchSnapshot(): DispatchSnapshot | null {
 
 export function clearDispatchSnapshot(): void {
   try {
-    sessionStorage.removeItem(DISPATCH_SNAPSHOT_KEY);
+    sessionStorage.removeItem(dispatchSnapshotKey());
   } catch {
     /* sessionStorage unavailable */
   }
@@ -106,7 +110,7 @@ export function clearDispatchSnapshot(): void {
 // would see snapshot=null and fire a *second* /api/generate (the original
 // snapshot-based gate only protects after task_id is known). 60s TTL so
 // a crashed dispatch doesn't lock the next session permanently.
-const DISPATCH_INFLIGHT_KEY = storageKey('dispatchInflight');
+const dispatchInflightKey = () => storageKey('dispatchInflight');
 const INFLIGHT_TTL_MS = 60_000;
 
 export interface DispatchInflight {
@@ -117,7 +121,7 @@ export interface DispatchInflight {
 export function setDispatchInflight(signature: string): void {
   try {
     const lock: DispatchInflight = { signature, at: Date.now() };
-    sessionStorage.setItem(DISPATCH_INFLIGHT_KEY, JSON.stringify(lock));
+    sessionStorage.setItem(dispatchInflightKey(), JSON.stringify(lock));
   } catch {
     /* sessionStorage unavailable */
   }
@@ -125,14 +129,14 @@ export function setDispatchInflight(signature: string): void {
 
 export function getDispatchInflight(): DispatchInflight | null {
   try {
-    const raw = sessionStorage.getItem(DISPATCH_INFLIGHT_KEY);
+    const raw = sessionStorage.getItem(dispatchInflightKey());
     if (!raw) return null;
     const parsed: unknown = JSON.parse(raw);
     if (!parsed || typeof parsed !== 'object') return null;
     const obj = parsed as Record<string, unknown>;
     if (typeof obj.signature !== 'string' || typeof obj.at !== 'number') return null;
     if (Date.now() - obj.at > INFLIGHT_TTL_MS) {
-      sessionStorage.removeItem(DISPATCH_INFLIGHT_KEY);
+      sessionStorage.removeItem(dispatchInflightKey());
       return null;
     }
     return { signature: obj.signature, at: obj.at };
@@ -143,7 +147,7 @@ export function getDispatchInflight(): DispatchInflight | null {
 
 export function clearDispatchInflight(): void {
   try {
-    sessionStorage.removeItem(DISPATCH_INFLIGHT_KEY);
+    sessionStorage.removeItem(dispatchInflightKey());
   } catch {
     /* sessionStorage unavailable */
   }
@@ -155,10 +159,10 @@ export function clearDispatchInflight(): void {
  * tabs and re-attach flows both clean up correctly. */
 export function clearDraftIfDispatched(completedTaskId: string): void {
   try {
-    if (sessionStorage.getItem(DISPATCHED_KEY) === completedTaskId) {
+    if (sessionStorage.getItem(dispatchedKey()) === completedTaskId) {
       useWizardStore.getState().reset();
-      sessionStorage.removeItem(DISPATCHED_KEY);
-      sessionStorage.removeItem(DISPATCH_SNAPSHOT_KEY);
+      sessionStorage.removeItem(dispatchedKey());
+      sessionStorage.removeItem(dispatchSnapshotKey());
     }
   } catch {
     /* sessionStorage unavailable */

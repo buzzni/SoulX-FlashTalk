@@ -1,9 +1,9 @@
 /**
  * theme — light/dark mode toggle stored in localStorage.
  *
- * Honors system preference on first visit (`prefers-color-scheme: dark`),
- * then user choice persists. Uses a tiny external store pattern so any
- * component can `useSyncExternalStore`-subscribe to changes.
+ * Defaults to light on first visit; user choice persists. Uses a tiny
+ * external store pattern so any component can `useSyncExternalStore`-subscribe
+ * to changes.
  */
 
 type Theme = 'light' | 'dark';
@@ -18,8 +18,6 @@ function readInitial(): Theme {
   } catch {
     /* ignore */
   }
-  // Fall through to system pref
-  if (window.matchMedia?.('(prefers-color-scheme: dark)').matches) return 'dark';
   return 'light';
 }
 

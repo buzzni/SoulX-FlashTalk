@@ -192,6 +192,22 @@ export default function Step3Audio({ state, update }: Step3AudioProps) {
   const tts = useTTSGeneration();
   const cloner = useVoiceClone();
   const audioUpload = useUploadReferenceImage(uploadAudio);
+
+  // After PR2's voice scoping, a hydrated wizard draft may carry a
+  // voiceId that the current user can no longer access (e.g. previous
+  // user's clone, or a voice deleted server-side). Once the voice list
+  // arrives we drop any selection that isn't represented — UI then
+  // shows "보이스를 골라주세요" instead of letting Step 3 look valid
+  // and 404-ing at generate time. Still loading → don't touch.
+  useEffect(() => {
+    if (source !== 'tts' || !voiceId || voiceList.isLoading) return;
+    const exists = voiceList.voices.some((v) => v.voice_id === voiceId);
+    if (!exists) {
+      setVoice((prev) => (prev.source === 'tts'
+        ? { ...prev, voiceId: null, voiceName: '' }
+        : prev));
+    }
+  }, [source, voiceId, voiceList.isLoading, voiceList.voices, setVoice]);
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [uploadErrorMsg, setUploadErrorMsg] = useState<string | null>(null);

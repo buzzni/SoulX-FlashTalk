@@ -13,13 +13,17 @@ import { fetchJSON } from '../api/http';
 import { schemas } from '../api/schemas-generated';
 import { getUser, logout, subscribe } from '../stores/authStore';
 import { getTheme, subscribeTheme, setTheme } from '../lib/theme';
+import { storageKey } from '../stores/storageKey';
 import { cn } from '@/lib/utils';
 
-const NOTIFY_KEY = 'showhost.notify.v1';
+// User-scoped: storageKey('notify.enabled') resolves to
+// 'showhost.notify.enabled.v1.<user_id>' so each user keeps their own
+// preference. Logout clears it via allOwnedStorageKeys() purge.
+const notifyKey = () => storageKey('notify.enabled');
 
 function readNotify(): boolean {
   try {
-    return localStorage.getItem(NOTIFY_KEY) !== 'off';
+    return localStorage.getItem(notifyKey()) !== 'off';
   } catch {
     return true;
   }
@@ -61,7 +65,7 @@ export function MyPage() {
     const next = !notify;
     setNotify(next);
     try {
-      localStorage.setItem(NOTIFY_KEY, next ? 'on' : 'off');
+      localStorage.setItem(notifyKey(), next ? 'on' : 'off');
     } catch {
       /* ignore */
     }
