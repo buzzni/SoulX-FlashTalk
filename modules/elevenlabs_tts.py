@@ -227,10 +227,14 @@ class ElevenLabsTTS:
                 return voice_id
 
     def delete_voice(self, voice_id: str) -> bool:
-        """Delete a cloned voice"""
+        """Delete a cloned voice. Treats 404 as success — if the voice is
+        already gone upstream (manual ElevenLabs UI delete, or a prior
+        partial delete from us), the desired end state is already reached
+        and our DB cleanup should proceed. Without this, an orphan DB row
+        produces a permanent 502 loop with no UI path to recover."""
         with httpx.Client(timeout=30) as client:
             resp = client.delete(
                 f"{ELEVENLABS_BASE_URL}/voices/{voice_id}",
                 headers=self.headers,
             )
-            return resp.status_code == 200
+            return resp.status_code in (200, 404)

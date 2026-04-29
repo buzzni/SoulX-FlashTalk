@@ -54,12 +54,16 @@ async def add(
     labels: Optional[dict] = None,
     category: str = "cloned",
 ) -> dict:
-    """Persist a voice for a user. Idempotent on (voice_id) — re-clone with
-    the same voice_id refreshes name/labels but keeps created_at and the
-    original owner.
+    """Persist a voice for a user. Idempotent on (voice_id) — re-call with
+    the same voice_id refreshes name/description/labels and preserves
+    created_at.
 
-    Per-user clones get unique ElevenLabs voice_ids, so the unique index on
-    voice_id is correct: a voice can't switch owners by accident.
+    Ownership note: `$set` includes `user_id`, so calling add() with the
+    same voice_id from a different user_id transfers the row (see
+    test_voice_id_unique_across_users). In practice this is unreachable
+    because ElevenLabs assigns globally unique voice_ids per clone — our
+    users never share a voice_id. The unique index on voice_id enforces
+    the invariant.
     """
     update = {
         "user_id": user_id,

@@ -101,12 +101,15 @@ export function VoicePicker({ remoteVoices, loadError, onAfterDelete }: VoicePic
       // ids; this is the immediate-response path for the row the
       // user just acted on.
       if (selectedVoiceId === voice.id) {
+        // Server-driven cleanup, not a user edit — keep the form non-dirty
+        // so any unsaved-changes prompt doesn't fire on a deletion the user
+        // didn't author.
         setValue('voice.voiceId' as const, null, {
-          shouldDirty: true,
+          shouldDirty: false,
           shouldValidate: true,
         });
         setValue('voice.voiceName' as const, null, {
-          shouldDirty: true,
+          shouldDirty: false,
           shouldValidate: true,
         });
       }

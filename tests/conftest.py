@@ -71,7 +71,7 @@ def _bypass_studio_auth(monkeypatch, request):
     pre = MongoClient("mongodb://localhost:27017", serverSelectionTimeoutMS=2000)
     test_db = pre[_test_db_name()]
     for coll in test_db.list_collection_names():
-        if coll.startswith("studio_") or coll == "users":
+        if coll.startswith("studio_") or coll == "users" or coll == "elevenlabs_voices":
             test_db[coll].drop()
     pre.close()
 
