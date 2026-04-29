@@ -908,6 +908,16 @@ async def generate_video_task(
     # Each download is run via `asyncio.to_thread` so a multi-MB
     # audio fetch from S3 doesn't block the event loop while other
     # SSE / status / queue requests wait.
+    # Capture the original storage_key inputs BEFORE _resolve_input_to_local
+    # shadows the names with local fs paths. The manifest must record
+    # `outputs/...` style storage keys so the result page can re-mint
+    # presigned URLs at read time. If we persist the local temp paths we
+    # downloaded for inference, the manifest is unusable on the SPA side
+    # and `_normalize_to_storage_key` returns None.
+    host_image_key_for_manifest: Optional[str] = host_image
+    audio_key_for_manifest: Optional[str] = audio_path
+    ref_paths_keys_for_manifest: list[str] = list(reference_image_paths or [])
+
     input_cleanup: list[str] = []
     host_image = await asyncio.to_thread(
         _resolve_input_to_local, host_image, input_cleanup
@@ -950,11 +960,32 @@ async def generate_video_task(
                             output_dir=os.path.join(config.OUTPUTS_DIR, "composites"),
                         )
                     )
-                    # Use the composed image as the host image for FlashTalk
+                    # Use the composed image as the host image for FlashTalk.
+                    # Promote it into storage too so the manifest records the
+                    # actual frame FlashTalk animated (codex finding #3 — without
+                    # this, manifest.params.host_image points at the original
+                    # pre-Gemini composite while the real frame lives only on
+                    # the worker's local disk and is unrecoverable later).
                     composed_path = results.get("full") or results.get(0)
                     if composed_path and os.path.exists(composed_path):
                         host_image = composed_path
                         logger.info(f"Gemini background applied: {composed_path}")
+                        try:
+                            promoted = _upload_local_to_storage(
+                                composed_path,
+                                "composites",
+                                cleanup_local=False,
+                            )
+                            host_image_key_for_manifest = promoted.get("storage_key")
+                        except Exception as upload_err:
+                            # Storage promotion is best-effort. If it fails the
+                            # video still gets generated — manifest just won't
+                            # have the canonical composed_path key. Log and
+                            # carry on.
+                            logger.warning(
+                                "Failed to promote composed_path to storage: %s",
+                                upload_err,
+                            )
                     update_task(task_id, "compositing_bg", 0.08, "배경 생성 완료")
                 finally:
                     await loop.run_in_executor(None, release_models)
@@ -1219,8 +1250,13 @@ async def generate_video_task(
                 "video_bytes": video_bytes,
                 "video_filename": os.path.basename(output_path),
                 "params": {
-                    "host_image": host_image,
-                    "audio_path": audio_path,
+                    # Use the *original* storage_key inputs we captured before
+                    # _resolve_input_to_local downloaded them to temp paths.
+                    # Storing temp paths here breaks read-time URL re-minting
+                    # (`_normalize_to_storage_key` returns None on absolute
+                    # /opt/.../temp/... paths) and frontend rehydrate.
+                    "host_image": host_image_key_for_manifest,
+                    "audio_path": audio_key_for_manifest,
                     "audio_source_label": audio_source_label,
                     "prompt": prompt,
                     "seed": seed,
@@ -1229,7 +1265,7 @@ async def generate_video_task(
                     "resolution_requested": resolution,
                     "resolution_actual": f"{target_h}x{target_w}",
                     "scene_prompt": scene_prompt,
-                    "reference_image_paths": reference_image_paths or [],
+                    "reference_image_paths": ref_paths_keys_for_manifest,
                 },
                 "meta": meta,
                 "playlist_id": playlist_id,
@@ -1300,8 +1336,10 @@ async def generate_video_task(
                         status="error",
                         error=str(e),
                         params={
-                            "host_image": host_image,
-                            "audio_path": audio_path,
+                            # Storage keys, not the temp local paths
+                            # `_resolve_input_to_local` produced.
+                            "host_image": host_image_key_for_manifest,
+                            "audio_path": audio_key_for_manifest,
                             "audio_source_label": audio_source_label,
                             "prompt": prompt,
                             "seed": seed,
@@ -1309,7 +1347,7 @@ async def generate_video_task(
                             "script_text": script_text,
                             "resolution_requested": resolution,
                             "scene_prompt": scene_prompt,
-                            "reference_image_paths": reference_image_paths or [],
+                            "reference_image_paths": ref_paths_keys_for_manifest,
                         },
                         meta=meta,
                         playlist_id=playlist_id,
@@ -2159,19 +2197,25 @@ async def generate_video(
         if not await _validate_voice_access(user["user_id"], voice_id, is_admin=is_admin):
             raise HTTPException(status_code=404, detail="Voice not found")
 
-        # Generate TTS audio
+        # Generate TTS audio. Write to OUTPUTS_DIR (in SAFE_ROOTS) and
+        # promote into storage so the queue params receive an
+        # `outputs/...` storage_key, not a temp absolute path. Without
+        # this the manifest's `params.audio_path` ends up as
+        # `/opt/.../temp/tts_*.wav` which `_normalize_to_storage_key`
+        # can't recover (codex finding #6 — also protects cancel_task
+        # path which persists queue params on cancellation).
         from modules.elevenlabs_tts import ElevenLabsTTS, ElevenLabsQuotaExceeded, ElevenLabsAPIError
         tts = ElevenLabsTTS(
             api_key=config.ELEVENLABS_API_KEY,
             model_id=config.ELEVENLABS_OPTIONS["model_id"],
         )
         audio_filename = f"tts_{uuid.uuid4().hex[:8]}.wav"
-        audio_path = os.path.join(config.TEMP_DIR, audio_filename)
+        audio_local_path = os.path.join(config.OUTPUTS_DIR, audio_filename)
         try:
             tts.generate_speech(
                 text=script_text,
                 voice_id=voice_id,
-                output_path=audio_path,
+                output_path=audio_local_path,
                 stability=stability,
                 similarity_boost=similarity_boost,
                 style=style,
@@ -2185,6 +2229,8 @@ async def generate_video(
         except ElevenLabsAPIError as e:
             logger.error(f"ElevenLabs API error: {e}")
             raise HTTPException(status_code=502, detail="음성 합성에 실패했어요. 잠시 후 다시 시도해주세요")
+        promoted = _upload_local_to_storage(audio_local_path)
+        audio_path = promoted.get("storage_key") or audio_local_path
         audio_source_label = f"elevenlabs:{voice_id}"
 
     elif audio_source == "upload":
@@ -3025,10 +3071,14 @@ async def generate_conversation_endpoint(
 
 @app.get("/api/queue", response_model=QueueSnapshot)
 async def get_queue_status(request: Request):
-    """Get queue status scoped to the authenticated user (admin sees all)."""
+    """Get queue status scoped to the authenticated user.
+
+    Always filters by the caller's user_id — the queue panel is a
+    per-user "내 작업이 어디까지 갔나" view, not an admin dashboard.
+    Role is irrelevant here; admins/masters use their own queue too.
+    """
     user = auth_module.get_request_user(request)
-    scope = None if user.get("role") in ("admin", "master") else user["user_id"]
-    return await task_queue.get_status(user_id=scope)
+    return await task_queue.get_status(user_id=user["user_id"])
 
 
 @app.post("/api/tasks/{task_id}/retry")
@@ -3178,40 +3228,56 @@ def _media_url(value: Optional[str], *, expires_in: Optional[int] = None) -> str
 
 
 def _ensure_manifest_urls(doc: dict) -> dict:
-    """Lazily populate `url` fields on a result manifest.
+    """Mint fresh URLs on a result manifest at read time.
 
-    For rows that carry only a `key` (or legacy `path`/`storage_key`)
-    reference, populate the sibling `url` so the frontend can render
-    media without re-deriving anything. Idempotent: existing `url`
-    values pass through unchanged. Backfill (scripts/backfill_*.py)
-    rewrites the legacy field names; this helper handles read-time
-    URL minting (S3 presigned URLs need fresh TTLs on each render).
+    S3 presigned URLs carry a TTL (an hour by default). Manifests written
+    to studio_results store the URL that was fresh at dispatch time, but
+    by the time a user opens /result/:id more than an hour later the
+    stored URL 403s. This helper re-mints every URL field from its
+    storage_key on every read, so the frontend can render media without
+    knowing about TTLs.
 
-    Touches three locations:
-      - `meta.background.url` (canonical), accepts legacy `imageUrl` /
-        `uploadPath` / `storage_key` as fallback inputs
-      - `params.audio_url` (canonical), accepts legacy `audio_path` /
-        `audio_storage_key` as fallback inputs
-      - `meta.products[].url` (canonical), accepts legacy `path` /
-        `storage_key` as fallback inputs
+    Behaviour: when a key is present, the sibling `url` is *always*
+    overwritten with a freshly minted URL. We do not preserve stored
+    URLs even if they look intact — we cannot tell expired vs valid
+    without trying them, and a stale URL is worse than a fresh one.
+
+    Touches:
+      - `meta.background.url`, accepts legacy `imageUrl`/`uploadPath`/
+        `storage_key` as fallback key sources
+      - `meta.host.imageUrl` + `meta.host.url` (canonical for
+        ProvenanceCard + wizard variant), key from `selectedPath`/`key`
+      - `meta.composition.selectedUrl` + `meta.composition.url`, key
+        from `selectedPath`/`key`
+      - `params.audio_url`, accepts `audio_key`/`audio_storage_key`/
+        `audio_path` as fallback key sources
+      - `meta.products[].url`, accepts `key`/`storage_key`/`path`
+
+    Also populates `selectedPath` / `key` on host + composition when only
+    one of the two is present, since the SPA's rehydrate path reads
+    `selectedPath` while the wizard variant schema reads `key`.
+
+    NOTE on aliasing: this mutates `doc` in place. Today's callers are
+    Mongo find()/synthesize_from_queue, both of which return fresh
+    dicts. If a future result-repo cache is added, switch to
+    copy.deepcopy(doc) here so per-request presigned URLs don't leak
+    into cached objects.
     """
     meta = doc.get("meta") if isinstance(doc.get("meta"), dict) else {}
     params = doc.get("params") if isinstance(doc.get("params"), dict) else {}
 
     bg = meta.get("background") if isinstance(meta.get("background"), dict) else None
     if bg and bg.get("source") == "upload":
-        if not bg.get("url"):
-            bg_ref = (
-                bg.get("key")
-                or bg.get("storage_key")
-                or bg.get("uploadPath")
-                or bg.get("imageUrl")
-            )
-            if bg_ref:
-                url = _media_url(bg_ref)
-                if url:
-                    bg["url"] = url
-        # Promote `key` if missing (frontend canonical)
+        bg_ref = (
+            bg.get("key")
+            or bg.get("storage_key")
+            or bg.get("uploadPath")
+            or bg.get("imageUrl")
+        )
+        if bg_ref:
+            url = _media_url(bg_ref)
+            if url:
+                bg["url"] = url   # always overwrite (TTL re-mint)
         if not bg.get("key"):
             key = _normalize_to_storage_key(
                 bg.get("storage_key") or bg.get("uploadPath")
@@ -3219,33 +3285,73 @@ def _ensure_manifest_urls(doc: dict) -> dict:
             if key:
                 bg["key"] = key
 
+    host = meta.get("host") if isinstance(meta.get("host"), dict) else None
+    if host:
+        host_ref = (
+            host.get("selectedPath")
+            or host.get("key")
+            or host.get("storage_key")
+        )
+        if host_ref:
+            url = _media_url(host_ref)
+            if url:
+                host["imageUrl"] = url   # ProvenanceCard reads this
+                host["url"] = url         # wizard variant reads this
+            key = _normalize_to_storage_key(host_ref)
+            if key:
+                # Frontend rehydrate reads `selectedPath`; populate it
+                # from a key-only legacy row so the SPA can find it.
+                if not host.get("selectedPath"):
+                    host["selectedPath"] = key
+                if not host.get("key"):
+                    host["key"] = key
+
+    comp = meta.get("composition") if isinstance(meta.get("composition"), dict) else None
+    if comp:
+        comp_ref = (
+            comp.get("selectedPath")
+            or comp.get("key")
+            or comp.get("storage_key")
+        )
+        if comp_ref:
+            url = _media_url(comp_ref)
+            if url:
+                comp["selectedUrl"] = url
+                comp["url"] = url
+            key = _normalize_to_storage_key(comp_ref)
+            if key:
+                if not comp.get("selectedPath"):
+                    comp["selectedPath"] = key
+                if not comp.get("key"):
+                    comp["key"] = key
+
     audio_ref = (
         params.get("audio_key")
         or params.get("audio_storage_key")
         or params.get("audio_path")
     )
-    if audio_ref and not params.get("audio_url"):
+    if audio_ref:
         url = _media_url(audio_ref)
         if url:
-            params["audio_url"] = url
-    if audio_ref and not params.get("audio_key"):
-        key = _normalize_to_storage_key(audio_ref)
-        if key:
-            params["audio_key"] = key
+            params["audio_url"] = url   # always overwrite
+        if not params.get("audio_key"):
+            key = _normalize_to_storage_key(audio_ref)
+            if key:
+                params["audio_key"] = key
 
     products = meta.get("products") if isinstance(meta.get("products"), list) else []
     for p in products:
         if not isinstance(p, dict):
             continue
         p_ref = p.get("key") or p.get("storage_key") or p.get("path")
-        if p_ref and not p.get("url"):
+        if p_ref:
             url = _media_url(p_ref)
             if url:
-                p["url"] = url
-        if p_ref and not p.get("key"):
-            key = _normalize_to_storage_key(p_ref)
-            if key:
-                p["key"] = key
+                p["url"] = url   # always overwrite
+            if not p.get("key"):
+                key = _normalize_to_storage_key(p_ref)
+                if key:
+                    p["key"] = key
 
     return doc
 
