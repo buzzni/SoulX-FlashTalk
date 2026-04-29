@@ -152,14 +152,9 @@ async def generate_host_candidates(
             logger.warning("Host candidate seed=%s failed: %s", seed, res)
             errors.append(f"seed={seed}: {type(res).__name__}: {res}")
         elif res:
-            candidates.append({
-                "seed": seed,
-                "path": res,
-                # /api/files prepends a SAFE_ROOT (OUTPUTS_DIR here) — so the
-                # path must be relative to OUTPUTS_DIR, not PROJECT_ROOT, or
-                # we end up with "outputs/outputs/hosts/..." and a 404.
-                "url": f"/api/files/{os.path.relpath(res, config.OUTPUTS_DIR)}",
-            })
+            # url field gets populated by app.py:_upload_local_to_storage
+            # after this returns — generators no longer construct URLs.
+            candidates.append({"seed": seed, "path": res})
 
     if len(candidates) < min_success:
         raise RuntimeError(
@@ -265,11 +260,12 @@ async def stream_host_candidates(
             }
         elif path:
             success_count += 1
+            # url field gets populated by app.py:_upload_local_to_storage
+            # after this yields — stream consumers must wait for the swap.
             yield {
                 "type": "candidate",
                 "seed": seed,
                 "path": path,
-                "url": f"/api/files/{os.path.relpath(path, config.OUTPUTS_DIR)}",
                 "done": done_count,
                 "total": n,
             }

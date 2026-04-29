@@ -507,12 +507,15 @@ def _ffprobe_validate(video_path: str) -> None:
         raise RuntimeError(f"ffprobe timed out on {video_path}") from e
 
 
-def _upload_video_with_retry(local_path: str, key: str, *, attempts: int = 2) -> None:
+def _upload_video_with_retry(local_path: str, key: str, *, attempts: int = 2,
+                              cleanup_local: bool = True) -> None:
     """Upload `local_path` to `media_store` at `key` with `attempts`
-    outer retries. Each attempt wraps boto3's own standard-mode retry
-    chain (`config.S3_MAX_RETRY_ATTEMPTS`, default 3), so the worst
-    case is `attempts` × `S3_MAX_RETRY_ATTEMPTS` = 6 — matches plan
-    §1 #6 budget.
+    outer retries. On success, deletes the local file (cleanup_local=True
+    by default) — the canonical copy lives in S3 from now on.
+
+    Each attempt wraps boto3's own standard-mode retry chain
+    (`config.S3_MAX_RETRY_ATTEMPTS`, default 3), so the worst case is
+    `attempts` × `S3_MAX_RETRY_ATTEMPTS` = 6.
 
     Why a caller-side outer retry on top of boto3's: a single transient
     ClientError after a 5-minute GPU job shouldn't lose the work. The
@@ -524,6 +527,28 @@ def _upload_video_with_retry(local_path: str, key: str, *, attempts: int = 2) ->
     for attempt in range(1, attempts + 1):
         try:
             _storage.media_store.upload(Path(local_path), key)
+            if cleanup_local:
+                # On LocalDisk backend the upload is a same-file no-op
+                # (src.resolve() == dst.resolve()), so removing here would
+                # delete the canonical copy. Skip cleanup when src and the
+                # resolved key point at the same path.
+                same_file = False
+                try:
+                    resolved = _storage.media_store._validate_and_resolve(key)
+                    same_file = (
+                        resolved is not None
+                        and Path(local_path).resolve() == Path(resolved).resolve()
+                    )
+                except (AttributeError, ValueError):
+                    same_file = False
+                if not same_file:
+                    try:
+                        os.unlink(local_path)
+                    except OSError as e:
+                        logger.warning(
+                            "post-upload cleanup failed for %s: %s",
+                            local_path, e,
+                        )
             return
         except Exception as e:
             last_exc = e
@@ -542,37 +567,59 @@ def _upload_local_to_storage(
     bucket_subpath: str = "",
     *,
     with_sidecar: bool = False,
+    cleanup_local: bool = True,
 ) -> dict:
     """Upload a generator's local output to storage; return the standard
-    response shape {filename, path, storage_key, url}.
+    response shape {filename, path, storage_key, url}. Deletes the local
+    source on success (cleanup_local=True default) to keep the LocalDisk
+    staging dirs from growing unbounded — the canonical copy is in S3.
 
     On LocalDisk this is a same-file no-op (`upload()` short-circuits
-    when src.resolve() == dst.resolve()), so generators that write
-    directly into config.HOSTS_DIR / OUTPUTS_DIR keep working unchanged.
-    On S3 it actually uploads. The caller still owns `local_path` —
-    cleanup (or keeping it as a cache) is up to the caller.
+    when src.resolve() == dst.resolve()), so the cleanup branch detects
+    the same-file case and skips the unlink (otherwise we'd delete the
+    canonical copy on dev/CI).
 
     `bucket_subpath`: extra prefix under outputs/ (e.g. "hosts/saved",
     "composites"). Empty string places the file directly under outputs/.
 
     `with_sidecar`: if True and `<local_path>.meta.json` exists, also
-    upload it as `<key>.meta.json` so generator provenance (the
-    sidecar `image_compositor.write_generation_metadata` writes)
-    survives the move to S3. Sidecar upload failures are swallowed
-    with a warning — the main image is what the user actually sees,
-    so a broken provenance file shouldn't fail the request.
+    upload it as `<key>.meta.json` so generator provenance survives the
+    move to S3. Sidecar upload failures are swallowed with a warning —
+    the main image is what the user sees, so a broken provenance file
+    shouldn't fail the request.
     """
     from modules import storage as _storage
     basename = os.path.basename(local_path)
     key = f"outputs/{bucket_subpath}/{basename}" if bucket_subpath else f"outputs/{basename}"
     _storage.media_store.upload(Path(local_path), key)
-    if with_sidecar:
-        sidecar = local_path + ".meta.json"
-        if os.path.exists(sidecar):
-            try:
-                _storage.media_store.upload(Path(sidecar), key + ".meta.json")
-            except Exception as e:
-                logger.warning("sidecar upload failed for %s: %s", sidecar, e)
+    sidecar_local = local_path + ".meta.json"
+    if with_sidecar and os.path.exists(sidecar_local):
+        try:
+            _storage.media_store.upload(Path(sidecar_local), key + ".meta.json")
+        except Exception as e:
+            logger.warning("sidecar upload failed for %s: %s", sidecar_local, e)
+
+    if cleanup_local:
+        # Skip cleanup if the upload was a same-file no-op (LocalDisk
+        # backend) — otherwise we'd delete the canonical copy.
+        same_file = False
+        try:
+            resolved = _storage.media_store._validate_and_resolve(key)
+            same_file = (
+                resolved is not None
+                and Path(local_path).resolve() == Path(resolved).resolve()
+            )
+        except (AttributeError, ValueError):
+            same_file = False
+        if not same_file:
+            for stale in (local_path, sidecar_local):
+                if os.path.exists(stale):
+                    try:
+                        os.unlink(stale)
+                    except OSError as e:
+                        logger.warning(
+                            "post-upload cleanup failed for %s: %s", stale, e,
+                        )
     return {
         "filename": basename,
         "path": _path_field_for_backwards_compat(key),
@@ -910,11 +957,11 @@ async def generate_video_task(
                         None,
                         lambda: compose_agents_together(
                             host_image_paths=[host_image],
-                            bg_image_path=os.path.join(config.UPLOADS_DIR, "dummy"),
                             target_size=(target_h, target_w),
                             layout="single",
                             scene_prompt=scene_prompt,
                             reference_image_paths=ref_paths if ref_paths else None,
+                            output_dir=os.path.join(config.OUTPUTS_DIR, "composites"),
                         )
                     )
                     # Use the composed image as the host image for FlashTalk
@@ -1166,6 +1213,12 @@ async def generate_video_task(
             video_bytes = os.path.getsize(output_path)
             video_storage_key = f"outputs/{os.path.basename(output_path)}"
             _upload_video_with_retry(output_path, video_storage_key)
+            # Local mp4 is gone after upload (or never moved on LocalDisk
+            # backend's same-file no-op). Clear task_states output_path
+            # so /api/videos picks the storage_key redirect path instead
+            # of FileResponse'ing a vanished file.
+            if task_id in task_states:
+                task_states[task_id]["output_path"] = None
             manifest = {
                 "task_id": task_id,
                 "type": "generate",
@@ -1176,9 +1229,6 @@ async def generate_video_task(
                 "video_storage_key": video_storage_key,
                 # PR S3+ invariant: never store an absolute filesystem
                 # path. /api/videos handler reads video_storage_key.
-                # `task_states[task_id]["output_path"]` still holds the
-                # local file for the duration of this process — that
-                # serves the "currently rendering" preview path.
                 "video_path": None,
                 "video_bytes": video_bytes,
                 "video_filename": os.path.basename(output_path),
@@ -1659,7 +1709,6 @@ async def preview_composite_together(
                 None,
                 lambda: compose_agents_together(
                     host_image_paths=host_paths,
-                    bg_image_path=os.path.join(config.UPLOADS_DIR, "dummy"),
                     target_size=(target_h, target_w),
                     layout=layout,
                     scene_prompt=scene_prompt,
@@ -2219,31 +2268,24 @@ async def task_state_snapshot(task_id: str, request: Request):
 
 @app.api_route("/api/videos/{task_id}", methods=["GET", "HEAD"])
 async def get_video(task_id: str, request: Request, download: bool = False):
-    """Serve generated video.
+    """Serve generated video via S3 presigned URL.
 
-    Resolution order (post-PR S3+):
+    Resolution order:
       1. task_states[task_id]["output_path"] — the in-flight render's
-         local mp4 (preview while the task is still queued/running).
-         Always served via FileResponse; the worker hasn't uploaded yet.
-      2. studio_results.video_storage_key — the persisted manifest's
-         storage_key. On S3 backend → 302 redirect to a presigned GET
-         URL with TTL = S3_PRESIGN_TTL_VIDEO (6h, covers byte-range
-         seek sessions). On LocalDisk → FileResponse via
-         media_store.local_path_for resolution.
-      3. studio_results.video_path — legacy fallback for rows persisted
-         before C7 set video_path=None. Local file only.
+         local mp4 (worker hasn't uploaded yet). Served via FileResponse.
+      2. studio_results.video_storage_key — persisted manifest's
+         storage_key. HEAD returns S3 head_object headers; GET returns
+         a 302 to a presigned URL (TTL = S3_PRESIGN_TTL_VIDEO, 6h,
+         covers byte-range seek sessions).
 
-    HEAD: on S3 backend, fetches head_object and returns
-    Content-Length / ETag headers without redirecting (RenderDashboard
-    uses HEAD to pull file size without downloading).
-    `?download=true` triggers attachment disposition (LocalDisk: header
-    direct; S3: signed into presigned URL).
+    `?download=true` triggers attachment disposition (signed into the
+    presigned URL via ResponseContentDisposition).
     """
     is_head = request.method == "HEAD"
     from modules import storage as _storage
     from modules.repositories import studio_result_repo as _result_repo
 
-    # 1. In-flight task — always local file (uploaded only at end).
+    # 1. In-flight task — local mp4 the worker writes pre-upload.
     state = task_states.get(task_id)
     if state and state.get("output_path") and os.path.exists(state["output_path"]):
         headers = {}
@@ -2259,57 +2301,31 @@ async def get_video(task_id: str, request: Request, download: bool = False):
     if not doc:
         raise HTTPException(status_code=404, detail="Video not found")
 
-    # 2. storage_key path (post-C7 invariant for new rows).
+    # 2. storage_key — S3-backed canonical resolution.
     storage_key = doc.get("video_storage_key")
-    if storage_key:
-        if _is_s3_backend():
-            if is_head:
-                # HEAD: read head_object and return its headers — no
-                # redirect, since browsers running HEAD don't follow
-                # redirects to gather Content-Length.
-                try:
-                    info = _storage.media_store.head(storage_key)
-                except FileNotFoundError:
-                    raise HTTPException(status_code=404, detail="Video not found")
-                headers = {
-                    "Content-Length": str(info["ContentLength"]),
-                    "Accept-Ranges": "bytes",
-                }
-                if info.get("ETag"):
-                    headers["ETag"] = info["ETag"]
-                return Response(headers=headers, media_type="video/mp4")
-            # GET: 302 to presigned URL, signing in download_filename
-            # so Content-Disposition round-trips through the redirect.
-            download_name = (
-                f"video_{task_id}.mp4" if download else None
-            )
-            url = _storage.media_store.url_for(
-                storage_key,
-                expires_in=config.S3_PRESIGN_TTL_VIDEO,
-                download_filename=download_name,
-            )
-            return RedirectResponse(url, status_code=302)
-        # LocalDisk: resolve to absolute path and FileResponse.
+    if not storage_key:
+        raise HTTPException(status_code=404, detail="Video not found")
+
+    if is_head:
         try:
-            candidate = str(_storage.media_store._validate_and_resolve(storage_key))
-        except (ValueError, AttributeError):
-            candidate = None
-        if candidate and os.path.exists(candidate):
-            headers = {
-                "Content-Disposition": (
-                    f'attachment; filename="video_{task_id}.mp4"'
-                    if download else "inline"
-                )
-            }
-            return FileResponse(candidate, media_type="video/mp4", headers=headers)
+            info = _storage.media_store.head(storage_key)
+        except FileNotFoundError:
+            raise HTTPException(status_code=404, detail="Video not found")
+        headers = {
+            "Content-Length": str(info["ContentLength"]),
+            "Accept-Ranges": "bytes",
+        }
+        if info.get("ETag"):
+            headers["ETag"] = info["ETag"]
+        return Response(headers=headers, media_type="video/mp4")
 
-    # 3. Legacy fallback: video_path absolute path on disk.
-    legacy_path = doc.get("video_path")
-    if legacy_path and os.path.exists(legacy_path):
-        headers = {"Content-Disposition": "attachment" if download else "inline"}
-        return FileResponse(legacy_path, media_type="video/mp4", headers=headers)
-
-    raise HTTPException(status_code=404, detail="Video not found")
+    download_name = f"video_{task_id}.mp4" if download else None
+    url = _storage.media_store.url_for(
+        storage_key,
+        expires_in=config.S3_PRESIGN_TTL_VIDEO,
+        download_filename=download_name,
+    )
+    return RedirectResponse(url, status_code=302)
 
 
 _VALID_HISTORY_STATUSES = {"all", "completed", "error", "cancelled"}
@@ -2567,12 +2583,12 @@ async def generate_conversation_task(
                         host_paths = [a.face_image for a in agent_list]
                         composed = compose_agents_together(
                             host_image_paths=host_paths,
-                            bg_image_path=os.path.join(config.UPLOADS_DIR, "dummy"),
                             target_size=(target_h, target_w),
                             layout=layout,
                             scene_prompt=scene_prompt,
                             reference_image_paths=ref_paths if ref_paths else None,
                             multitalk=True,
+                            output_dir=os.path.join(config.OUTPUTS_DIR, "composites"),
                         )
                         result_full = composed.get("full")
                         release_models()
@@ -2587,11 +2603,11 @@ async def generate_conversation_task(
                         host_paths = [a.face_image for a in agent_list]
                         composed = compose_agents_together(
                             host_image_paths=host_paths,
-                            bg_image_path=os.path.join(config.UPLOADS_DIR, "dummy"),
                             target_size=(target_h, target_w),
                             layout=layout,
                             scene_prompt=scene_prompt,
                             reference_image_paths=ref_paths if ref_paths else None,
+                            output_dir=os.path.join(config.OUTPUTS_DIR, "composites"),
                         )
                         for i, agent in enumerate(agent_list):
                             if i in composed:
@@ -2688,6 +2704,8 @@ async def generate_conversation_task(
             video_bytes = os.path.getsize(output_path)
             video_storage_key = f"outputs/{os.path.basename(output_path)}"
             _upload_video_with_retry(output_path, video_storage_key)
+            if task_id in task_states:
+                task_states[task_id]["output_path"] = None
             manifest = {
                 "task_id": task_id,
                 "type": "conversation",
@@ -2907,21 +2925,13 @@ def _synthesize_result_from_queue(entry: dict) -> dict:
     params = entry.get("params", {}) or {}
     meta = params.get("meta")
 
-    # Best effort — find the output file by scanning OUTPUTS_DIR for the
-    # {task_id[:8]} suffix the writer uses. Missing file is fine, just 0.
+    # Synthesized manifests are pre-PR5 fallbacks: the queue entry has
+    # the task params but no manifest row exists yet. The video file
+    # itself lives in S3 once the worker uploaded; the redirect at
+    # /api/videos/{task_id} resolves it via in-flight task_states or
+    # studio_results, so we don't need to populate video_path here.
     video_path = None
     video_bytes = 0
-    try:
-        short = task_id[:8]
-        for name in os.listdir(config.OUTPUTS_DIR):
-            if name.endswith(".mp4") and short in name:
-                p = os.path.join(config.OUTPUTS_DIR, name)
-                if os.path.isfile(p):
-                    video_path = p
-                    video_bytes = os.path.getsize(p)
-                    break
-    except Exception:
-        pass
 
     # generation_time from queue timestamps when both are present
     gen_sec = None
@@ -3111,52 +3121,47 @@ async def get_result(task_id: str, request: Request):
 
 @app.get("/api/files/{filename:path}")
 async def get_file(filename: str, download_filename: Optional[str] = None):
-    """Serve files. Accepts both legacy (bucket-less) and PR3 storage_key forms.
+    """Serve files via storage_key (No PROJECT_ROOT fallback — Phase 0 Critical #1).
 
-    Examples:
-      /api/files/outputs/hosts/saved/x.png   ← PR3 storage_key
-      /api/files/hosts/saved/x.png           ← legacy (still resolves)
-      /api/files/ref_img_abc.png             ← legacy (probes UPLOADS)
+    Path must be a bucket-prefixed storage key (`outputs/...`,
+    `uploads/...`, `examples/...`). On S3 backend → 302 redirect to a
+    presigned GET URL. On LocalDisk (test/dev) → FileResponse via the
+    storage_key resolution.
 
-    `?download_filename=<name>` triggers a download response with the
-    given filename (S3 backend signs `ResponseContentDisposition` into
-    the presigned URL; LocalDisk sets the header directly).
+    `?download_filename=<name>` signs a Content-Disposition into the
+    response so the browser saves with the requested filename.
 
-    On S3 backend: 302 redirect to a presigned GET URL (TTL governed
-    by the storage layer). On LocalDisk: direct FileResponse — same
-    behaviour as before C10.
+    Bare-name probing (e.g. `/api/files/host_abc.png`) was removed —
+    those URLs only existed in pre-PR3 manifests and would 404 on S3
+    runtime regardless. Frontend now uses the manifest's `url` field
+    populated by `_ensure_manifest_urls`.
     """
     from utils.security import safe_upload_path
     from modules import storage as _storage
-    from modules.storage import resolve_legacy_or_keyed
 
-    # S3 backend: redirect bucket-prefixed keys directly. Legacy
-    # bucket-less paths fall back to the local probe (still useful
-    # during the cutover window when old manifests carry bare names).
-    if _is_s3_backend():
-        head, _, _ = filename.partition("/")
-        if head in ("outputs", "uploads", "examples"):
-            try:
-                url = _storage.media_store.url_for(
-                    filename,
-                    expires_in=config.S3_PRESIGN_TTL_IMAGE,
-                    download_filename=download_filename,
-                )
-            except ValueError as e:
-                # validate_key inside url_for rejects traversal
-                # (e.g. `outputs/../etc`) — surface as 400 instead of
-                # the generic 500 the unhandled exception would
-                # produce.
-                raise HTTPException(status_code=400, detail=str(e))
-            return RedirectResponse(url, status_code=302)
-        # Otherwise let the legacy resolver handle it (no S3 mapping
-        # for bucket-less keys; old manifests are LocalDisk-only).
-
-    resolved = resolve_legacy_or_keyed(filename)
-    if resolved is None:
+    head, _, _ = filename.partition("/")
+    if head not in ("outputs", "uploads", "examples"):
         raise HTTPException(status_code=404, detail="File not found")
-    # Defense in depth — confirm realpath stays inside a safe root even if
-    # the storage layer's traversal check is somehow bypassed.
+
+    if _is_s3_backend():
+        try:
+            url = _storage.media_store.url_for(
+                filename,
+                expires_in=config.S3_PRESIGN_TTL_IMAGE,
+                download_filename=download_filename,
+            )
+        except ValueError as e:
+            # validate_key inside url_for rejects traversal — surface as 400.
+            raise HTTPException(status_code=400, detail=str(e))
+        return RedirectResponse(url, status_code=302)
+
+    # LocalDisk path — only reached in tests/dev (S3 creds absent).
+    try:
+        resolved = _storage.media_store._validate_and_resolve(filename)
+    except (ValueError, AttributeError):
+        raise HTTPException(status_code=404, detail="File not found")
+    if not resolved or not os.path.exists(resolved):
+        raise HTTPException(status_code=404, detail="File not found")
     filepath = safe_upload_path(str(resolved))
 
     ext = os.path.splitext(filename)[1].lower()
@@ -3166,9 +3171,6 @@ async def get_file(filename: str, download_filename: Optional[str] = None):
     }
     headers = {}
     if download_filename:
-        # LocalDisk-side equivalent of the S3 presigned
-        # ResponseContentDisposition: same filename round-trips the
-        # frontend regardless of backend.
         from urllib.parse import quote
         safe = "".join(c for c in download_filename if c not in '"\r\n\\')
         headers["Content-Disposition"] = (

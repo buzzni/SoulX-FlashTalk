@@ -569,7 +569,6 @@ def _gemini_generate_scene(
 
 def compose_agents_together(
     host_image_paths: List[str],
-    bg_image_path: str,
     target_size: Tuple[int, int],
     layout: str = "split",
     scene_prompt: str = "",
@@ -586,21 +585,19 @@ def compose_agents_together(
 
     Args:
         host_image_paths: list of host image paths
-        bg_image_path: ignored (kept for API compatibility), prompt used instead
         target_size: (width, height) per agent output
         layout: "split", "switch", "pip"
         scene_prompt: description of the scene/background to generate
-        output_dir: where to write composed PNGs. None → derive from
-            bg_image_path's dir (legacy behaviour, usually UPLOADS_DIR).
-            PR S3+ callers should pass `OUTPUTS_DIR/composites` so
-            `media_store.upload(...)` sees a same-file no-op on
-            LocalDisk and the file lands in the right bucket on S3.
+        output_dir: where to write composed PNGs. Required — callers
+            pass `OUTPUTS_DIR/composites` so `media_store.upload(...)`
+            sees a same-file no-op on LocalDisk and the file lands in
+            the right bucket on S3.
 
     Returns:
         {agent_index: composed_image_path}
     """
     if output_dir is None:
-        output_dir = os.path.dirname(bg_image_path) if bg_image_path else "uploads"
+        raise ValueError("compose_agents_together requires output_dir")
     os.makedirs(output_dir, exist_ok=True)
     num_agents = len(host_image_paths)
 

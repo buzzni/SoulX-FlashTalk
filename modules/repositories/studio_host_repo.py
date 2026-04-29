@@ -177,26 +177,24 @@ async def record_batch(
 ) -> None:
     """Tag freshly generated candidates as draft + batch_id. Idempotent.
 
-    PR S3+ contract: `image_paths` accepts both shapes:
-
-      * Bucket-prefixed storage_keys (post-cutover, `outputs/hosts/saved/...`)
-        — used as-is.
-      * Legacy absolute disk paths — converted via the deprecated
-        `media_store.key_from_path()` (LocalDisk only; S3 raises
-        NotImplementedError so absolute paths are rejected at runtime
-        once cutover happens).
+    `image_paths` must be bucket-prefixed storage_keys
+    (`outputs/hosts/saved/...`, `outputs/composites/...`). Legacy
+    absolute paths are rejected — callers (host stream, composite
+    stream, host generate) all run image promotion through
+    `_upload_local_to_storage` before record_batch, so they have a
+    real storage_key to pass.
 
     extra_per_path, if given, maps the original input value → extra
     fields (model, prompt, seed, ...) to persist alongside the row.
     """
     for p in image_paths:
         head, _, _ = p.partition("/")
-        if head in ("outputs", "uploads", "examples"):
-            # already a storage_key
-            key = p
-        else:
-            # legacy absolute path — only works on LocalDisk backend.
-            key = storage_module.media_store.key_from_path(p)
+        if head not in ("outputs", "uploads", "examples"):
+            raise ValueError(
+                f"record_batch requires storage_key form (outputs/..., "
+                f"uploads/..., examples/...), got {p!r}"
+            )
+        key = p
         image_id = _image_id_from_path(p)
         extra = (extra_per_path or {}).get(p)
         await upsert_candidate(
