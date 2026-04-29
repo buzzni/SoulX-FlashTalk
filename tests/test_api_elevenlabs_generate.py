@@ -37,6 +37,15 @@ def client(monkeypatch, tmp_path):
 
     from fastapi.testclient import TestClient
     import app as app_module
+
+    # Voice ownership is now checked at /api/elevenlabs/generate. These tests
+    # exist to verify the audio file plumbing (write to OUTPUTS_DIR, return
+    # serveable URL), not the ownership rule — separate file covers that.
+    # Stub the helper to always pass so the tests stay focused.
+    async def _allow(user_id, voice_id, *, is_admin=False):
+        return True
+    monkeypatch.setattr(app_module, "_validate_voice_access", _allow)
+
     with TestClient(app_module.app) as c:
         yield c
 
@@ -91,8 +100,11 @@ def test_tts_rejects_missing_api_key(client, monkeypatch):
         "/api/elevenlabs/generate",
         data={"text": "안녕", "voice_id": "v1"},
     )
-    assert r.status_code == 400
-    assert "API key" in r.json()["detail"]
+    # 503 — operator misconfig surfaced as service-unavailable. The
+    # message intentionally omits the vendor name (implementation
+    # detail, not user concern).
+    assert r.status_code == 503
+    assert "음성" in r.json()["detail"]
 
 
 def test_tts_rejects_out_of_range_speed(client):

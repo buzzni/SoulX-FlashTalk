@@ -15,6 +15,8 @@ Indexes (per docs/db-integration-plan.md §4 + §7, docs/playlist-feature-plan.m
                         {user_id, playlist_id, completed_at} compound (filter)
 - studio_playlists:    {user_id, playlist_id} unique;
                         {user_id, name_normalized} unique
+- elevenlabs_voices:   {voice_id} unique;
+                        {user_id, created_at} compound
 
 Re-running init_indexes() is a no-op on collections that already have the
 spec — motor's create_index uses the same idempotent semantics as pymongo.
@@ -133,6 +135,16 @@ async def init_indexes() -> None:
         [("user_id", 1), ("name_normalized", 1)],
         unique=True,
         name="user_name_normalized_uniq",
+    )
+    # elevenlabs_voices (user → cloned ElevenLabs voice_id mapping)
+    # voice_id unique because a single ElevenLabs ID can't belong to two of
+    # our users — no shared ownership for clones (stock voices live outside
+    # this collection, fetched via the in-process stock cache).
+    await db.elevenlabs_voices.create_index(
+        [("voice_id", 1)], unique=True, name="voice_id_uniq"
+    )
+    await db.elevenlabs_voices.create_index(
+        [("user_id", 1), ("created_at", -1)], name="user_created"
     )
 
 

@@ -60,6 +60,29 @@ export async function cloneVoice(
   return parseResponse(res, '보이스 클론');
 }
 
+/**
+ * Delete a cloned voice. Owner-scoped server-side — the backend 404s
+ * other users' voices and 403s stock voices, so the UI's only job is
+ * to call this for cloned rows the user just selected.
+ */
+export async function deleteVoice(
+  voiceId: string,
+  { signal }: CallOptions = {},
+): Promise<void> {
+  const res = await fetch(
+    `${API_BASE}/api/elevenlabs/voices/${encodeURIComponent(voiceId)}`,
+    {
+      method: 'DELETE',
+      headers: getAuthHeaders(),
+      signal,
+    },
+  );
+  // We don't care about the body — success is the 200; parseResponse
+  // raises a humanized ApiError on non-2xx so callers see the same
+  // toast surface as cloneVoice / generateVoice errors.
+  await parseResponse(res, '보이스 삭제');
+}
+
 export interface GenerateVoiceInput {
   voice: {
     source?: 'tts' | 'clone' | 'upload' | null;
