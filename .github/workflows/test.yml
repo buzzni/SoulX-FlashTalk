@@ -29,6 +29,13 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+      - name: Install ffmpeg (ffprobe required by validate_audio_upload)
+        # utils/security.py:validate_audio_upload shells out to `ffprobe`
+        # for magic-byte verification. Without it, FileNotFoundError leaks
+        # as HTTP 500 in upload tests (see test_upload_json_rejects_
+        # invalid_audio_does_not_leak which expects 400/422). Prod runners
+        # already have ffmpeg; CI ubuntu-latest does not by default.
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
       - name: Install pytest + runtime deps that tests import
         run: |
           python -m pip install --upgrade pip
