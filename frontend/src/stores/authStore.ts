@@ -13,6 +13,7 @@
 
 import { z } from 'zod';
 import { fetchJSON, setAuthProvider, setUnauthorizedHandler } from '../api/http';
+import { setUserScope } from './storageKey';
 
 const TOKEN_KEY = 'studio.jwt.access';
 const USER_KEY = 'studio.jwt.user';
@@ -71,6 +72,16 @@ function _persist(): void {
   }
 }
 
+// Push the current user's id (or null) into storageKey's scope slot
+// so wizardStore + dispatch flags read/write through user-scoped keys
+// instead of the legacy global ones. Centralized here so login/logout/
+// _restore/401 paths all go through the same pipe — none of them can
+// silently forget to update the scope. wizardStore subscribes to scope
+// changes and handles its own rehydrate / cleanup on the other side.
+function _applyUserScope(): void {
+  setUserScope(_user?.user_id ?? null);
+}
+
 function _restore(): void {
   try {
     _token = localStorage.getItem(TOKEN_KEY);
@@ -80,6 +91,7 @@ function _restore(): void {
     _token = null;
     _user = null;
   }
+  _applyUserScope();
 }
 
 _restore();
@@ -94,6 +106,7 @@ setUnauthorizedHandler(() => {
   _token = null;
   _user = null;
   _persist();
+  _applyUserScope();
   _notify();
   // Preserve where the user was so we can bounce back after re-login.
   const next = encodeURIComponent(window.location.pathname + window.location.search);
@@ -120,6 +133,7 @@ export async function login(user_id: string, password: string): Promise<AuthUser
   _token = res.access_token;
   _user = res.user;
   _persist();
+  _applyUserScope();
   _notify();
   return res.user;
 }
@@ -138,6 +152,7 @@ export async function logout(): Promise<void> {
   _token = null;
   _user = null;
   _persist();
+  _applyUserScope();
   _notify();
 }
 
@@ -148,6 +163,7 @@ export async function fetchMe(): Promise<AuthUser> {
   });
   _user = me;
   _persist();
+  _applyUserScope();
   _notify();
   return me;
 }

@@ -19,7 +19,7 @@
 
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
-import { storageKey } from './storageKey';
+import { storageKey, subscribeScope, localStorageKeys, sessionStorageKeys } from './storageKey';
 import type {
   Background,
   Composition,
@@ -95,6 +95,11 @@ export interface WizardActions {
    * selectors when Phase 3 lands. */
   updateState: (updater: WizardState | ((state: WizardState) => WizardState | Partial<WizardState>)) => void;
   reset: () => void;
+  /** Internal — used by the user-scope subscriber when the active
+   * user changes. Clears in-memory state + caches without bumping
+   * wizardEpoch so a hydrate from the new scope's storage can land
+   * cleanly on top. Not for app code. */
+  _resetForScopeChange: () => void;
   /** Set the voice clone cache. See `voiceCloneCache` below for the
    * mode-swap recovery contract. Pass null to clear. */
   setVoiceCloneCache: (
@@ -316,6 +321,10 @@ export function migrateWizardEnvelope(
 
 if (typeof window !== 'undefined' && typeof localStorage !== 'undefined') {
   migrateLegacyStateOnce();
+  // authStore (imported in main.jsx before this module) has already
+  // resolved the userScope. Move any pre-scoping global draft into the
+  // scoped slot before persist's middleware reads its key.
+  migrateGlobalToScopedOnce();
 }
 
 // ────────────────────────────────────────────────────────────────────
@@ -401,6 +410,18 @@ export const useWizardStore = create<WizardStore>()(
         set((s) => ({
           ...INITIAL_WIZARD_STATE,
           wizardEpoch: ((s.wizardEpoch as number | undefined) ?? 0) + 1,
+          voiceCloneCache: null,
+          voiceTtsCache: null,
+        })),
+
+      // Drop in-memory state + caches without bumping wizardEpoch (the
+      // scope change itself is the discontinuity, not a fresh wizard).
+      // Used by the user-scope subscriber on logout / login as the user
+      // changes — clears any draft from the previous user before the
+      // next rehydrate decides whether the new scope has its own.
+      _resetForScopeChange: () =>
+        set(() => ({
+          ...INITIAL_WIZARD_STATE,
           voiceCloneCache: null,
           voiceTtsCache: null,
         })),
@@ -510,6 +531,94 @@ export function useWizardActions(): WizardActionsRef {
     touchLastSavedAt: s.touchLastSavedAt,
     reset: s.reset,
   };
+}
+
+// ────────────────────────────────────────────────────────────────────
+// User-scope re-binding.
+//
+// When authStore calls setUserScope(user_id) (login / page restore) or
+// setUserScope(null) (logout / 401), this subscriber:
+//   1. drops in-memory store state — otherwise the previous user's
+//      data lingers visibly until the next slice write,
+//   2. for a non-null new scope, runs one-shot legacy migration of
+//      pre-scoping global keys ('showhost.wizard.v1', '.step.v1')
+//      into the new scoped keys (so the only existing user — jack —
+//      doesn't lose his draft on the day this lands),
+//   3. re-binds the persist middleware's storage `name` to the new
+//      scoped key,
+//   4. on a non-null scope, calls rehydrate() so the store reflects
+//      the new user's persisted draft (or a clean slate if absent),
+//   5. on null (logout), purges all owned keys from local + session
+//      storage so nothing carries to the next user.
+//
+// The subscription is module-level — wizardStore evaluating triggers
+// the subscribe call exactly once, and the callback runs on every
+// scope change for the lifetime of the page.
+// ────────────────────────────────────────────────────────────────────
+
+function migrateGlobalToScopedOnce(): void {
+  // Move 'showhost.wizard.v1' (legacy global) → storageKey('wizard')
+  // (which now resolves with the user_id suffix). Idempotent — once
+  // the global key is gone the function no-ops.
+  try {
+    const scopedWizard = storageKey('wizard');
+    const globalWizard = 'showhost.wizard.v1';
+    if (scopedWizard !== globalWizard) {
+      const existingScoped = localStorage.getItem(scopedWizard);
+      const existingGlobal = localStorage.getItem(globalWizard);
+      if (existingScoped == null && existingGlobal != null) {
+        localStorage.setItem(scopedWizard, existingGlobal);
+      }
+      // Remove the global copy regardless — once any user has owned
+      // this device, the global slot is dead. Subsequent users get
+      // their own scoped key, never inherit jack's draft.
+      if (existingGlobal != null) localStorage.removeItem(globalWizard);
+    }
+    const scopedStep = storageKey('step');
+    const globalStep = 'showhost.step.v1';
+    if (scopedStep !== globalStep) {
+      const existingScopedStep = localStorage.getItem(scopedStep);
+      const existingGlobalStep = localStorage.getItem(globalStep);
+      if (existingScopedStep == null && existingGlobalStep != null) {
+        localStorage.setItem(scopedStep, existingGlobalStep);
+      }
+      if (existingGlobalStep != null) localStorage.removeItem(globalStep);
+    }
+  } catch {
+    /* localStorage unavailable / quota — leave keys as-is */
+  }
+}
+
+if (typeof window !== 'undefined' && typeof localStorage !== 'undefined') {
+  subscribeScope((next, prev) => {
+    // 1. Drop previous user's in-memory state.
+    useWizardStore.getState()._resetForScopeChange();
+    // 2. Wipe storage owned by the user who just left. Done for both
+    //    null→user (new login on a device that had a prior session)
+    //    and user→user (account swap). When prev is null there's
+    //    nothing to wipe — the global slot itself is migrated below.
+    if (prev !== null) {
+      try {
+        for (const k of localStorageKeys(prev)) localStorage.removeItem(k);
+        for (const k of sessionStorageKeys(prev)) sessionStorage.removeItem(k);
+      } catch { /* storage unavailable */ }
+    }
+    if (next === null) {
+      // Logout: re-bind persist to the new (un-scoped) key but don't
+      // rehydrate — there's no signed-in user to load state for.
+      // Next setUserScope call will trigger the rehydrate.
+      useWizardStore.persist.setOptions({ name: storageKey('wizard') });
+      return;
+    }
+    // 3. Move legacy global draft into the scoped slot before persist
+    //    rehydrates from it. No-op if global slot is empty.
+    migrateGlobalToScopedOnce();
+    // 4. Re-bind persist storage to the new scoped name.
+    useWizardStore.persist.setOptions({ name: storageKey('wizard') });
+    // 5. Pull the new user's draft from storage. Promise — fire and
+    //    forget; subscribers re-render when state lands.
+    void useWizardStore.persist.rehydrate();
+  });
 }
 
 // ────────────────────────────────────────────────────────────────────
