@@ -22,7 +22,10 @@ import Icon from '../Icon.jsx';
 import { cn } from '@/lib/utils';
 import { Field } from '@/components/field';
 import { UploadTile } from '@/components/upload-tile';
-import { localAssetFromUploadFile } from '@/components/upload-tile-bridge';
+import {
+  localAssetFromUploadFile,
+  revokeLocalAssetIfBlob,
+} from '@/components/upload-tile-bridge';
 import { OptionCard } from '@/components/option-card';
 import { isProductReady, type Product } from '@/wizard/schema';
 import type { Step2FormValues } from '@/wizard/form-mappers';
@@ -131,9 +134,23 @@ export function ProductList() {
                       type="file"
                       accept="image/*"
                       className="hidden"
+                      // Reset value before the click resolves so re-
+                      // picking the same file (after a swap intent that
+                      // landed on the same path) still fires onChange.
+                      // Without this the input keeps its prior value
+                      // and the browser suppresses the event.
+                      onClick={(e) => {
+                        (e.currentTarget as HTMLInputElement).value = '';
+                      }}
                       onChange={(e) => {
                         const file = e.target.files?.[0];
                         if (!file) return;
+                        // Revoke the previous blob: previewUrl when
+                        // replacing a localFile so the slot doesn't
+                        // accumulate dead object URLs.
+                        if (p.source.kind === 'localFile') {
+                          revokeLocalAssetIfBlob(p.source.asset);
+                        }
                         const reader = new FileReader();
                         reader.onload = (ev) =>
                           update(idx, {

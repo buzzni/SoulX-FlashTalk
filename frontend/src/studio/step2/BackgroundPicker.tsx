@@ -27,7 +27,9 @@ import {
 import {
   uploadFileFromAsset,
   localAssetFromUploadFile,
+  revokeLocalAssetIfBlob,
 } from '@/components/upload-tile-bridge';
+import { isLocalAsset as isLocalAssetGuard } from '@/wizard/normalizers';
 import { OptionCard } from '@/components/option-card';
 import { WizardTabs, WizardTab } from '@/components/wizard-tabs';
 import { cn } from '@/lib/utils';
@@ -265,10 +267,16 @@ function UploadView({ asset, onChange, onPickServerFile }: UploadViewProps) {
       <UploadTile
         file={uploadFileFromAsset(asset)}
         onFile={(f) => {
+          // Revoke the prior blob: previewUrl on replace so the slot
+          // doesn't accumulate dead object URLs across pick/replace.
+          if (asset && isLocalAssetGuard(asset)) revokeLocalAssetIfBlob(asset);
           const localAsset = localAssetFromUploadFile(f);
           onChange({ kind: 'upload', asset: localAsset });
         }}
-        onRemove={() => onChange({ kind: 'upload', asset: null })}
+        onRemove={() => {
+          if (asset && isLocalAssetGuard(asset)) revokeLocalAssetIfBlob(asset);
+          onChange({ kind: 'upload', asset: null });
+        }}
         label="배경 사진 올리기"
         sub="촬영한 매장 사진 등"
       />
