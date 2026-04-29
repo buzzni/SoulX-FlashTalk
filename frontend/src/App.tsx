@@ -23,6 +23,7 @@ import { RequireAuth } from './routes/RequireAuth';
 import { HomePage } from './routes/HomePage';
 import { MyPage } from './routes/MyPage';
 import { ResultsListPage } from './routes/ResultsListPage';
+import { HostsLibraryPage } from './routes/HostsLibraryPage';
 
 export default function App() {
   // The top-level ErrorBoundary moved to main.jsx (Lane A) so the
@@ -36,6 +37,7 @@ export default function App() {
         <Route path="/" element={<RequireAuth><HomePage /></RequireAuth>} />
         <Route path="/mypage" element={<RequireAuth><MyPage /></RequireAuth>} />
         <Route path="/results" element={<RequireAuth><ResultsListPage /></RequireAuth>} />
+        <Route path="/hosts" element={<RequireAuth><HostsLibraryPage /></RequireAuth>} />
         <Route
           path="/step/1"
           element={

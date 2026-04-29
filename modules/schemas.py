@@ -28,7 +28,9 @@ from __future__ import annotations
 
 from typing import Any, Literal, Optional
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, computed_field
+from pydantic.types import StringConstraints
+from typing_extensions import Annotated
 
 
 class _ExtraAllowBase(BaseModel):
@@ -225,3 +227,87 @@ class SimpleMessage(_ExtraAllowBase):
 
     message: str
     task_id: Optional[str] = None
+
+
+# ────────────────────────────────────────────────────────────────────
+# Saved Hosts (/api/hosts) — 나의 쇼호스트 library
+# ────────────────────────────────────────────────────────────────────
+#
+# Decision log: see ~/.gstack/projects/buzzni-SoulX-FlashTalk/jack-main-design-
+# 20260429-104009.md §"Eng Review Decisions" #2, #6, #10.
+#
+# Why typed responses now: list_saved_hosts/save_host/delete previously
+# returned bare dicts → OpenAPI surfaced `application/json: unknown` →
+# frontend hand-typed SavedHost which drifts (memory: shot_enum_drift
+# pattern). These models close the loop.
+#
+# `SavedHostMeta` fields are SERVER-DERIVED from `studio_hosts` at save
+# time (codex tension 1±). Frontend never supplies them. The fields are
+# Optional because the `studio_hosts` collection currently only persists
+# image_id/storage_key/batch_id — richer fields (seed, prompt, face_ref_
+# storage_key, mode) require a follow-up enrichment of `record_batch`
+# extras passing. Until then, `selected_seed` is parseable from
+# image_id (`host_<uuid8>_s<seed>` convention) but the rest are None.
+
+# `name`: 1-100 chars after strip, no traversal-shaped values.
+SavedHostName = Annotated[
+    str,
+    StringConstraints(min_length=1, max_length=100, strip_whitespace=True),
+]
+
+
+class SavedHostMeta(_ExtraAllowBase):
+    """Server-derived generation context for a saved host.
+
+    NEVER trust client-supplied values here — `/api/hosts/save` ignores
+    any meta sent by the client and rebuilds this object from the
+    `studio_hosts` row owned by the requesting user.
+    """
+
+    source: Optional[Literal["text", "image"]] = None
+    selected_seed: Optional[int] = None
+    # The *clean* face anchor for image-mode hosts — the original face_ref
+    # uploaded by the user, before outfit was applied. None for text-mode
+    # hosts or until `record_batch` enrichment lands.
+    face_ref_storage_key: Optional[str] = None
+    outfit_ref_storage_key: Optional[str] = None
+    outfit_text: Optional[str] = None
+    prompt: Optional[str] = None
+    negative_prompt: Optional[str] = None
+    face_strength: Optional[float] = None
+    outfit_strength: Optional[float] = None
+
+
+class SavedHost(_ExtraAllowBase):
+    """One row in `/api/hosts.hosts[]`, returned by save_host and PATCH.
+
+    `face_ref_for_variation` (computed): which storage_key the frontend
+    should use as the face_ref when re-deploying this saved host into
+    image-mode generation. For image-mode hosts where the original
+    face_ref was preserved in `meta.face_ref_storage_key`, that wins
+    (clean anchor, outfit-free). For text-mode hosts (or any saved host
+    missing the meta hint), falls back to `key` — the selected variant
+    image, which has any outfit baked in.
+    """
+
+    id: str
+    name: str
+    key: str
+    url: str
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+    deleted_at: Optional[str] = None
+    meta: Optional[SavedHostMeta] = None
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def face_ref_for_variation(self) -> str:
+        if self.meta and self.meta.face_ref_storage_key:
+            return self.meta.face_ref_storage_key
+        return self.key
+
+
+class SavedHostsListResponse(_ExtraAllowBase):
+    """Return shape of `GET /api/hosts`."""
+
+    hosts: list[SavedHost] = Field(default_factory=list)

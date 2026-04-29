@@ -27,8 +27,8 @@
  * from `useFormContext` instead of value/onChange props.
  */
 
-import { useCallback, useMemo, useRef } from 'react';
-import { ImageOff } from 'lucide-react';
+import { useCallback, useMemo, useRef, useState } from 'react';
+import { ImageOff, Bookmark } from 'lucide-react';
 import { FormProvider, useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { WizardBadge as Badge } from '@/components/wizard-badge';
@@ -54,6 +54,7 @@ import { HostTextForm } from './HostTextForm';
 import { HostReferenceUploader } from './HostReferenceUploader';
 import { HostControls } from './HostControls';
 import { HostVariantGrid } from './HostVariantGrid';
+import { SaveHostModal } from '@/components/save-host-modal';
 
 const DEFAULT_SEEDS = [10, 42, 77, 128];
 
@@ -179,6 +180,11 @@ export default function Step1Host({ state, update }: Step1HostProps) {
       : null;
   const generated = host.generation.state === 'ready' && host.generation.selected !== null;
 
+  // T11 — saved host modal lives at this level so the AuditionGallery
+  // footer button can flip its open state. sourceImageId resolves at
+  // click time from the current selection.
+  const [saveModalOpen, setSaveModalOpen] = useState(false);
+
   return (
     <FormProvider {...form}>
       <div className="step-page-split step-page-split--40-60">
@@ -231,9 +237,17 @@ export default function Step1Host({ state, update }: Step1HostProps) {
             generated={generated}
             onSelect={handleSelectVariant}
             onRegenerate={submit}
+            onSaveHost={() => setSaveModalOpen(true)}
           />
         </div>
       </div>
+      {selectedImageId && (
+        <SaveHostModal
+          open={saveModalOpen}
+          onOpenChange={setSaveModalOpen}
+          sourceImageId={selectedImageId}
+        />
+      )}
     </FormProvider>
   );
 }
@@ -247,6 +261,8 @@ interface AuditionGalleryProps {
   generated: boolean;
   onSelect: (v: HostVariant) => void;
   onRegenerate: () => void;
+  /** Opens the SaveHostModal for the currently-selected variant. */
+  onSaveHost: () => void;
 }
 
 function AuditionGallery({
@@ -258,6 +274,7 @@ function AuditionGallery({
   generated,
   onSelect,
   onRegenerate,
+  onSaveHost,
 }: AuditionGalleryProps) {
   const empty = !isLoading && variants.length === 0;
   return (
@@ -297,6 +314,14 @@ function AuditionGallery({
               <Badge variant="success" icon="check_circle">
                 선택 완료 · 다음 단계로 넘어가세요
               </Badge>
+              <Button
+                size="sm"
+                onClick={onSaveHost}
+                data-testid="save-host-trigger"
+              >
+                <Bookmark className="size-3.5" />
+                내 호스트로 저장
+              </Button>
               <Button size="sm" icon="refresh" onClick={onRegenerate}>
                 다시 만들기
               </Button>

@@ -129,29 +129,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/upload/list": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * List Uploads
-         * @description List files already present in UPLOADS_DIR so the UI can pick one
-         *     without re-uploading. Workaround for environments where the browser's
-         *     file read or multipart POST is blocked by DLP/VPN — user scp's the file
-         *     to uploads/ once, then selects it from this list in the UI.
-         */
-        get: operations["list_uploads_api_upload_list_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/upload/json": {
         parameters: {
             query?: never;
@@ -272,7 +249,10 @@ export interface paths {
         put?: never;
         /**
          * Upload Audio
-         * @description Upload audio file directly for video generation (any audio)
+         * @description Upload audio file for video generation. Always converts to 16kHz
+         *     mono WAV before storing — downstream inference (FlashTalk / wav2vec)
+         *     expects that format. Original (non-WAV) bytes are discarded after
+         *     transcoding.
          */
         post: operations["upload_audio_api_upload_audio_post"];
         delete?: never;
@@ -290,7 +270,10 @@ export interface paths {
         };
         /**
          * List Elevenlabs Voices
-         * @description List available ElevenLabs voices
+         * @description List voices for the authenticated user: shared stock voices + their
+         *     own cloned voices. ElevenLabs API call is reserved for the stock cache
+         *     (30-min TTL); cloned voices come from our DB so list latency is a single
+         *     Mongo read.
          */
         get: operations["list_elevenlabs_voices_api_elevenlabs_voices_get"];
         put?: never;
@@ -317,6 +300,10 @@ export interface paths {
          *     speed: 0.5-1.8 multiplier (v3 voice_settings.speed). Previously the endpoint
          *     hardcoded this from config; now passed through so the Step 3 UI slider
          *     actually controls playback rate.
+         *
+         *     Voice access is checked: stock voices for everyone, cloned voices only
+         *     for the owner (admin bypass). Foreign voice_ids return 404 — same surface
+         *     as missing-voice so existence is not leaked.
          */
         post: operations["generate_elevenlabs_speech_api_elevenlabs_generate_post"];
         delete?: never;
@@ -336,10 +323,48 @@ export interface paths {
         put?: never;
         /**
          * Clone Voice
-         * @description Clone a voice from reference audio using ElevenLabs
+         * @description Clone a voice from reference audio using ElevenLabs.
+         *
+         *     The reference audio is sent to ElevenLabs and discarded — we never
+         *     persist it ourselves (no `storage_key` in the response). Pre-S3
+         *     this handler kept the ref in UPLOADS_DIR forever; now it goes to
+         *     a tempfile (config.TEMP_DIR) and is unlinked after the API call.
+         *
+         *     On success, persists (user_id, voice_id, metadata) to elevenlabs_voices
+         *     so subsequent /api/elevenlabs/voices reads serve owner-scoped lists
+         *     without re-hitting ElevenLabs.
          */
         post: operations["clone_voice_api_elevenlabs_clone_voice_post"];
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/elevenlabs/voices/{voice_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Delete Elevenlabs Voice
+         * @description Delete a cloned voice. Owner-scoped (admin/master can delete any).
+         *
+         *     Stock voices (premade/professional) are not deletable through this
+         *     endpoint — they're shared workspace assets, not user-owned. Trying
+         *     returns 403 to surface the intent ('not yours, also can't be removed').
+         *
+         *     Order: ElevenLabs delete first, then DB delete. If ElevenLabs fails we
+         *     keep the DB row (502) so a retry can succeed; if ElevenLabs succeeds
+         *     but DB delete fails the next /voices call won't see it anyway since
+         *     list_for_user reads our DB. Either failure is recoverable.
+         */
+        delete: operations["delete_elevenlabs_voice_api_elevenlabs_voices__voice_id__delete"];
         options?: never;
         head?: never;
         patch?: never;
@@ -356,7 +381,14 @@ export interface paths {
         put?: never;
         /**
          * Generate Video
-         * @description Generate video from host image + audio
+         * @description Generate video from host image + audio.
+         *
+         *     PR S3+ C9: `host_image_path`/`audio_path`/`reference_image_paths`
+         *     each accept either a legacy absolute filesystem path (pre-cutover)
+         *     or a bucket-prefixed storage_key (post-C9 frontend, post-cutover).
+         *     `safe_input_value` validates both shapes; the worker
+         *     (generate_video_task) downloads storage_keys to a temp file and
+         *     cleans them up at end of task.
          */
         post: operations["generate_video_api_generate_post"];
         delete?: never;
@@ -430,8 +462,18 @@ export interface paths {
         };
         /**
          * Get Video
-         * @description Serve generated video. HEAD returns headers only (used by the
-         *     RenderDashboard to pull Content-Length without downloading the mp4).
+         * @description Serve generated video via S3 presigned URL.
+         *
+         *     Resolution order:
+         *       1. task_states[task_id]["output_path"] — the in-flight render's
+         *          local mp4 (worker hasn't uploaded yet). Served via FileResponse.
+         *       2. studio_results.video_key — persisted manifest's
+         *          storage_key. HEAD returns S3 head_object headers; GET returns
+         *          a 302 to a presigned URL (TTL = S3_PRESIGN_TTL_VIDEO, 6h,
+         *          covers byte-range seek sessions).
+         *
+         *     `?download=true` triggers attachment disposition (signed into the
+         *     presigned URL via ResponseContentDisposition).
          */
         get: operations["get_video_api_videos__task_id__head"];
         put?: never;
@@ -447,8 +489,18 @@ export interface paths {
         options?: never;
         /**
          * Get Video
-         * @description Serve generated video. HEAD returns headers only (used by the
-         *     RenderDashboard to pull Content-Length without downloading the mp4).
+         * @description Serve generated video via S3 presigned URL.
+         *
+         *     Resolution order:
+         *       1. task_states[task_id]["output_path"] — the in-flight render's
+         *          local mp4 (worker hasn't uploaded yet). Served via FileResponse.
+         *       2. studio_results.video_key — persisted manifest's
+         *          storage_key. HEAD returns S3 head_object headers; GET returns
+         *          a 302 to a presigned URL (TTL = S3_PRESIGN_TTL_VIDEO, 6h,
+         *          covers byte-range seek sessions).
+         *
+         *     `?download=true` triggers attachment disposition (signed into the
+         *     presigned URL via ResponseContentDisposition).
          */
         head: operations["get_video_api_videos__task_id__head"];
         patch?: never;
@@ -528,6 +580,11 @@ export interface paths {
         /**
          * Generate Conversation Endpoint
          * @description Generate multi-agent conversation video.
+         *
+         *     Voice ownership is checked here too — every agent's voice_id must be
+         *     a stock voice or owned by the requesting user. Without this guard the
+         *     /api/elevenlabs/generate ownership check is bypassable by stuffing
+         *     foreign voice_ids into dialog_data.
          */
         post: operations["generate_conversation_endpoint_api_generate_conversation_post"];
         delete?: never;
@@ -630,16 +687,20 @@ export interface paths {
         };
         /**
          * Get File
-         * @description Serve files. Accepts both legacy (bucket-less) and PR3 storage_key forms.
+         * @description Serve files via storage_key (No PROJECT_ROOT fallback — Phase 0 Critical #1).
          *
-         *     Examples:
-         *       /api/files/outputs/hosts/saved/x.png   ← PR3 storage_key
-         *       /api/files/hosts/saved/x.png           ← legacy (still resolves)
-         *       /api/files/ref_img_abc.png             ← legacy (probes UPLOADS)
+         *     Path must be a bucket-prefixed storage key (`outputs/...`,
+         *     `uploads/...`, `examples/...`). On S3 backend → 302 redirect to a
+         *     presigned GET URL. On LocalDisk (test/dev) → FileResponse via the
+         *     storage_key resolution.
          *
-         *     Bucket-prefixed keys go through `modules.storage` (rejects `..`).
-         *     Legacy filenames probe every bucket dir and pass through `safe_upload_path`
-         *     for the final realpath-containment check.
+         *     `?download_filename=<name>` signs a Content-Disposition into the
+         *     response so the browser saves with the requested filename.
+         *
+         *     Bare-name probing (e.g. `/api/files/host_abc.png`) was removed —
+         *     those URLs only existed in pre-PR3 manifests and would 404 on S3
+         *     runtime regardless. Frontend now uses the manifest's `url` field
+         *     populated by `_ensure_manifest_urls`.
          */
         get: operations["get_file_api_files__filename__get"];
         put?: never;
@@ -750,7 +811,7 @@ export interface paths {
         };
         /**
          * List Saved Hosts
-         * @description List saved hosts owned by the authenticated user.
+         * @description List saved hosts owned by the authenticated user. Soft-deleted rows hidden.
          */
         get: operations["list_saved_hosts_api_hosts_get"];
         put?: never;
@@ -772,7 +833,14 @@ export interface paths {
         put?: never;
         /**
          * Save Host
-         * @description Persist a candidate image as a long-lived saved host (PR4: DB-backed).
+         * @description Persist a candidate image as a long-lived saved host.
+         *
+         *     Eng-review 2026-04-29 (codex tension 1±): the endpoint takes a
+         *     `source_image_id` referring to a row in `studio_hosts` and
+         *     server-derives every meta field from that owned row. The frontend
+         *     cannot smuggle storage_keys via meta — `meta` is no longer a Form
+         *     parameter at all. studio_host_repo's user_id-scoped lookup gives
+         *     us ownership for free; cross-user image_ids fall through to 404.
          */
         post: operations["save_host_api_hosts_save_post"];
         delete?: never;
@@ -793,7 +861,12 @@ export interface paths {
         post?: never;
         /**
          * Delete Host
-         * @description Remove a saved host (DB row + backing file). Owner-scoped.
+         * @description Soft-delete a saved host (sets deleted_at, keeps file). Owner-scoped.
+         *
+         *     Eng-review 2026-04-29 (codex tension 5±): hard-delete used to break
+         *     active wizard drafts that had this host injected as faceRef. Soft-
+         *     delete + 30-day retention lets the active draft keep generating; a
+         *     cron sweeps files older than the window.
          */
         delete: operations["delete_host_api_hosts__host_id__delete"];
         options?: never;
@@ -1333,12 +1406,10 @@ export interface components {
         };
         /** Body_save_host_api_hosts_save_post */
         Body_save_host_api_hosts_save_post: {
-            /** Source Path */
-            source_path: string;
+            /** Source Image Id */
+            source_image_id: string;
             /** Name */
             name: string;
-            /** Meta */
-            meta?: string | null;
         };
         /** Body_upload_audio_api_upload_audio_post */
         Body_upload_audio_api_upload_audio_post: {
@@ -1542,6 +1613,79 @@ export interface components {
             scene_prompt?: string | null;
             /** Reference Image Paths */
             reference_image_paths?: string[] | null;
+        } & {
+            [key: string]: unknown;
+        };
+        /**
+         * SavedHost
+         * @description One row in `/api/hosts.hosts[]`, returned by save_host and PATCH.
+         *
+         *     `face_ref_for_variation` (computed): which storage_key the frontend
+         *     should use as the face_ref when re-deploying this saved host into
+         *     image-mode generation. For image-mode hosts where the original
+         *     face_ref was preserved in `meta.face_ref_storage_key`, that wins
+         *     (clean anchor, outfit-free). For text-mode hosts (or any saved host
+         *     missing the meta hint), falls back to `key` — the selected variant
+         *     image, which has any outfit baked in.
+         */
+        SavedHost: {
+            /** Id */
+            id: string;
+            /** Name */
+            name: string;
+            /** Key */
+            key: string;
+            /** Url */
+            url: string;
+            /** Created At */
+            created_at?: string | null;
+            /** Updated At */
+            updated_at?: string | null;
+            /** Deleted At */
+            deleted_at?: string | null;
+            meta?: components["schemas"]["SavedHostMeta"] | null;
+            /** Face Ref For Variation */
+            readonly face_ref_for_variation: string;
+        } & {
+            [key: string]: unknown;
+        };
+        /**
+         * SavedHostMeta
+         * @description Server-derived generation context for a saved host.
+         *
+         *     NEVER trust client-supplied values here — `/api/hosts/save` ignores
+         *     any meta sent by the client and rebuilds this object from the
+         *     `studio_hosts` row owned by the requesting user.
+         */
+        SavedHostMeta: {
+            /** Source */
+            source?: ("text" | "image") | null;
+            /** Selected Seed */
+            selected_seed?: number | null;
+            /** Face Ref Storage Key */
+            face_ref_storage_key?: string | null;
+            /** Outfit Ref Storage Key */
+            outfit_ref_storage_key?: string | null;
+            /** Outfit Text */
+            outfit_text?: string | null;
+            /** Prompt */
+            prompt?: string | null;
+            /** Negative Prompt */
+            negative_prompt?: string | null;
+            /** Face Strength */
+            face_strength?: number | null;
+            /** Outfit Strength */
+            outfit_strength?: number | null;
+        } & {
+            [key: string]: unknown;
+        };
+        /**
+         * SavedHostsListResponse
+         * @description Return shape of `GET /api/hosts`.
+         */
+        SavedHostsListResponse: {
+            /** Hosts */
+            hosts?: components["schemas"]["SavedHost"][];
         } & {
             [key: string]: unknown;
         };
@@ -1790,37 +1934,6 @@ export interface operations {
                 "multipart/form-data": components["schemas"]["Body_upload_background_image_api_upload_background_image_post"];
             };
         };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    list_uploads_api_upload_list_get: {
-        parameters: {
-            query?: {
-                kind?: string;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
         responses: {
             /** @description Successful Response */
             200: {
@@ -2092,6 +2205,37 @@ export interface operations {
                 "multipart/form-data": components["schemas"]["Body_clone_voice_api_elevenlabs_clone_voice_post"];
             };
         };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_elevenlabs_voice_api_elevenlabs_voices__voice_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                voice_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
         responses: {
             /** @description Successful Response */
             200: {
@@ -2518,7 +2662,9 @@ export interface operations {
     };
     get_file_api_files__filename__get: {
         parameters: {
-            query?: never;
+            query?: {
+                download_filename?: string | null;
+            };
             header?: never;
             path: {
                 filename: string;
@@ -2698,7 +2844,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["SavedHostsListResponse"];
                 };
             };
         };
@@ -2722,7 +2868,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["SavedHost"];
                 };
             };
             /** @description Validation Error */

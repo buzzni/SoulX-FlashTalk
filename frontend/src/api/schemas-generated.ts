@@ -273,11 +273,41 @@ const Body_composite_generate_stream_api_composite_generate_stream_post = z
     imageSize: z.string().optional().default("1K"),
   })
   .passthrough();
+const SavedHostMeta = z
+  .object({
+    source: z.union([z.enum(["text", "image"]), z.null()]),
+    selected_seed: z.union([z.number(), z.null()]),
+    face_ref_storage_key: z.union([z.string(), z.null()]),
+    outfit_ref_storage_key: z.union([z.string(), z.null()]),
+    outfit_text: z.union([z.string(), z.null()]),
+    prompt: z.union([z.string(), z.null()]),
+    negative_prompt: z.union([z.string(), z.null()]),
+    face_strength: z.union([z.number(), z.null()]),
+    outfit_strength: z.union([z.number(), z.null()]),
+  })
+  .partial()
+  .passthrough();
+const SavedHost = z
+  .object({
+    id: z.string(),
+    name: z.string(),
+    key: z.string(),
+    url: z.string(),
+    created_at: z.union([z.string(), z.null()]).optional(),
+    updated_at: z.union([z.string(), z.null()]).optional(),
+    deleted_at: z.union([z.string(), z.null()]).optional(),
+    meta: z.union([SavedHostMeta, z.null()]).optional(),
+    face_ref_for_variation: z.string(),
+  })
+  .passthrough();
+const SavedHostsListResponse = z
+  .object({ hosts: z.array(SavedHost) })
+  .partial()
+  .passthrough();
 const Body_save_host_api_hosts_save_post = z
   .object({
-    source_path: z.string(),
-    name: z.string(),
-    meta: z.union([z.string(), z.null()]).optional(),
+    source_image_id: z.string().min(1).max(128),
+    name: z.string().min(1).max(100),
   })
   .passthrough();
 const Body_create_playlist_api_playlists_post = z
@@ -323,6 +353,9 @@ export const schemas = {
   Body_host_generate_stream_api_host_generate_stream_post,
   Body_composite_generate_api_composite_generate_post,
   Body_composite_generate_stream_api_composite_generate_stream_post,
+  SavedHostMeta,
+  SavedHost,
+  SavedHostsListResponse,
   Body_save_host_api_hosts_save_post,
   Body_create_playlist_api_playlists_post,
   Body_rename_playlist_api_playlists__playlist_id__patch,
