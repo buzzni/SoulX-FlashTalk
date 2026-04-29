@@ -15,10 +15,12 @@ import {
   Play,
   HelpCircle,
   Settings,
+  Users,
 } from 'lucide-react';
 import { Brand } from '../components/brand';
 import { useStartNewVideo } from '../components/start-new-video';
 import { useLastSavedAt } from '../stores/wizardStore';
+import { useSavedHostCount } from '../api/queries/use-saved-hosts';
 import { cn } from '@/lib/utils';
 import {
   formatDraftAge,
@@ -27,7 +29,7 @@ import {
 } from '../lib/wizardNav';
 
 interface SidebarProps {
-  active: 'home' | 'results' | 'mypage';
+  active: 'home' | 'results' | 'mypage' | 'hosts';
 }
 
 export function Sidebar({ active }: SidebarProps) {
@@ -35,6 +37,7 @@ export function Sidebar({ active }: SidebarProps) {
   const lastSavedAt = useLastSavedAt();
   useDraftAgeTick(lastSavedAt != null);
   const { start: handleStartNew, modal: startNewModal } = useStartNewVideo();
+  const savedHostCount = useSavedHostCount();
 
   return (
     <aside className="hidden md:flex md:sticky md:top-0 md:h-screen flex-col bg-sidebar-background border-r border-sidebar-border px-3.5 py-4 overflow-y-auto">
@@ -91,6 +94,13 @@ export function Sidebar({ active }: SidebarProps) {
             )
           }
           active={active === 'results'}
+        />
+        <NavItem
+          to="/hosts"
+          label="나의 쇼호스트"
+          icon={<Users className="size-4" />}
+          active={active === 'hosts'}
+          count={savedHostCount > 0 ? savedHostCount : undefined}
         />
         {/* "진행 중" item removed — link was /render (dispatch-new),
          * not a list of in-flight tasks. Real queue lives in the

@@ -13,8 +13,8 @@ import QueueStatus from '../studio/QueueStatus';
 
 interface AppLayoutProps {
   children: ReactNode;
-  /** Optional active nav key for the sidebar — 'home' | 'results' | 'mypage' */
-  active?: 'home' | 'results' | 'mypage';
+  /** Optional active nav key for the sidebar. */
+  active?: 'home' | 'results' | 'mypage' | 'hosts';
 }
 
 export function AppLayout({ children, active = 'home' }: AppLayoutProps) {

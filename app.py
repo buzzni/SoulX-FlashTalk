@@ -12,7 +12,7 @@ import logging
 import json
 import time
 from pathlib import Path
-from typing import Optional, List
+from typing import Any, Optional, List
 from datetime import datetime, timezone
 
 from fastapi import FastAPI, File, UploadFile, Form, HTTPException, Request
@@ -28,6 +28,8 @@ from modules.schemas import (
     HistoryResponse,
     QueueSnapshot,
     ResultManifest,
+    SavedHost,
+    SavedHostsListResponse,
     TaskStateSnapshot,
 )
 
@@ -3836,66 +3838,129 @@ async def composite_generate_stream(
 # ========================================
 
 
-@app.get("/api/hosts")
+@app.get("/api/hosts", response_model=SavedHostsListResponse)
 async def list_saved_hosts(request: Request):
-    """List saved hosts owned by the authenticated user."""
+    """List saved hosts owned by the authenticated user. Soft-deleted rows hidden."""
     from modules.repositories import studio_saved_host_repo
     user = auth_module.get_request_user(request)
     items = await studio_saved_host_repo.list_for_user(user["user_id"])
     return {"hosts": items}
 
 
-@app.post("/api/hosts/save")
+def _parse_seed_from_image_id(image_id: str) -> Optional[int]:
+    """Extract seed from `host_<uuid8>_s<seed>` image_id.
+
+    studio_hosts rows currently don't persist seed as a separate column —
+    `record_batch` only takes storage_key/batch_id today. The id format
+    leaks the seed reliably (host_generator.py:34 sets it during write),
+    so parse it back instead of forcing a record_batch enrichment in
+    this PR. Future PR can populate richer studio_hosts fields and the
+    repo lookup in save_host will pick them up automatically.
+    """
+    import re
+    m = re.match(r".*_s(-?\d+)$", image_id)
+    if not m:
+        return None
+    try:
+        return int(m.group(1))
+    except ValueError:
+        return None
+
+
+@app.post("/api/hosts/save", response_model=SavedHost)
 async def save_host(
     request: Request,
-    source_path: str = Form(...),
-    name: str = Form(...),
-    meta: Optional[str] = Form(None),  # JSON dict
+    source_image_id: str = Form(..., min_length=1, max_length=128),
+    name: str = Form(..., min_length=1, max_length=100),
 ):
-    """Persist a candidate image as a long-lived saved host (PR4: DB-backed)."""
+    """Persist a candidate image as a long-lived saved host.
+
+    Eng-review 2026-04-29 (codex tension 1±): the endpoint takes a
+    `source_image_id` referring to a row in `studio_hosts` and
+    server-derives every meta field from that owned row. The frontend
+    cannot smuggle storage_keys via meta — `meta` is no longer a Form
+    parameter at all. studio_host_repo's user_id-scoped lookup gives
+    us ownership for free; cross-user image_ids fall through to 404.
+    """
     from pathlib import Path as _Path
     from modules import storage as storage_module
-    from modules.repositories import studio_saved_host_repo
+    from modules.repositories import studio_host_repo, studio_saved_host_repo
 
     user = auth_module.get_request_user(request)
+    user_id = user["user_id"]
 
-    # Accept either an absolute path (legacy) or a storage_key from a
-    # generate-candidate response. _validate_and_resolve downloads the
-    # latter to a local tempfile we can hand to media_store.save_path.
+    # Server-side name normalization — Form(min_length=1, max_length=100)
+    # rejects empty/oversize but doesn't strip whitespace. "   " (3 spaces)
+    # would pass min_length=1 otherwise.
+    name = name.strip()
+    if not name:
+        raise HTTPException(status_code=422, detail="name must not be blank")
+
+    # Defensive: image_id must be alphanumeric/underscore. host_generator
+    # produces `host_<uuid8>_s<seed>` which fits.
+    if not all(c.isalnum() or c == "_" for c in source_image_id):
+        raise HTTPException(status_code=400, detail="Invalid source_image_id")
+
+    # Owner-scoped lookup — if user A passes user B's image_id, we get
+    # None back (find_one filters by user_id). No leak, no 403/404
+    # ambiguity to time-side-channel.
+    candidate = await studio_host_repo.find_by_image_id(user_id, source_image_id)
+    if candidate is None:
+        raise HTTPException(status_code=404, detail="Source candidate not found")
+
+    source_storage_key = candidate.get("key") or candidate.get("storage_key")
+    if not source_storage_key:
+        # Defensive — record_batch invariant requires storage_key. If a
+        # row got in without one, treat as not-found rather than 500.
+        raise HTTPException(status_code=404, detail="Source candidate has no storage")
+
+    # Server-derive meta from the studio_hosts row. Most fields are None
+    # today because record_batch doesn't persist them yet (see
+    # `_parse_seed_from_image_id` docstring); when a future PR enriches
+    # the candidate row, this dict picks up the new fields automatically.
+    meta_dict: dict[str, Any] = {
+        "source": candidate.get("mode") or None,  # 'text' | 'image' if persisted
+        "selected_seed": candidate.get("seed") or _parse_seed_from_image_id(source_image_id),
+        "face_ref_storage_key": candidate.get("face_ref_storage_key"),
+        "outfit_ref_storage_key": candidate.get("outfit_ref_storage_key"),
+        "outfit_text": candidate.get("outfit_text"),
+        "prompt": candidate.get("prompt"),
+        "negative_prompt": candidate.get("negative_prompt"),
+        "face_strength": candidate.get("face_strength"),
+        "outfit_strength": candidate.get("outfit_strength"),
+    }
+    # Drop keys that are None — saves storage and keeps the persisted
+    # doc readable. Pydantic SavedHostMeta will fill missing fields with
+    # None on read either way.
+    meta_dict = {k: v for k, v in meta_dict.items() if v is not None}
+
+    # Copy the candidate's bytes to a fresh saved-host key. We don't
+    # re-use the candidate's storage_key directly because the candidate
+    # row's lifecycle (commit/cascade_delete_by_video) can drop the file
+    # — saved hosts must outlive the wizard step that created them.
     input_cleanup: list[str] = []
     try:
-        source = await _validate_and_resolve(source_path, input_cleanup)
-        if not source or not os.path.exists(source):
-            raise HTTPException(status_code=404, detail="Source image not found")
-
-        host_id = uuid.uuid4().hex
-        storage_key = storage_module.media_store.save_path(
-            "hosts", _Path(source), basename=f"{host_id}.png"
+        source_local = await _validate_and_resolve(source_storage_key, input_cleanup)
+        if not source_local or not os.path.exists(source_local):
+            raise HTTPException(status_code=404, detail="Source image bytes not found")
+        new_host_id = uuid.uuid4().hex
+        copied_key = storage_module.media_store.save_path(
+            "hosts", _Path(source_local), basename=f"{new_host_id}.png"
         )
     finally:
         _cleanup_input_tempfiles(input_cleanup)
 
-    meta_dict = None
-    if meta:
-        try:
-            extra = json.loads(meta)
-            if isinstance(extra, dict):
-                meta_dict = extra
-        except json.JSONDecodeError:
-            pass
-
     try:
         return await studio_saved_host_repo.create(
-            user["user_id"],
-            host_id=host_id,
+            user_id,
+            host_id=new_host_id,
             name=name,
-            storage_key=storage_key,
-            meta=meta_dict,
+            storage_key=copied_key,
+            meta=meta_dict if meta_dict else None,
         )
     except Exception as e:
-        # If DB insert fails, clean up the file we just wrote.
         try:
-            storage_module.media_store.delete(storage_key)
+            storage_module.media_store.delete(copied_key)
         except Exception:
             pass
         raise HTTPException(status_code=500, detail=f"Failed to save host: {e}")
@@ -3903,10 +3968,16 @@ async def save_host(
 
 @app.delete("/api/hosts/{host_id}")
 async def delete_host(host_id: str, request: Request):
-    """Remove a saved host (DB row + backing file). Owner-scoped."""
+    """Soft-delete a saved host (sets deleted_at, keeps file). Owner-scoped.
+
+    Eng-review 2026-04-29 (codex tension 5±): hard-delete used to break
+    active wizard drafts that had this host injected as faceRef. Soft-
+    delete + 30-day retention lets the active draft keep generating; a
+    cron sweeps files older than the window.
+    """
     from modules.repositories import studio_saved_host_repo
     user = auth_module.get_request_user(request)
-    # Defensive: host_id must be alphanumeric (UUID hex) to avoid traversal-shaped values.
+    # host_id is uuid4().hex — alphanumeric only.
     if not host_id.isalnum():
         raise HTTPException(status_code=400, detail="Invalid host_id")
     ok = await studio_saved_host_repo.delete(user["user_id"], host_id)
