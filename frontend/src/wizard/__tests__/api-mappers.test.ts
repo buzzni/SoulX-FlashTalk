@@ -78,8 +78,8 @@ describe('toCompositeRequest', () => {
       imageQuality: '1K',
     });
     expect(req.products).toEqual([
-      { path: '/uploads/p1.png' },
-      { path: 'https://example.com/p2.png' },
+      { key: '/uploads/p1.png' },
+      { key: 'https://example.com/p2.png' },
     ]);
   });
 
@@ -101,7 +101,7 @@ describe('toCompositeRequest', () => {
       imageQuality: '1K',
     });
     expect(req.products).toHaveLength(2);
-    expect(req.products?.[0]).toEqual({ path: '/uploads/p1.png' });
+    expect(req.products?.[0]).toEqual({ key: '/uploads/p1.png' });
   });
 
   it('translates 4 background variants to the composite background shape', () => {

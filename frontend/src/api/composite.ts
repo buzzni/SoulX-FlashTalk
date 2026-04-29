@@ -11,7 +11,7 @@ import { parseSSEStream, type CallOptions, type StreamEvent } from './host';
 
 export interface CompositeInput {
   host: { selectedPath?: string | null };
-  products?: Array<{ path?: string | null }>;
+  products?: Array<{ key?: string | null }>;
   background: {
     source?: 'preset' | 'prompt' | 'upload' | 'url' | null;
     preset?: { id?: string; label?: string } | string | null;

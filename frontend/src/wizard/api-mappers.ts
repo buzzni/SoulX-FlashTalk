@@ -102,15 +102,15 @@ export function toCompositeRequest(input: CompositeMapperInput): CompositeInput 
   const hostSelected =
     input.host.generation.state === 'ready' ? input.host.generation.selected : null;
 
-  // CompositeInput's products only carries `path`; the wizard's
+  // CompositeInput's products only carries `key`; the wizard's
   // id/name are provenance-only, dropped on the wire.
   const products: NonNullable<CompositeInput['products']> = input.products
     .map((p) => {
-      if (p.source.kind === 'uploaded') return { path: p.source.asset.key };
-      if (p.source.kind === 'url') return { path: p.source.url };
+      if (p.source.kind === 'uploaded') return { key: p.source.asset.key };
+      if (p.source.kind === 'url') return { key: p.source.url };
       return null;
     })
-    .filter((p): p is { path: string } => p !== null);
+    .filter((p): p is { key: string } => p !== null);
 
   // CompositeInput nests imageSize under composition; the request
   // body builder reads it from there.
