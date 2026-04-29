@@ -53,6 +53,24 @@ import { API_BASE } from '../api/http';
 
 const BUCKETS = ['outputs', 'uploads', 'examples'] as const;
 
+/**
+ * Resolve a video URL (or any backend URL) for cross-origin deploy.
+ * Backend writes `video_url: "/api/videos/<id>"` into result manifests
+ * and history rows. On split deploy (frontend `imseller-studio.viskits.ai`,
+ * backend `imseller-maker-api.viskits.ai`) feeding that root-relative
+ * URL to a `<video src>` or download anchor 404s on the frontend host.
+ * Always run video URLs through this helper before binding them.
+ *
+ * Absolute URLs pass through. Empty/null returns empty string so callers
+ * can keep their current `<video src={x || ''}>` patterns.
+ */
+export function resolveBackendUrl(input: string | null | undefined): string {
+  if (!input) return '';
+  if (/^https?:\/\//.test(input)) return input;
+  if (input.startsWith('/')) return `${API_BASE}${input}`;
+  return input;
+}
+
 export function outputsPathToUrl(input: string | null | undefined): string | null {
   if (!input || typeof input !== 'string') return null;
   if (/^https?:\/\//.test(input)) return input;

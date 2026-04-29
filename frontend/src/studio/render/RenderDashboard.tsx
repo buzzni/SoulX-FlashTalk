@@ -33,6 +33,7 @@ import { useQueuePosition } from '../../stores/queueStore';
 import { RESOLUTION_META } from '../../wizard/schema';
 import { formatTaskTitle } from '../taskFormat.js';
 import RenderHistory from '../RenderHistory.jsx';
+import { resolveBackendUrl } from '../../lib/format';
 import { Confetti } from '../shared/Confetti';
 import { RenderPreview } from './RenderPreview';
 import { ProgressCard } from './ProgressCard';
@@ -259,16 +260,19 @@ export default function RenderDashboard({
   const currentStageIdx = resolveStageIdx(job.stage, progressPct);
 
   // Video URLs — /api/videos/:task_id is the canonical playback URL.
+  // resolveBackendUrl absolutizes against API_BASE for split deploy
+  // (frontend on imseller-studio, backend on imseller-maker-api).
   const playableVideoUrl =
-    status === 'done' && taskId ? `/api/videos/${taskId}` : null;
-  const downloadUrl = taskId ? `/api/videos/${taskId}?download=true` : null;
+    status === 'done' && taskId ? resolveBackendUrl(`/api/videos/${taskId}`) : null;
+  const downloadUrl = taskId
+    ? resolveBackendUrl(`/api/videos/${taskId}?download=true`)
+    : null;
 
   const handleCopyShare = async () => {
     const url = playableVideoUrl;
     if (!url) return;
-    const link = url.startsWith('http') ? url : `${window.location.origin}${url}`;
     try {
-      await navigator.clipboard.writeText(link);
+      await navigator.clipboard.writeText(url);
       setCopied(true);
       setTimeout(() => setCopied(false), 1800);
     } catch {

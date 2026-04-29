@@ -5,6 +5,7 @@ import { useState, useEffect } from 'react';
 import Icon from './Icon.jsx';
 import { fetchHistory } from './api.js';
 import { formatTaskTitle } from './taskFormat.js';
+import { resolveBackendUrl } from '../lib/format';
 
 const MIN = 60_000;
 const HOUR = 60 * MIN;
@@ -104,7 +105,7 @@ export default function RenderHistory({ excludeTaskId, limit = 8 }) {
                   </div>
                 ) : (
                   <video
-                    src={v.video_url}
+                    src={resolveBackendUrl(v.video_url)}
                     controls
                     autoPlay
                     muted

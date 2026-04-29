@@ -23,6 +23,7 @@
 import Icon from '../Icon.jsx';
 import { MoreHorizontal } from 'lucide-react';
 import { WizardButton as Button } from '@/components/wizard-button';
+import { resolveBackendUrl } from '../../lib/format';
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -152,7 +153,7 @@ function PrimaryButton({
     return (
       <a
         data-testid="result-primary-action"
-        href={`/api/videos/${taskId}?download=true`}
+        href={resolveBackendUrl(`/api/videos/${taskId}?download=true`)}
         download
         className={`${PRIMARY_CLASSES} inline-flex items-center justify-center gap-2 px-4 rounded-md bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-colors no-underline`}
       >

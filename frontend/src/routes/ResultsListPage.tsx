@@ -13,7 +13,7 @@ import { MoreHorizontal, Plus, Play, RotateCw, Trash2 } from 'lucide-react';
 import { AppLayout } from './AppLayout';
 import { EmptyState } from '../components/empty-state';
 import { Pagination } from '../components/pagination';
-import { videoTitle, formatCompactDate, outputsPathToUrl } from '../lib/format';
+import { videoTitle, formatCompactDate, outputsPathToUrl, resolveBackendUrl } from '../lib/format';
 import { startNewVideo } from '../lib/wizardNav';
 import { cn } from '@/lib/utils';
 import { humanizeError } from '../api/http';
@@ -832,7 +832,7 @@ function ResultCard({ item, playlists, onMoved }: ResultCardProps) {
     v.currentTime = 0;
   };
 
-  const videoUrl = item.video_url || `/api/videos/${item.task_id}`;
+  const videoUrl = resolveBackendUrl(item.video_url || `/api/videos/${item.task_id}`);
   const compositeUrl = outputsPathToUrl(item.host_image);
   const title = videoTitle(item);
   const ts = formatCompactDate(item.timestamp);

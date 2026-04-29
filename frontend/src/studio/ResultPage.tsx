@@ -22,6 +22,7 @@ import { ProfileMenu } from '../routes/ProfileMenu';
 import { fetchResult } from '../api/result';
 import { humanizeError } from '../api/http';
 import { retryFailedTask } from '../api/queue';
+import { resolveBackendUrl } from '../lib/format';
 import { useWizardStore } from '../stores/wizardStore';
 import {
   RESOLUTION_META,
@@ -465,7 +466,9 @@ export default function ResultPage() {
   // Legacy combined boolean — kept for the header h1 + retry/edit modal
   // gating, which still treats both error & cancelled as "terminal-with-retry".
   const isTerminalFailure = isError || isCancelled;
-  const videoUrl = result?.video_url || (taskId ? `/api/videos/${taskId}` : '');
+  const videoUrl = resolveBackendUrl(
+    result?.video_url || (taskId ? `/api/videos/${taskId}` : ''),
+  );
   const resolutionLabel = deriveResolutionLabel(result?.params);
 
   const videoCardStatus: 'completed' | 'error' | 'processing' = isDone
