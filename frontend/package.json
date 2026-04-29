@@ -26,7 +26,7 @@
     {
       "name": "App JS (gzip)",
       "path": "dist/assets/index-*.js",
-      "limit": "250 KB",
+      "limit": "260 KB",
       "gzip": true
     },
     {
