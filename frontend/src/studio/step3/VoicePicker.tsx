@@ -18,9 +18,14 @@
 
 import { useRef, useState } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
+import { Trash2 } from 'lucide-react';
+import { toast } from 'sonner';
 import Icon from '../Icon.jsx';
 import { Field } from '@/components/field';
+import { ConfirmModal } from '@/components/confirm-modal';
 import { cn } from '@/lib/utils';
+import { deleteVoice } from '../../api/voice';
+import { humanizeError } from '../../api/http';
 import type { Step3FormValues } from '@/wizard/form-mappers';
 
 const VOICE_PRESETS: VoiceItem[] = [
@@ -63,9 +68,12 @@ export interface VoicePickerProps {
   /** null = still loading; empty array = fetched but no voices. */
   remoteVoices: RemoteVoiceEntry[] | null;
   loadError: string | null;
+  /** Called after a cloned voice is deleted server-side so the parent
+   * can re-fetch the list. Optional — if omitted, deletion is hidden. */
+  onAfterDelete?: () => void | Promise<void>;
 }
 
-export function VoicePicker({ remoteVoices, loadError }: VoicePickerProps) {
+export function VoicePicker({ remoteVoices, loadError, onAfterDelete }: VoicePickerProps) {
   const { control, setValue } = useFormContext<Step3FormValues>();
   const selectedVoiceId = useWatch({
     control,
@@ -74,6 +82,43 @@ export function VoicePicker({ remoteVoices, loadError }: VoicePickerProps) {
 
   const previewAudioRef = useRef<HTMLAudioElement | null>(null);
   const [playingPreview, setPlayingPreview] = useState<string | null>(null);
+  // Two-step delete flow. `pendingDelete` carries the row the user
+  // clicked the trash icon on; null means no modal open. `deleting`
+  // is true while the API call is in flight — the modal disables
+  // the confirm button so a double-click can't fire two requests.
+  const [pendingDelete, setPendingDelete] = useState<VoiceItem | null>(null);
+  const [deleting, setDeleting] = useState(false);
+
+  const handleDeleteCloned = async () => {
+    if (!pendingDelete || deleting) return;
+    setDeleting(true);
+    const voice = pendingDelete;
+    try {
+      await deleteVoice(voice.id);
+      // If the user had this voice selected, drop the selection so
+      // Step 3 doesn't look valid with a now-deleted voiceId. The
+      // selectedVoiceId fallback in Step3Audio also catches stale
+      // ids; this is the immediate-response path for the row the
+      // user just acted on.
+      if (selectedVoiceId === voice.id) {
+        setValue('voice.voiceId' as const, null, {
+          shouldDirty: true,
+          shouldValidate: true,
+        });
+        setValue('voice.voiceName' as const, null, {
+          shouldDirty: true,
+          shouldValidate: true,
+        });
+      }
+      toast.success('보이스를 지웠어요');
+      setPendingDelete(null);
+      await onAfterDelete?.();
+    } catch (e) {
+      toast.error(humanizeError(e));
+    } finally {
+      setDeleting(false);
+    }
+  };
 
   const voicesLoading = remoteVoices === null && !loadError;
   const voiceList: VoiceItem[] =
@@ -169,6 +214,7 @@ export function VoicePicker({ remoteVoices, loadError }: VoicePickerProps) {
                   isPlaying={playingPreview === v.id}
                   onSelect={() => selectVoice({ id: v.id, name: v.name })}
                   onPlay={() => playPreview(v)}
+                  onDelete={onAfterDelete ? () => setPendingDelete(v) : undefined}
                 />
               ))}
             </VoiceColumn>
@@ -180,6 +226,27 @@ export function VoicePicker({ remoteVoices, loadError }: VoicePickerProps) {
         onEnded={() => setPlayingPreview(null)}
         onPause={() => setPlayingPreview(null)}
         className="hidden"
+      />
+      <ConfirmModal
+        open={pendingDelete !== null}
+        title="이 보이스를 지울까요?"
+        description={
+          pendingDelete ? (
+            <p className="m-0 leading-relaxed">
+              {pendingDelete.name}
+              <br />
+              <span className="text-muted-foreground">
+                ElevenLabs 계정에서도 함께 지워지며 되돌릴 수 없어요.
+              </span>
+            </p>
+          ) : null
+        }
+        confirmLabel="지우기"
+        cancelLabel="유지"
+        variant="danger"
+        busy={deleting}
+        onConfirm={handleDeleteCloned}
+        onCancel={() => { if (!deleting) setPendingDelete(null); }}
       />
     </Field>
   );
@@ -239,9 +306,14 @@ interface VoiceRowProps {
   isPlaying: boolean;
   onSelect: () => void;
   onPlay: () => void;
+  /** When provided, renders a trash button that fires this callback.
+   * The cloned column passes it; stock voices leave it undefined so
+   * users can't try to delete a shared workspace asset (the backend
+   * 403s those anyway, but hiding the button is the saner UX). */
+  onDelete?: () => void;
 }
 
-function VoiceRow({ voice, selected, isPlaying, onSelect, onPlay }: VoiceRowProps) {
+function VoiceRow({ voice, selected, isPlaying, onSelect, onPlay, onDelete }: VoiceRowProps) {
   return (
     <div
       data-testid="voice-row"
@@ -289,6 +361,20 @@ function VoiceRow({ voice, selected, isPlaying, onSelect, onPlay }: VoiceRowProp
       >
         <Icon name={isPlaying ? 'pause' : 'play'} size={10} />
       </button>
+      {onDelete && (
+        <button
+          type="button"
+          aria-label={`${voice.name} 보이스 지우기`}
+          title="보이스 지우기"
+          className="shrink-0 inline-flex items-center justify-center size-8 rounded-md text-muted-foreground hover:bg-destructive-soft hover:text-destructive transition-colors"
+          onClick={(e) => {
+            e.stopPropagation();
+            onDelete();
+          }}
+        >
+          <Trash2 className="size-3.5" />
+        </button>
+      )}
     </div>
   );
 }
