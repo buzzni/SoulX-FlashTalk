@@ -258,27 +258,17 @@ def save_upload_file(upload_file: UploadFile, destination: str, max_bytes: int |
 # transcode step in between).
 
 def _path_field_for_backwards_compat(key: str) -> str:
-    """Best-effort `path` field for legacy upload response shape.
+    """Thin wrapper over `storage.legacy_path_for()` (added in C8) so
+    upload helpers and repo serializers share one backend-aware
+    resolver instead of two near-identical implementations drifting
+    apart.
 
-    The frontend currently round-trips the absolute disk path through
-    the `path` field into generate-task bodies. C9 migrates frontend to
-    `storage_key`; until then we keep emitting `path` for compat:
-
-    - LocalDisk backend: returns the resolved on-disk path.
-    - S3 backend (post-C13): no canonical local path — we return the
-      storage_key so the response is well-formed even before C9 lands.
-
-    Uses `_validate_and_resolve()` rather than `local_path_for()` to
-    avoid the deprecation warning + the process-global
-    `warnings.catch_warnings()` filter race that comes with suppressing
-    it under concurrent requests.
+    LocalDisk: real on-disk path. S3: storage_key fallback. Empty
+    or invalid key: "". The frontend round-trips this through the
+    legacy `path` field into generate-task bodies until C9.
     """
     from modules import storage as _storage
-    store = _storage.media_store
-    if isinstance(store, _storage.LocalDiskMediaStore):
-        return str(store._validate_and_resolve(key))
-    # S3 (or any non-LocalDisk) backend: emit the storage_key.
-    return key
+    return _storage.legacy_path_for(key)
 
 
 def _tempfile_dir() -> str | None:

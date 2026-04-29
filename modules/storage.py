@@ -428,6 +428,32 @@ media_store: MediaStore = LocalDiskMediaStore()
 # old (no-bucket) and new (bucket-prefixed) keys without breaking any
 # currently-stored result manifest URL.
 
+def legacy_path_for(key: str) -> str:
+    """Best-effort legacy `path` field for API response shapes.
+
+    Pre-cutover (LocalDisk backend): returns the resolved on-disk path.
+    Frontend round-trips this back into generate-task bodies through
+    the `path` field — until C9 lands the storage_key contract.
+
+    Post-cutover (S3 backend): returns the storage_key. Well-formed
+    string the response can carry, but not a real disk path —
+    `local_path_for()` raises `NotImplementedError` on S3 so we never
+    call it here.
+
+    Empty / invalid key: returns "".
+    """
+    if not key:
+        return ""
+    store = media_store
+    if isinstance(store, LocalDiskMediaStore):
+        try:
+            return str(store._validate_and_resolve(key))
+        except ValueError:
+            return ""
+    # S3 or any other backend — emit the key itself.
+    return key
+
+
 def resolve_legacy_or_keyed(filename: str) -> Optional[Path]:
     """Resolve a /api/files/{filename:path} request to an absolute file.
 

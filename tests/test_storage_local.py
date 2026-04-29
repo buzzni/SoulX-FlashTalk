@@ -449,6 +449,42 @@ def test_list_prefix_empty_when_unknown_bucket(isolated_dirs):
     assert store.list_prefix("outputs") == []  # no slash
 
 
+def test_legacy_path_for_localdisk_returns_real_path(isolated_dirs):
+    """C8 helper: LocalDisk should resolve the storage_key to its
+    on-disk path so the response's legacy `path` field is valid."""
+    from modules.storage import legacy_path_for
+    _, _, outputs, _ = isolated_dirs
+    p = legacy_path_for("outputs/x.png")
+    assert p == str(outputs / "x.png")
+
+
+def test_legacy_path_for_empty_key(isolated_dirs):
+    from modules.storage import legacy_path_for
+    assert legacy_path_for("") == ""
+
+
+def test_legacy_path_for_invalid_key_returns_empty(isolated_dirs):
+    """Invalid key → "", not raise — callers blanket-emit the field
+    in API responses without guarding."""
+    from modules.storage import legacy_path_for
+    assert legacy_path_for("garbage/foo.png") == ""
+    assert legacy_path_for("foo.png") == ""
+
+
+def test_legacy_path_for_s3_backend_returns_storage_key(isolated_dirs, monkeypatch):
+    """When media_store is the S3 backend, legacy_path_for emits the
+    storage_key itself (not None) so frontend that still reads `path`
+    gets a well-formed string instead of a crash."""
+    import modules.storage as storage_module
+
+    class _FakeS3:
+        # not a LocalDiskMediaStore — isinstance branch falls through.
+        pass
+
+    monkeypatch.setattr(storage_module, "media_store", _FakeS3())
+    assert storage_module.legacy_path_for("outputs/x.mp4") == "outputs/x.mp4"
+
+
 def test_list_prefix_does_not_follow_symlinks(isolated_dirs, tmp_path):
     """Symlinks inside a bucket must not be traversed — defense against
     accidental escape of the bucket boundary."""

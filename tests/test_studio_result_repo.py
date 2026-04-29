@@ -91,6 +91,26 @@ async def test_upsert_requires_task_id(repo_db):
         await repo.upsert("u1", bad)
 
 
+async def test_upsert_completed_requires_video_storage_key(repo_db):
+    """PR S3+ C8 invariant: a manifest with status='completed' must
+    carry video_storage_key, else /api/videos has nothing to serve
+    after C13 cutover."""
+    bad = _manifest("missing-key")
+    bad.pop("video_storage_key")
+    with pytest.raises(ValueError, match="video_storage_key"):
+        await repo.upsert("u1", bad)
+
+
+async def test_upsert_non_completed_status_skips_storage_key_check(repo_db):
+    """The invariant only fires for completed rows — error / cancelled
+    can legitimately have no storage_key."""
+    err = _manifest("err-row", status="error")
+    err.pop("video_storage_key")
+    await repo.upsert("u1", err)  # must not raise
+    doc = await repo.get("u1", "err-row")
+    assert doc["status"] == "error"
+
+
 # ── get ──
 
 async def test_get_returns_none_for_missing(repo_db):

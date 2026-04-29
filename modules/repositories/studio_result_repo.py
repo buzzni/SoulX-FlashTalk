@@ -99,6 +99,13 @@ async def upsert(user_id: str, manifest: dict) -> None:
     Caller is responsible for normalizing absolute paths to storage_keys
     before passing it in (the repo does no path scrubbing).
 
+    PR S3+ invariant: completed manifests MUST carry a non-empty
+    `video_storage_key`. Without it the /api/videos handler can't
+    serve the video after C13 cutover (S3 backend has no
+    `local_path_for` fallback). Reject loudly so a regression in the
+    generate task doesn't silently produce playable-only-on-LocalDisk
+    rows.
+
     Plan decision #9: if `manifest.playlist_id` references a missing or
     cross-user playlist, silently coerce it to null. This is the worker
     race-recovery path (user deletes playlist mid-render). The PATCH
@@ -109,6 +116,11 @@ async def upsert(user_id: str, manifest: dict) -> None:
     task_id = manifest.get("task_id")
     if not task_id:
         raise ValueError("upsert requires manifest.task_id")
+    if manifest.get("status") == "completed" and not manifest.get("video_storage_key"):
+        raise ValueError(
+            f"upsert: completed manifest for {task_id} is missing "
+            "video_storage_key (post-C7 invariant)"
+        )
     set_doc = dict(manifest)
     set_doc["user_id"] = user_id
 

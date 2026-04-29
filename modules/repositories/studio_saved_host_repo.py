@@ -30,17 +30,20 @@ def _now() -> datetime:
 
 
 def _public(doc: dict) -> dict:
-    """API-shape projection. Adds the `url` derived from storage_key."""
+    """API-shape projection. Adds `storage_key` (stable, PR S3+) and
+    legacy-compat `path` / `url` derived from storage_key. After C9
+    the frontend reads `storage_key`; `path` is left intact for the
+    transition."""
     key = doc.get("storage_key", "")
     try:
-        url = storage_module.media_store.url_for(key)
-        path = str(storage_module.media_store.local_path_for(key))
+        url = storage_module.media_store.url_for(key) if key else ""
     except ValueError:
         url = ""
-        path = ""
+    path = storage_module.legacy_path_for(key)
     out: dict[str, Any] = {
         "id": doc["host_id"],
         "name": doc.get("name", ""),
+        "storage_key": key,
         "path": path,
         "url": url,
         "created_at": doc.get("created_at"),

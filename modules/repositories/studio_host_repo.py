@@ -53,18 +53,23 @@ def _now() -> datetime:
 
 def _serialize(doc: dict) -> dict:
     """Reduce a studio_hosts row to the minimal wizard-frontend shape
-    (image_id, path, url, batch_id, is_prev_selected, seed)."""
+    (image_id, path, url, batch_id, is_prev_selected, seed, storage_key).
+
+    PR S3+ contract: `storage_key` is the stable field. `path` is a
+    backwards-compat field — on LocalDisk it's the real disk path, on
+    S3 it falls back to the storage_key (frontend C9 picks `storage_key`
+    so the path field stops mattering)."""
     if doc is None:
         return None
     storage_key = doc.get("storage_key", "")
     try:
-        url = storage_module.media_store.url_for(storage_key)
-        path = str(storage_module.media_store.local_path_for(storage_key))
+        url = storage_module.media_store.url_for(storage_key) if storage_key else ""
     except ValueError:
         url = ""
-        path = ""
+    path = storage_module.legacy_path_for(storage_key)
     return {
         "image_id": doc.get("image_id"),
+        "storage_key": storage_key,
         "path": path,
         "url": url,
         "batch_id": doc.get("batch_id"),
@@ -133,7 +138,16 @@ async def upsert_candidate(
 ) -> None:
     """Upsert a draft candidate row by (user_id, image_id). Used by both
     record_batch (live generation) and studio_007_local_import.
+
+    PR S3+ C8 invariant: `storage_key` must be non-empty — same reason
+    as studio_result_repo.upsert. Without it `_serialize` emits
+    path="" / url="" and the frontend renders a broken card the user
+    can't recover.
     """
+    if not storage_key:
+        raise ValueError(
+            f"upsert_candidate: storage_key is required (image_id={image_id})"
+        )
     doc_set = {
         "user_id": user_id,
         "image_id": image_id,
