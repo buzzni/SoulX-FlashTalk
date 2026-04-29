@@ -202,12 +202,17 @@ export default function ResultPage() {
       const upPath = str(metaBackground.uploadPath);
       const upUrl = str(metaBackground.imageUrl);
       if (upPath || upUrl) {
-        const fname = ((upPath ?? upUrl) ?? '').split('/').pop() ?? '';
+        // Backend's /api/results enrichment populates imageUrl from
+        // storage_key/path so the frontend doesn't need to construct
+        // /api/files/<fname> itself (broken under separated deploy +
+        // S3 cutover). Fallback to '' on a stale row — UI shows empty
+        // state instead of a 404'd image.
+        const fname = (upPath || upUrl || '').split('/').pop() ?? '';
         nextBackground = {
           kind: 'upload',
           asset: {
             path: upPath ?? '',
-            url: upUrl ?? (upPath ? `/api/files/${fname}` : ''),
+            url: upUrl ?? '',
             name: fname,
           },
         };
@@ -269,9 +274,12 @@ export default function ResultPage() {
       (typeof params.script_text === 'string' ? params.script_text : '');
     const paragraphs = scriptText ? splitScript(scriptText) : [];
     const audioPath = typeof params.audio_path === 'string' ? params.audio_path : '';
+    const audioUrl = typeof params.audio_url === 'string' ? params.audio_url : '';
     const audioName = audioPath ? (audioPath.split('/').pop() ?? '') : '';
+    // audio_url comes from backend /api/results enrichment (PR-1).
+    // Fallback empty string on a stale row — element shows empty state.
     const audioAsset = audioPath
-      ? { path: audioPath, url: `/api/files/${audioName}`, name: audioName }
+      ? { path: audioPath, url: audioUrl, name: audioName }
       : null;
     const voiceSource = strOr(metaVoice.source, 'tts');
     const advancedFromMeta = {
@@ -330,6 +338,10 @@ export default function ResultPage() {
         const pUrl = typeof p.url === 'string' ? p.url : '';
         if (pPath || pUrl) {
           const fname = (pPath || pUrl).split('/').pop() ?? '';
+          // Backend /api/results enrichment populates url from
+          // storage_key/path, so we use whatever it sent. Empty string
+          // fallback on stale rows lets the UI render the empty card
+          // instead of a 404 thumbnail.
           return {
             id: `product-${idx}-${fname}`,
             name,
@@ -337,7 +349,7 @@ export default function ResultPage() {
               kind: 'uploaded',
               asset: {
                 path: pPath || '',
-                url: pUrl || (pPath ? `/api/files/${fname}` : ''),
+                url: pUrl || '',
                 name: fname || name,
               },
             },

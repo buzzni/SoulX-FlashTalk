@@ -27,26 +27,50 @@ export function videoTitle(item: {
 }
 
 /**
- * Resolve a filesystem path or URL fragment to a frontend-loadable URL.
+ * Resolve a backend reference (storage_key, legacy absolute path, or
+ * pre-formed URL) to a URL the browser can load.
  *
- * Backend mounts /api/files at the SAFE_ROOTS (outputs / uploads / examples).
- * Server stores absolute paths like "/opt/.../outputs/x.png" or
- * "/opt/.../examples/woman.png". We strip the path up to the first known
- * root segment and prefix /api/files. Pre-formed /api/* URLs and full
- * http(s) URLs pass through unchanged.
+ * Post PR S3+ + production-cutover PR-1: backend `/api/results` enriches
+ * media references with `*url` siblings populated via
+ * `media_store.url_for`, so direct callers who already receive a `url`
+ * field should use it instead of mangling paths. This helper exists for
+ * surfaces that still consume raw `path` / `storage_key` fields and
+ * need a frontend-routable URL on the spot.
  *
- * Returns null for paths we can't resolve (off-roots, empty, non-string).
+ * Inputs handled:
+ *   - Absolute http(s) URLs (presigned S3 etc): passed through.
+ *   - Pre-formed `/api/...` URLs: prefixed with `${API_BASE}` so they
+ *     resolve correctly when frontend runs on a different origin from
+ *     backend (separated deploy).
+ *   - Storage keys (`outputs/...`, `uploads/...`, `examples/...`):
+ *     wrapped as `${API_BASE}/api/files/<key>`.
+ *   - Legacy absolute filesystem paths (`/opt/.../outputs/x.png`):
+ *     stripped to the first bucket segment, then wrapped as above.
+ *
+ * Returns `null` for unresolvable inputs (off-roots, empty, non-string).
  */
+import { API_BASE } from '../api/http';
+
+const BUCKETS = ['outputs', 'uploads', 'examples'] as const;
+
 export function outputsPathToUrl(input: string | null | undefined): string | null {
   if (!input || typeof input !== 'string') return null;
-  if (input.startsWith('/api/') || /^https?:\/\//.test(input)) return input;
-  // outputs/ keeps the legacy segment-stripping shape that ProvenanceCard
-  // already relied on (no double "/outputs/" in the URL).
-  const outIdx = input.indexOf('/outputs/');
-  if (outIdx >= 0) return `/api/files${input.slice(outIdx + '/outputs'.length)}`;
-  for (const segment of ['/uploads/', '/examples/']) {
-    const idx = input.indexOf(segment);
-    if (idx >= 0) return `/api/files${input.slice(idx)}`;
+  if (/^https?:\/\//.test(input)) return input;
+  if (input.startsWith('/api/')) return `${API_BASE}${input}`;
+
+  // Storage-key form: bucket-prefixed, no leading slash
+  const head = input.split('/', 1)[0] ?? '';
+  if ((BUCKETS as readonly string[]).includes(head)) {
+    return `${API_BASE}/api/files/${input}`;
+  }
+
+  // Legacy absolute path: locate the first bucket segment, slice from there.
+  const parts = input.replace(/\\/g, '/').split('/');
+  for (const bucket of BUCKETS) {
+    const idx = parts.indexOf(bucket);
+    if (idx >= 0) {
+      return `${API_BASE}/api/files/${parts.slice(idx).join('/')}`;
+    }
   }
   return null;
 }

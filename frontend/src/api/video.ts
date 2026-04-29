@@ -146,8 +146,8 @@ function hostProvenance(h: unknown): {
     imageUrl: selected?.url ?? null,
     prompt: text?.prompt ?? '',
     negativePrompt: text?.negativePrompt ?? '',
-    faceRefPath: image && isServerAsset(image.faceRef) ? image.faceRef.path : null,
-    outfitRefPath: image && isServerAsset(image.outfitRef) ? image.outfitRef.path : null,
+    faceRefPath: image && isServerAsset(image.faceRef) ? (image.faceRef.path ?? null) : null,
+    outfitRefPath: image && isServerAsset(image.outfitRef) ? (image.outfitRef.path ?? null) : null,
     outfitText: image?.outfitText ?? '',
     faceStrength: image?.faceStrength ?? null,
     outfitStrength: image?.outfitStrength ?? null,
@@ -211,7 +211,7 @@ function backgroundProvenance(bg: unknown): {
         presetId: null,
         presetLabel: null,
         prompt: '',
-        uploadPath: isServerAsset(b.asset) ? b.asset.path : null,
+        uploadPath: isServerAsset(b.asset) ? (b.asset.path ?? null) : null,
         imageUrl: isServerAsset(b.asset) ? (b.asset.url ?? null) : null,
       };
     case 'url':

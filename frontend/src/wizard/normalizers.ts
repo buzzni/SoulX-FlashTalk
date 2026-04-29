@@ -51,7 +51,12 @@ export function isLocalAsset(a: ServerAsset | LocalAsset | null | undefined): a 
 }
 
 export function isServerAsset(a: ServerAsset | LocalAsset | null | undefined): a is ServerAsset {
-  return !!a && !isLocalAsset(a) && typeof (a as ServerAsset).path === 'string';
+  if (!a || isLocalAsset(a)) return false;
+  // Either legacy `path` (pre-PR S3+) or PR S3+ `storage_key` is enough
+  // to qualify as a server-resident asset. Both carry a backend reference
+  // the wizard can ship to /api/* endpoints; only one needs to be present.
+  const sa = a as ServerAsset;
+  return typeof sa.path === 'string' || typeof sa.storage_key === 'string';
 }
 
 function isTransientUrl(u: unknown): boolean {

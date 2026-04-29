@@ -30,7 +30,14 @@ import { z } from 'zod';
  * filename).
  */
 export const ServerAssetSchema = z.object({
-  path: z.string(),
+  /** Legacy field: absolute filesystem path on LocalDisk, storage_key
+   * (`outputs/...`) post-PR S3+. Carries one or the other depending on
+   * which response shape produced the asset. */
+  path: z.string().optional(),
+  /** PR S3+ canonical reference: bucket-prefixed storage key
+   * (`outputs/...`, `uploads/...`). Backend writes this on upload
+   * responses; manifests written before C7 won't have it. */
+  storage_key: z.string().optional(),
   url: z.string().optional(),
   name: z.string().optional(),
   /** Bytes — display-only, preserved across LocalAsset → ServerAsset

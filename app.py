@@ -2969,6 +2969,94 @@ def _synthesize_result_from_queue(entry: dict) -> dict:
     }
 
 
+def _normalize_to_storage_key(value: Optional[str]) -> Optional[str]:
+    """Coerce a legacy absolute path or a storage_key into the storage_key
+    form (`outputs/...` / `uploads/...` / `examples/...`). Returns the
+    input unchanged if it already looks like a storage_key, or `None`
+    when no bucket prefix can be located."""
+    if not value:
+        return None
+    if "/" in value and not value.startswith("/"):
+        head = value.split("/", 1)[0]
+        if head in ("outputs", "uploads", "examples"):
+            return value
+    parts = value.replace("\\", "/").split("/")
+    for prefix in ("outputs", "uploads", "examples"):
+        if prefix in parts:
+            idx = parts.index(prefix)
+            return "/".join(parts[idx:])
+    return None
+
+
+def _media_url(value: Optional[str], *, expires_in: Optional[int] = None) -> str:
+    """Build a frontend-routable URL for a stored asset. On S3 backend
+    this returns an absolute presigned URL (works under separated deploy);
+    on LocalDisk it returns a root-relative `/api/files/<key>` URL.
+
+    Accepts storage_keys (`outputs/foo.png`) and legacy absolute paths.
+    Returns `""` on resolution failure so the frontend falls through to
+    its empty-state branch instead of mounting a broken image."""
+    if not value:
+        return ""
+    key = _normalize_to_storage_key(value)
+    if not key:
+        return ""
+    from modules import storage as _storage
+    try:
+        return _storage.media_store.url_for(
+            key,
+            expires_in=expires_in if expires_in is not None else config.S3_PRESIGN_TTL_IMAGE,
+        )
+    except Exception:
+        return ""
+
+
+def _ensure_manifest_urls(doc: dict) -> dict:
+    """Lazily populate `*url`/`*Url` fields on a result manifest so the
+    frontend can render media without string-mangling backend paths.
+    Idempotent: existing url fields are preserved as-is.
+
+    Touches three locations the frontend renders from:
+      - `meta.background.imageUrl` (alongside uploadPath)
+      - `params.audio_url` (alongside audio_path)
+      - `meta.products[].url` (alongside path / storage_key)
+
+    Why here, not at upsert time: legacy rows persisted before this lazy
+    helper land are still rendered correctly, and re-rendering picks up
+    fresh presigned URLs (TTL).
+    """
+    meta = doc.get("meta") if isinstance(doc.get("meta"), dict) else {}
+    params = doc.get("params") if isinstance(doc.get("params"), dict) else {}
+
+    bg = meta.get("background") if isinstance(meta.get("background"), dict) else None
+    if bg and bg.get("source") == "upload" and not bg.get("imageUrl"):
+        bg_ref = bg.get("storage_key") or bg.get("uploadPath")
+        if bg_ref:
+            url = _media_url(bg_ref)
+            if url:
+                bg["imageUrl"] = url
+
+    audio_ref = params.get("audio_storage_key") or params.get("audio_path")
+    if audio_ref and not params.get("audio_url"):
+        url = _media_url(audio_ref)
+        if url:
+            params["audio_url"] = url
+
+    products = meta.get("products") if isinstance(meta.get("products"), list) else []
+    for p in products:
+        if not isinstance(p, dict):
+            continue
+        if p.get("url"):
+            continue
+        p_ref = p.get("storage_key") or p.get("path")
+        if p_ref:
+            url = _media_url(p_ref)
+            if url:
+                p["url"] = url
+
+    return doc
+
+
 @app.get("/api/results/{task_id}", response_model=ResultManifest)
 async def get_result(task_id: str, request: Request):
     """Return the result manifest for a completed task. Owner-scoped.
@@ -3006,7 +3094,7 @@ async def get_result(task_id: str, request: Request):
             v = doc.get(k)
             if v is not None:
                 doc[k] = _iso_utc(v)
-        return doc
+        return _ensure_manifest_urls(doc)
 
     # Fallback — in-flight tasks not yet persisted to studio_results.
     if not is_admin:
@@ -3017,7 +3105,7 @@ async def get_result(task_id: str, request: Request):
     for bucket in ("running", "pending", "recent"):
         for entry in status.get(bucket, []):
             if entry.get("task_id") == task_id:
-                return _synthesize_result_from_queue(entry)
+                return _ensure_manifest_urls(_synthesize_result_from_queue(entry))
 
     raise HTTPException(status_code=404, detail=f"Result for task {task_id} not found")
 
