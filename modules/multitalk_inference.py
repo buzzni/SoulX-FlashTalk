@@ -459,9 +459,11 @@ def generate_multitalk_turn_video(
             for i in range(frames_np.shape[0]):
                 writer.append_data(frames_np[i])
 
-    # Merge with speaker audio
+    # Merge with speaker audio. +faststart: moov atom up front so
+    # byte-range video players (S3 presigned URLs) seek cleanly.
     cmd = ['ffmpeg', '-y', '-i', temp_path, '-i', speaker_audio_path,
-           '-c:v', 'copy', '-c:a', 'aac', '-shortest', output_path]
+           '-c:v', 'copy', '-c:a', 'aac', '-shortest',
+           '-movflags', '+faststart', output_path]
     subprocess.run(cmd, check=True, capture_output=True)
 
     if os.path.exists(temp_path):

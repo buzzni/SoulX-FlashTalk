@@ -188,9 +188,12 @@ def _merge_with_audio(video_path: str, audio_paths: list, output_path: str):
     """Merge video with audio track(s)."""
     import subprocess
 
+    # +faststart on the final mux: moov atom up front so byte-range
+    # video players (S3 presigned URLs) seek without a preroll fetch.
     if len(audio_paths) == 1:
         cmd = ['ffmpeg', '-y', '-i', video_path, '-i', audio_paths[0],
-               '-c:v', 'copy', '-c:a', 'aac', '-shortest', output_path]
+               '-c:v', 'copy', '-c:a', 'aac', '-shortest',
+               '-movflags', '+faststart', output_path]
     else:
         # Concatenate audio files first
         temp_audio = output_path.replace(".mp4", "_audio.wav")
@@ -205,7 +208,8 @@ def _merge_with_audio(video_path: str, audio_paths: list, output_path: str):
         subprocess.run(cmd_audio, check=True, capture_output=True)
 
         cmd = ['ffmpeg', '-y', '-i', video_path, '-i', temp_audio,
-               '-c:v', 'copy', '-c:a', 'aac', '-shortest', output_path]
+               '-c:v', 'copy', '-c:a', 'aac', '-shortest',
+               '-movflags', '+faststart', output_path]
         subprocess.run(cmd, check=True, capture_output=True)
         if os.path.exists(temp_audio):
             os.remove(temp_audio)

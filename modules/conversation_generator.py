@@ -143,8 +143,11 @@ def generate_turn_video(
             for i in range(frames_np.shape[0]):
                 writer.append_data(frames_np[i])
 
-    # Merge audio
-    cmd = ['ffmpeg', '-y', '-i', temp_path, '-i', audio_path, '-c:v', 'copy', '-c:a', 'aac', '-shortest', output_path]
+    # Merge audio. +faststart: moov atom to the front so byte-range
+    # video players can seek without downloading the whole file.
+    cmd = ['ffmpeg', '-y', '-i', temp_path, '-i', audio_path,
+           '-c:v', 'copy', '-c:a', 'aac', '-shortest',
+           '-movflags', '+faststart', output_path]
     subprocess.run(cmd, check=True, capture_output=True)
 
     if os.path.exists(temp_path):

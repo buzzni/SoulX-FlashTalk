@@ -906,7 +906,11 @@ async def generate_video_task(
                     cmd = ['ffmpeg', '-y', '-i', temp_path]
                     if offset_ms != 0:
                         cmd += ['-itsoffset', f'{offset_ms / 1000:.3f}']
-                    cmd += ['-i', audio_path, '-c:v', 'copy', '-c:a', 'aac', '-shortest', output_path]
+                    # +faststart: move moov atom to the front so byte-range
+                    # players (S3 presigned <video>) can seek without
+                    # downloading the whole file first.
+                    cmd += ['-i', audio_path, '-c:v', 'copy', '-c:a', 'aac',
+                            '-shortest', '-movflags', '+faststart', output_path]
                     subprocess.run(cmd, check=True, capture_output=True)
 
                     if os.path.exists(temp_path):
