@@ -139,7 +139,7 @@ CORS_ORIGINS = [
             "http://localhost:5173",
             "http://localhost:5555",
             "http://localhost:8001",
-            "http://imseller-maker.viskits.ai",
+            "http://imseller-studio.viskits.ai",
         ]),
     ).split(",") if o.strip()
 ]
