@@ -24,8 +24,8 @@ const READY_TEXT_HOST: Host = {
   generation: {
     state: 'ready',
     batchId: 'b-1',
-    variants: [{ seed: 1, imageId: 'h1', url: '/u/h1.png', path: '/p/h1.png' }],
-    selected: { seed: 1, imageId: 'h1', url: '/u/h1.png', path: '/p/h1.png' },
+    variants: [{ seed: 1, imageId: 'h1', url: '/u/h1.png', key: '/p/h1.png' }],
+    selected: { seed: 1, imageId: 'h1', url: '/u/h1.png', key: '/p/h1.png' },
     prevSelected: null,
   },
 };
@@ -94,7 +94,7 @@ describe('Step2FormValuesSchema', () => {
           id: 'p1',
           source: {
             kind: 'uploaded',
-            asset: { path: '/uploads/p1.png', url: '/u/p1.png', name: 'p1' },
+            asset: { key: '/uploads/p1.png', url: '/u/p1.png', name: 'p1' },
           },
         },
       ],
@@ -132,7 +132,7 @@ describe('Step3 voice form mappers', () => {
     script: SCRIPT,
     generation: {
       state: 'ready',
-      audio: { path: '/p/tts.wav', url: '/u/tts.wav', name: 'tts.wav' },
+      audio: { key: '/p/tts.wav', url: '/u/tts.wav', name: 'tts.wav' },
     },
   };
 

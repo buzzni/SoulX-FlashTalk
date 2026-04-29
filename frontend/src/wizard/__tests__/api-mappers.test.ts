@@ -16,8 +16,8 @@ const READY_HOST: Host = {
   generation: {
     state: 'ready',
     batchId: 'b1',
-    variants: [{ seed: 1, imageId: 'h1', url: '/u/h1.png', path: '/srv/h1.png' }],
-    selected: { seed: 1, imageId: 'h1', url: '/u/h1.png', path: '/srv/h1.png' },
+    variants: [{ seed: 1, imageId: 'h1', url: '/u/h1.png', key: '/srv/h1.png' }],
+    selected: { seed: 1, imageId: 'h1', url: '/u/h1.png', key: '/srv/h1.png' },
     prevSelected: null,
   },
 };
@@ -26,7 +26,7 @@ const TWO_PRODUCTS: Products = [
   {
     id: 'p1',
     name: 'p1.png',
-    source: { kind: 'uploaded', asset: { path: '/uploads/p1.png', url: '/u/p1.png', name: 'p1' } },
+    source: { kind: 'uploaded', asset: { key: '/uploads/p1.png', url: '/u/p1.png', name: 'p1' } },
   },
   {
     id: 'p2',
@@ -47,7 +47,7 @@ const READY_COMPOSITION: Composition = {
 };
 
 describe('toCompositeRequest', () => {
-  it('threads host.selected.path through to host.selectedPath', () => {
+  it('threads host.selected.key through to host.selectedPath', () => {
     const req = toCompositeRequest({
       host: READY_HOST,
       products: [],
@@ -108,7 +108,7 @@ describe('toCompositeRequest', () => {
     const cases: { bg: Background; expected: unknown }[] = [
       { bg: { kind: 'preset', presetId: 'studio_white' }, expected: { source: 'preset', preset: 'studio_white' } },
       {
-        bg: { kind: 'upload', asset: { path: '/u/bg.png', url: '/u/bg.png', name: 'bg' } },
+        bg: { kind: 'upload', asset: { key: '/u/bg.png', url: '/u/bg.png', name: 'bg' } },
         expected: { source: 'upload', uploadPath: '/u/bg.png' },
       },
       { bg: { kind: 'url', url: 'https://x/y.png' }, expected: { source: 'url', url: 'https://x/y.png' } },

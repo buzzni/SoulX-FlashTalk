@@ -12,7 +12,6 @@ from modules.storage import (
     LocalDiskMediaStore,
     MediaStore,
     media_store,
-    resolve_legacy_or_keyed,
 )
 
 
@@ -76,70 +75,46 @@ def test_save_path_copies_file(isolated_dirs, tmp_path):
     assert src.exists(), "source must remain (copy, not move)"
 
 
-# ── local_path_for / key_from_path (deprecated) ─────────────────────
+# ── _validate_and_resolve (internal) — replaces deprecated local_path_for ──
 
-def test_local_path_for_resolves_correctly(isolated_dirs):
+def test_validate_and_resolve_resolves_correctly(isolated_dirs):
     _, _, outputs, _ = isolated_dirs
     store = LocalDiskMediaStore()
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore", DeprecationWarning)
-        p = store.local_path_for("outputs/hosts/saved/x.png")
+    p = store._validate_and_resolve("outputs/hosts/saved/x.png")
     assert p == outputs / "hosts" / "saved" / "x.png"
 
 
-def test_local_path_for_does_not_double_apply_bucket(isolated_dirs):
-    """Codex N2 regression — bucket dir must not be applied twice."""
+def test_validate_and_resolve_does_not_double_apply_bucket(isolated_dirs):
+    """Bucket dir must not be applied twice (codex N2 regression)."""
     _, _, outputs, _ = isolated_dirs
     store = LocalDiskMediaStore()
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore", DeprecationWarning)
-        p = store.local_path_for("outputs/foo.png")
+    p = store._validate_and_resolve("outputs/foo.png")
     assert p == outputs / "foo.png"
     assert "outputs/outputs" not in str(p)
 
 
-def test_local_path_for_rejects_unknown_bucket(isolated_dirs):
+def test_validate_and_resolve_rejects_unknown_bucket(isolated_dirs):
     store = LocalDiskMediaStore()
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore", DeprecationWarning)
-        with pytest.raises(ValueError, match="unknown bucket"):
-            store.local_path_for("garbage/foo.png")
+    with pytest.raises(ValueError, match="unknown bucket"):
+        store._validate_and_resolve("garbage/foo.png")
 
 
-def test_local_path_for_rejects_traversal(isolated_dirs):
+def test_validate_and_resolve_rejects_traversal(isolated_dirs):
     store = LocalDiskMediaStore()
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore", DeprecationWarning)
-        for bad in (
-            "outputs/../etc/passwd",
-            "outputs/x/../y",
-            "uploads/../outputs/foo",
-            "outputs//foo.png",
-        ):
-            with pytest.raises(ValueError):
-                store.local_path_for(bad)
+    for bad in (
+        "outputs/../etc/passwd",
+        "outputs/x/../y",
+        "uploads/../outputs/foo",
+        "outputs//foo.png",
+    ):
+        with pytest.raises(ValueError):
+            store._validate_and_resolve(bad)
 
 
-def test_local_path_for_rejects_no_bucket(isolated_dirs):
+def test_validate_and_resolve_rejects_no_bucket(isolated_dirs):
     store = LocalDiskMediaStore()
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore", DeprecationWarning)
-        with pytest.raises(ValueError, match="bucket-prefixed"):
-            store.local_path_for("foo.png")
-
-
-def test_local_path_for_emits_deprecation_warning(isolated_dirs):
-    store = LocalDiskMediaStore()
-    with pytest.warns(DeprecationWarning, match="local_path_for"):
-        store.local_path_for("outputs/foo.png")
-
-
-def test_key_from_path_emits_deprecation_warning(isolated_dirs):
-    _, _, outputs, _ = isolated_dirs
-    (outputs / "x.png").write_bytes(b"x")
-    store = LocalDiskMediaStore()
-    with pytest.warns(DeprecationWarning, match="key_from_path"):
-        store.key_from_path(str(outputs / "x.png"))
+    with pytest.raises(ValueError, match="bucket-prefixed"):
+        store._validate_and_resolve("foo.png")
 
 
 # ── url_for ──
@@ -191,39 +166,6 @@ def test_unknown_kind_raises(isolated_dirs):
     store = LocalDiskMediaStore()
     with pytest.raises(ValueError, match="unknown media kind"):
         store.save_bytes("nonsense", b"x")
-
-
-# ── resolve_legacy_or_keyed ──
-
-def test_resolve_legacy_or_keyed_new_style(isolated_dirs):
-    _, _, outputs, _ = isolated_dirs
-    (outputs / "hosts" / "saved").mkdir(parents=True, exist_ok=True)
-    (outputs / "hosts" / "saved" / "h.png").write_bytes(b"x")
-    p = resolve_legacy_or_keyed("outputs/hosts/saved/h.png")
-    assert p is not None
-    assert p.read_bytes() == b"x"
-
-
-def test_resolve_legacy_or_keyed_legacy_under_outputs(isolated_dirs):
-    _, _, outputs, _ = isolated_dirs
-    (outputs / "hosts" / "saved").mkdir(parents=True, exist_ok=True)
-    (outputs / "hosts" / "saved" / "h.png").write_bytes(b"x")
-    p = resolve_legacy_or_keyed("hosts/saved/h.png")
-    assert p is not None
-    assert p.read_bytes() == b"x"
-
-
-def test_resolve_legacy_or_keyed_legacy_under_uploads(isolated_dirs):
-    _, uploads, _, _ = isolated_dirs
-    (uploads / "ref.png").write_bytes(b"y")
-    p = resolve_legacy_or_keyed("ref.png")
-    assert p is not None
-    assert p.read_bytes() == b"y"
-
-
-def test_resolve_legacy_or_keyed_missing_returns_none(isolated_dirs):
-    assert resolve_legacy_or_keyed("nope/missing.png") is None
-    assert resolve_legacy_or_keyed("missing.png") is None
 
 
 # ── PR S3+ key-based API ──────────────────────────────────────────
@@ -447,42 +389,6 @@ def test_list_prefix_empty_when_unknown_bucket(isolated_dirs):
     assert store.list_prefix("garbage/") == []
     assert store.list_prefix("") == []
     assert store.list_prefix("outputs") == []  # no slash
-
-
-def test_legacy_path_for_localdisk_returns_real_path(isolated_dirs):
-    """C8 helper: LocalDisk should resolve the storage_key to its
-    on-disk path so the response's legacy `path` field is valid."""
-    from modules.storage import legacy_path_for
-    _, _, outputs, _ = isolated_dirs
-    p = legacy_path_for("outputs/x.png")
-    assert p == str(outputs / "x.png")
-
-
-def test_legacy_path_for_empty_key(isolated_dirs):
-    from modules.storage import legacy_path_for
-    assert legacy_path_for("") == ""
-
-
-def test_legacy_path_for_invalid_key_returns_empty(isolated_dirs):
-    """Invalid key → "", not raise — callers blanket-emit the field
-    in API responses without guarding."""
-    from modules.storage import legacy_path_for
-    assert legacy_path_for("garbage/foo.png") == ""
-    assert legacy_path_for("foo.png") == ""
-
-
-def test_legacy_path_for_s3_backend_returns_storage_key(isolated_dirs, monkeypatch):
-    """When media_store is the S3 backend, legacy_path_for emits the
-    storage_key itself (not None) so frontend that still reads `path`
-    gets a well-formed string instead of a crash."""
-    import modules.storage as storage_module
-
-    class _FakeS3:
-        # not a LocalDiskMediaStore — isinstance branch falls through.
-        pass
-
-    monkeypatch.setattr(storage_module, "media_store", _FakeS3())
-    assert storage_module.legacy_path_for("outputs/x.mp4") == "outputs/x.mp4"
 
 
 def test_list_prefix_does_not_follow_symlinks(isolated_dirs, tmp_path):

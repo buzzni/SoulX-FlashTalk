@@ -132,8 +132,6 @@ class MediaStore(Protocol):
                     suffix: str = "", basename: Optional[str] = None) -> str: ...
     def save_path(self, kind: str, src: Path, *,
                    basename: Optional[str] = None) -> str: ...
-    def local_path_for(self, key: str) -> Path: ...                       # deprecated
-    def key_from_path(self, abs_path) -> str: ...                          # deprecated
     def url_for(self, key: str, *, expires_in: int = 3600,
                 download_filename: Optional[str] = None) -> str: ...
     def delete(self, key: str) -> bool: ...
@@ -210,52 +208,6 @@ class LocalDiskMediaStore:
         target.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(src, target / basename)
         return self._build_key(bucket, sub, basename)
-
-    def local_path_for(self, key: str) -> Path:
-        """[DEPRECATED] Resolve a storage_key to its absolute on-disk path.
-
-        Cutover plan: callers should switch to `open_local()` /
-        `download_to()` (which work for both LocalDisk and S3). See
-        `specs/s3-migration/plan.md` §3.1 for the call-site matrix.
-        """
-        warnings.warn(
-            "local_path_for() is deprecated; use open_local() or "
-            "download_to() for S3-backend portability. See "
-            "specs/s3-migration/plan.md §3.1.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        return self._validate_and_resolve(key)
-
-    def key_from_path(self, abs_path) -> str:
-        """[DEPRECATED] Convert an absolute filesystem path to a
-        bucket-prefixed storage_key.
-
-        Cutover plan: generators should build the storage_key directly
-        rather than writing to disk and reverse-mapping. See
-        `specs/s3-migration/plan.md` §3.1.
-        """
-        warnings.warn(
-            "key_from_path() is deprecated; build the storage_key "
-            "directly in the generator instead of reverse-mapping. See "
-            "specs/s3-migration/plan.md §3.1.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        target = Path(abs_path).resolve()
-        for bucket, root in _bucket_dirs().items():
-            try:
-                bucket_root = Path(root).resolve()
-            except FileNotFoundError:
-                continue
-            try:
-                rel = target.relative_to(bucket_root)
-            except ValueError:
-                continue
-            if str(rel) in (".", ""):
-                continue
-            return f"{bucket}/{rel}"
-        raise ValueError(f"path {abs_path!r} is not inside any known bucket")
 
     def url_for(self, key: str, *, expires_in: int = 3600,
                 download_filename: Optional[str] = None) -> str:
@@ -417,62 +369,3 @@ class LocalDiskMediaStore:
 media_store: MediaStore = LocalDiskMediaStore()
 
 
-# ── Compatibility helpers (PR3) ───────────────────────────────────────
-#
-# Legacy URLs in existing manifests look like:
-#     /api/files/hosts/saved/x.png       (bucket missing — implies "outputs")
-#     /api/files/ref_img_abc.png         (bucket missing — implies "uploads")
-#     /api/files/composite_xxx.png       (bucket missing — implies "outputs")
-#
-# `resolve_legacy_or_keyed()` lets the file-serving handler accept BOTH
-# old (no-bucket) and new (bucket-prefixed) keys without breaking any
-# currently-stored result manifest URL.
-
-def legacy_path_for(key: str) -> str:
-    """Best-effort legacy `path` field for API response shapes.
-
-    Pre-cutover (LocalDisk backend): returns the resolved on-disk path.
-    Frontend round-trips this back into generate-task bodies through
-    the `path` field — until C9 lands the storage_key contract.
-
-    Post-cutover (S3 backend): returns the storage_key. Well-formed
-    string the response can carry, but not a real disk path —
-    `local_path_for()` raises `NotImplementedError` on S3 so we never
-    call it here.
-
-    Empty / invalid key: returns "".
-    """
-    if not key:
-        return ""
-    store = media_store
-    if isinstance(store, LocalDiskMediaStore):
-        try:
-            return str(store._validate_and_resolve(key))
-        except ValueError:
-            return ""
-    # S3 or any other backend — emit the key itself.
-    return key
-
-
-def resolve_legacy_or_keyed(filename: str) -> Optional[Path]:
-    """Resolve a /api/files/{filename:path} request to an absolute file.
-
-    Tries new-style bucket-prefixed keys first; falls back to probing
-    each bucket dir with the raw filename (legacy behavior). Returns
-    None if nothing matches.
-    """
-    # New-style: first segment is a known bucket. Use the internal
-    # validator to avoid the deprecation warning on local_path_for().
-    head, _, _rest = filename.partition("/")
-    if head in _bucket_dirs():
-        try:
-            p = media_store._validate_and_resolve(filename)  # type: ignore[attr-defined]
-        except (ValueError, AttributeError):
-            return None
-        return p if p.exists() else None
-    # Legacy: probe every bucket dir with the unmodified filename.
-    for root in _bucket_dirs().values():
-        candidate = Path(root) / filename
-        if candidate.exists():
-            return candidate
-    return None

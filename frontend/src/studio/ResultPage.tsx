@@ -158,7 +158,7 @@ export default function ResultPage() {
         seed: hostSelectedSeed,
         imageId: imageIdFromPath(hostSelectedPath ?? hostSelectedUrl),
         url: hostSelectedUrl ?? '',
-        path: hostSelectedPath ?? '',
+        key: hostSelectedPath ?? '',
       };
       nextHost = {
         input:
@@ -211,7 +211,7 @@ export default function ResultPage() {
         nextBackground = {
           kind: 'upload',
           asset: {
-            path: upPath ?? '',
+            key: upPath ?? '',
             url: upUrl ?? '',
             name: fname,
           },
@@ -229,7 +229,7 @@ export default function ResultPage() {
         seed: compSeed,
         imageId: imageIdFromPath(compPath ?? compUrl),
         url: compUrl ?? '',
-        path: compPath ?? '',
+        key: compPath ?? '',
       };
       const shotRaw = strOr(metaComposition.shot, 'medium');
       const angleRaw = strOr(metaComposition.angle, 'eye');
@@ -279,7 +279,7 @@ export default function ResultPage() {
     // audio_url comes from backend /api/results enrichment (PR-1).
     // Fallback empty string on a stale row — element shows empty state.
     const audioAsset = audioPath
-      ? { path: audioPath, url: audioUrl, name: audioName }
+      ? { key: audioPath, url: audioUrl, name: audioName }
       : null;
     const voiceSource = strOr(metaVoice.source, 'tts');
     const advancedFromMeta = {
@@ -348,7 +348,7 @@ export default function ResultPage() {
             source: {
               kind: 'uploaded',
               asset: {
-                path: pPath || '',
+                key: pPath || '',
                 url: pUrl || '',
                 name: fname || name,
               },

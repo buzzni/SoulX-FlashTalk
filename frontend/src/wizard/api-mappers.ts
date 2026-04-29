@@ -58,8 +58,8 @@ export function toHostGenerateRequest(
   }
 
   // image mode — pass server paths only (uploads must complete first)
-  const faceRefPath = isServerAsset(host.input.faceRef) ? host.input.faceRef.path : null;
-  const outfitRefPath = isServerAsset(host.input.outfitRef) ? host.input.outfitRef.path : null;
+  const faceRefPath = isServerAsset(host.input.faceRef) ? host.input.faceRef.key : null;
+  const outfitRefPath = isServerAsset(host.input.outfitRef) ? host.input.outfitRef.key : null;
   const mode: HostGenerateInput['mode'] =
     faceRefPath && outfitRefPath ? 'face-outfit' : faceRefPath ? 'style-ref' : 'text';
 
@@ -106,7 +106,7 @@ export function toCompositeRequest(input: CompositeMapperInput): CompositeInput 
   // id/name are provenance-only, dropped on the wire.
   const products: NonNullable<CompositeInput['products']> = input.products
     .map((p) => {
-      if (p.source.kind === 'uploaded') return { path: p.source.asset.path };
+      if (p.source.kind === 'uploaded') return { path: p.source.asset.key };
       if (p.source.kind === 'url') return { path: p.source.url };
       return null;
     })
@@ -115,7 +115,7 @@ export function toCompositeRequest(input: CompositeMapperInput): CompositeInput 
   // CompositeInput nests imageSize under composition; the request
   // body builder reads it from there.
   return {
-    host: { selectedPath: hostSelected?.path ?? null },
+    host: { selectedPath: hostSelected?.key ?? null },
     products,
     background: backgroundToCompositeBg(input.background),
     composition: {
@@ -135,7 +135,7 @@ function backgroundToCompositeBg(bg: Background): CompositeInput['background'] {
     case 'upload':
       return {
         source: 'upload',
-        uploadPath: isServerAsset(bg.asset) ? bg.asset.path : null,
+        uploadPath: isServerAsset(bg.asset) ? bg.asset.key : null,
         // Local file isn't valid here — caller must upload first.
       };
     case 'url':
@@ -216,9 +216,9 @@ export function toRenderRequest(args: {
 
   const audioPath = (() => {
     if (args.voice.source === 'upload') {
-      return isServerAsset(args.voice.audio) ? args.voice.audio.path : null;
+      return isServerAsset(args.voice.audio) ? args.voice.audio.key : null;
     }
-    return args.voice.generation.state === 'ready' ? args.voice.generation.audio.path : null;
+    return args.voice.generation.state === 'ready' ? args.voice.generation.audio.key : null;
   })();
   if (!audioPath) return null;
 
@@ -226,7 +226,7 @@ export function toRenderRequest(args: {
   const meta = RESOLUTION_META[args.resolution];
 
   return {
-    composite_path: compositeSelected.path,
+    composite_path: compositeSelected.key,
     audio_path: audioPath,
     subtitle,
     width: meta.width,

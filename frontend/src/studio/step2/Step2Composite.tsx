@@ -150,12 +150,12 @@ export default function Step2Composite({ state }: Step2CompositeProps) {
         const productJobs = values.products.map(async (p): Promise<Product> => {
           if (p.source.kind !== 'localFile') return p;
           const r = await productUpload.upload(p.source.asset.file);
-          if (!r?.path) return p;
+          if (!r?.key) return p;
           return {
             ...p,
             source: {
               kind: 'uploaded',
-              asset: { path: r.path, url: r.url, name: p.source.asset.name },
+              asset: { key: r.key, url: r.url, name: p.source.asset.name },
             },
           };
         });
@@ -164,10 +164,10 @@ export default function Step2Composite({ state }: Step2CompositeProps) {
             return values.background;
           }
           const r = await backgroundUpload.upload(values.background.asset.file);
-          if (!r?.path) return values.background;
+          if (!r?.key) return values.background;
           return {
             kind: 'upload',
-            asset: { path: r.path, url: r.url, name: values.background.asset.name },
+            asset: { key: r.key, url: r.url, name: values.background.asset.name },
           };
         })();
         const [uploadedProducts, uploadedBg] = await Promise.all([
@@ -202,7 +202,7 @@ export default function Step2Composite({ state }: Step2CompositeProps) {
   );
 
   const selectComposite = (v: CompositionVariant) => {
-    if (!v.url || !v.path || !v.imageId) return;
+    if (!v.url || !v.key || !v.imageId) return;
     const imageId = v.imageId;
     setComposition((prev) => {
       if (prev.generation.state !== 'ready' && prev.generation.state !== 'streaming') return prev;
@@ -212,7 +212,7 @@ export default function Step2Composite({ state }: Step2CompositeProps) {
         seed: v.seed,
         imageId,
         url: v.url as string,
-        path: v.path as string,
+        key: v.key as string,
       };
       return {
         ...prev,

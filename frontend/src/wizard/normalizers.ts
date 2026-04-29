@@ -52,11 +52,12 @@ export function isLocalAsset(a: ServerAsset | LocalAsset | null | undefined): a 
 
 export function isServerAsset(a: ServerAsset | LocalAsset | null | undefined): a is ServerAsset {
   if (!a || isLocalAsset(a)) return false;
-  // Either legacy `path` (pre-PR S3+) or PR S3+ `storage_key` is enough
-  // to qualify as a server-resident asset. Both carry a backend reference
-  // the wizard can ship to /api/* endpoints; only one needs to be present.
+  // Server-resident assets carry a `key` — the bucket-prefixed storage
+  // key (`outputs/...`, `uploads/...`) backend round-trips on every form
+  // submission. Pre-PR-4 rows that used `path` / `storage_key` are
+  // up-converted by `migrateServerAsset` before reaching here.
   const sa = a as ServerAsset;
-  return typeof sa.path === 'string' || typeof sa.storage_key === 'string';
+  return typeof sa.key === 'string';
 }
 
 function isTransientUrl(u: unknown): boolean {
@@ -67,12 +68,12 @@ function isTransientUrl(u: unknown): boolean {
 // Persistence — strip everything that can't survive a page reload
 // ────────────────────────────────────────────────────────────────────
 
-/** Drop LocalAsset (File + blob: URL); keep ServerAsset (has a real path). */
+/** Drop LocalAsset (File + blob: URL); keep ServerAsset (has a real key). */
 function persistAsset(a: ServerAsset | LocalAsset | null | undefined): ServerAsset | null {
   if (!a) return null;
   if (isServerAsset(a)) {
     return {
-      path: a.path,
+      key: a.key,
       url: isTransientUrl(a.url) ? undefined : a.url,
       name: a.name,
       size: a.size,
@@ -200,11 +201,15 @@ function asObject(v: unknown): Raw {
 
 function migrateServerAsset(raw: unknown): ServerAsset | null {
   const r = asObject(raw);
-  const path = asString(r.path);
-  if (!path) return null;
+  // Accept all three legacy shapes — `key` (post-PR-4 canonical),
+  // `storage_key` (post-S3+ pre-PR-4), `path` (pre-S3+) — and emit
+  // the canonical `{key, url, name}` shape. This is the localStorage
+  // migration helper, runs once per page reload on hydrated state.
+  const key = asString(r.key) || asString(r.storage_key) || asString(r.path);
+  if (!key) return null;
   const url = typeof r.url === 'string' && !isTransientUrl(r.url) ? r.url : undefined;
   const name = typeof r.name === 'string' ? r.name : undefined;
-  return { path, url, name };
+  return { key, url, name };
 }
 
 function migrateHostVariants(raw: unknown): HostVariant[] {
@@ -213,14 +218,15 @@ function migrateHostVariants(raw: unknown): HostVariant[] {
       const o = asObject(v);
       const seed = asNumber(o.seed, NaN);
       const url = asString(o.url);
-      const path = asString(o.path);
-      // Legacy variants didn't carry imageId — derive from path
+      // Accept legacy `path` / `storage_key` from pre-PR-4 persisted state.
+      const key = asString(o.key) || asString(o.storage_key) || asString(o.path);
+      // Legacy variants didn't carry imageId — derive from key
       // (filename stem without extension) to match the server-side
       // identifier scheme.
-      const imageId = asString(o.imageId) || imageIdFromPath(path);
+      const imageId = asString(o.imageId) || imageIdFromPath(key);
       // Drop placeholders / errors / transient URLs.
-      if (o.placeholder || o.error || !url || !path || !imageId || isTransientUrl(url)) return null;
-      return { seed, imageId, url, path } as HostVariant;
+      if (o.placeholder || o.error || !url || !key || !imageId || isTransientUrl(url)) return null;
+      return { seed, imageId, url, key } as HostVariant;
     })
     .filter((v): v is HostVariant => v !== null);
 }
@@ -284,11 +290,11 @@ function migrateProducts(raw: unknown): Products {
     const id = asString(o.id) || `p${i}-${Date.now()}`;
     const name = typeof o.name === 'string' ? o.name : undefined;
     let source: ProductSource = { kind: 'empty' };
-    const path = asString(o.path);
-    if (path) {
+    const key = asString(o.key) || asString(o.storage_key) || asString(o.path);
+    if (key) {
       source = {
         kind: 'uploaded',
-        asset: { path, url: typeof o.url === 'string' && !isTransientUrl(o.url) ? o.url : undefined, name },
+        asset: { key, url: typeof o.url === 'string' && !isTransientUrl(o.url) ? o.url : undefined, name },
       };
     } else if (typeof o.urlInput === 'string' && o.urlInput.trim()) {
       source = { kind: 'url', url: asString(o.url), urlInput: asString(o.urlInput) };
@@ -307,11 +313,15 @@ function migrateBackground(raw: unknown): Background {
     return { kind: 'url', url: asString(r.url) };
   }
   if (source === 'upload') {
-    const path = asString(r.uploadPath);
-    if (path) {
-      const url = typeof r.imageUrl === 'string' && !isTransientUrl(r.imageUrl) ? r.imageUrl : undefined;
+    // Accept new `key`/`url` and legacy `uploadPath`/`imageUrl` from
+    // older persisted state and pre-PR-4 manifests.
+    const key = asString(r.key) || asString(r.uploadPath);
+    if (key) {
+      const url = typeof r.url === 'string' && !isTransientUrl(r.url)
+        ? r.url
+        : typeof r.imageUrl === 'string' && !isTransientUrl(r.imageUrl) ? r.imageUrl : undefined;
       const name = typeof r.serverFilename === 'string' ? r.serverFilename : undefined;
-      return { kind: 'upload', asset: { path, url, name } };
+      return { kind: 'upload', asset: { key, url, name } };
     }
     return { kind: 'upload', asset: null };
   }
@@ -389,21 +399,23 @@ function migrateVoice(raw: unknown): Voice {
 
   if (source === 'upload') {
     const u = asObject(r.uploadedAudio);
-    const audio = u.path
+    const audioKey = asString(u.key) || asString(u.path);
+    const audio = audioKey
       ? {
-          path: asString(u.path),
+          key: audioKey,
           name: typeof u.name === 'string' ? u.name : undefined,
         }
       : null;
     return { source: 'upload', audio, script };
   }
 
-  // For tts/clone, generation result lives in voice.generatedAudioPath/Url.
-  const audioPath = asString(r.generatedAudioPath);
+  // For tts/clone, generation result lives in voice.generatedAudioPath/Url
+  // (legacy) or voice.generatedAudioKey (post-PR-4).
+  const audioKey = asString(r.generatedAudioKey) || asString(r.generatedAudioPath);
   const audioUrl = asString(r.generatedAudioUrl);
   const generation: VoiceGeneration =
-    r.generated === true && audioPath
-      ? { state: 'ready', audio: { path: audioPath, url: audioUrl || undefined } }
+    r.generated === true && audioKey
+      ? { state: 'ready', audio: { key: audioKey, url: audioUrl || undefined } }
       : { state: 'idle' };
 
   if (source === 'clone') {

@@ -51,11 +51,11 @@ export async function generateVideo(
   // composition when state === 'ready'.
   const hostSelectedPath =
     state.host?.generation?.state === 'ready'
-      ? state.host.generation.selected?.path ?? null
+      ? state.host.generation.selected?.key ?? null
       : null;
   const compositeSelectedPath =
     state.composition?.generation?.state === 'ready'
-      ? state.composition.generation.selected?.path ?? null
+      ? state.composition.generation.selected?.key ?? null
       : null;
   const composite = compositeSelectedPath || hostSelectedPath;
   if (composite) body.append('host_image_path', composite);
@@ -142,12 +142,12 @@ function hostProvenance(h: unknown): {
   return {
     mode: host.input.kind === 'image' ? 'image' : 'text',
     selectedSeed: selected?.seed ?? null,
-    selectedPath: selected?.path ?? null,
+    selectedPath: selected?.key ?? null,
     imageUrl: selected?.url ?? null,
     prompt: text?.prompt ?? '',
     negativePrompt: text?.negativePrompt ?? '',
-    faceRefPath: image && isServerAsset(image.faceRef) ? (image.faceRef.path ?? null) : null,
-    outfitRefPath: image && isServerAsset(image.outfitRef) ? (image.outfitRef.path ?? null) : null,
+    faceRefPath: image && isServerAsset(image.faceRef) ? (image.faceRef.key ?? null) : null,
+    outfitRefPath: image && isServerAsset(image.outfitRef) ? (image.outfitRef.key ?? null) : null,
     outfitText: image?.outfitText ?? '',
     faceStrength: image?.faceStrength ?? null,
     outfitStrength: image?.outfitStrength ?? null,
@@ -176,7 +176,7 @@ function compositionProvenance(c: unknown): {
     comp.generation.state === 'ready' ? comp.generation.selected : null;
   return {
     selectedSeed: selected?.seed ?? null,
-    selectedPath: selected?.path ?? null,
+    selectedPath: selected?.key ?? null,
     selectedUrl: selected?.url ?? null,
     direction: comp.settings.direction,
     shot: comp.settings.shot,
@@ -211,7 +211,7 @@ function backgroundProvenance(bg: unknown): {
         presetId: null,
         presetLabel: null,
         prompt: '',
-        uploadPath: isServerAsset(b.asset) ? (b.asset.path ?? null) : null,
+        uploadPath: isServerAsset(b.asset) ? (b.asset.key ?? null) : null,
         imageUrl: isServerAsset(b.asset) ? (b.asset.url ?? null) : null,
       };
     case 'url':

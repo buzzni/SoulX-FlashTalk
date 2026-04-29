@@ -22,11 +22,12 @@ function assertSize(file: unknown): asserts file is Blob {
 }
 
 export interface UploadResult {
-  // Backend endpoints return varied shapes — always include filename + path.
+  // PR-4 canonical shape: {filename, key, url}. `key` is the
+  // bucket-prefixed storage key the client round-trips to backend.
   filename?: string;
-  path?: string;
+  key?: string;
   url?: string;
-  [key: string]: unknown;
+  [k: string]: unknown;
 }
 
 export interface UploadOptions {

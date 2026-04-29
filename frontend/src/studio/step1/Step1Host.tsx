@@ -145,7 +145,7 @@ export default function Step1Host({ state, update }: Step1HostProps) {
   );
 
   const handleSelectVariant = (v: HostVariant) => {
-    if (!v.url || !v.path || !v.imageId) return;
+    if (!v.url || !v.key || !v.imageId) return;
     setHost((prev) => {
       if (prev.generation.state !== 'ready' && prev.generation.state !== 'streaming') return prev;
       const variants = prev.generation.state === 'ready' ? prev.generation.variants : [];
@@ -160,7 +160,7 @@ export default function Step1Host({ state, update }: Step1HostProps) {
             seed: v.seed,
             imageId: v.imageId as string,
             url: v.url as string,
-            path: v.path as string,
+            key: v.key as string,
           },
           prevSelected,
         },

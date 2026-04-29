@@ -274,8 +274,8 @@ def test_imports_result_manifests(fresh_setup, monkeypatch):
     assert r["meta"]["host"]["selectedPath"] == "outputs/hosts/saved/host_x.png"
     # imageUrl is not a filesystem path → unchanged.
     assert r["meta"]["host"]["imageUrl"] == "/api/files/outputs/hosts/saved/host_x.png"
-    # video_storage_key derived from the scrubbed video_path.
-    assert r["video_storage_key"] == "outputs/res_abc123.mp4"
+    # video_key derived from the scrubbed video_path.
+    assert r["video_key"] == "outputs/res_abc123.mp4"
 
 
 def test_assert_local_only_blocks_prod_url(fresh_setup, monkeypatch):

@@ -256,20 +256,6 @@ def save_upload_file(upload_file: UploadFile, destination: str, max_bytes: int |
 # pattern every /api/upload/* handler uses (the audio one adds an ffmpeg
 # transcode step in between).
 
-def _path_field_for_backwards_compat(key: str) -> str:
-    """Thin wrapper over `storage.legacy_path_for()` (added in C8) so
-    upload helpers and repo serializers share one backend-aware
-    resolver instead of two near-identical implementations drifting
-    apart.
-
-    LocalDisk: real on-disk path. S3: storage_key fallback. Empty
-    or invalid key: "". The frontend round-trips this through the
-    legacy `path` field into generate-task bodies until C9.
-    """
-    from modules import storage as _storage
-    return _storage.legacy_path_for(key)
-
-
 async def _validate_and_resolve(value: str | None, cleanup_list: list) -> str | None:
     """Endpoint-level dual-input resolver (PR S3+ C13-fix).
 
@@ -453,16 +439,17 @@ def _save_upload_to_key(
 
 
 def _upload_response(key: str, *, extra: dict | None = None) -> dict:
-    """Standard /api/upload/* response shape (PR S3+).
+    """Standard /api/upload/* response shape: {filename, key, url}.
 
-    `path` is kept for backwards compat (frontend C9 will drop it).
-    `storage_key` and `url` are the new stable fields.
+    `key` is the bucket-prefixed storage key (e.g. `outputs/foo.png`)
+    that the client round-trips back to /api/*/generate as a form
+    field value. `url` is the frontend-loadable URL (S3 presigned on
+    prod, /api/files/<key> on dev/test).
     """
     from modules import storage as _storage
     body = {
         "filename": Path(key).name,
-        "path": _path_field_for_backwards_compat(key),
-        "storage_key": key,
+        "key": key,
         "url": _storage.media_store.url_for(key),
     }
     if extra:
@@ -622,8 +609,7 @@ def _upload_local_to_storage(
                         )
     return {
         "filename": basename,
-        "path": _path_field_for_backwards_compat(key),
-        "storage_key": key,
+        "key": key,
         "url": _storage.media_store.url_for(key),
     }
 
@@ -1211,8 +1197,8 @@ async def generate_video_task(
             # GPU work against a single transient ClientError.
             _ffprobe_validate(output_path)
             video_bytes = os.path.getsize(output_path)
-            video_storage_key = f"outputs/{os.path.basename(output_path)}"
-            _upload_video_with_retry(output_path, video_storage_key)
+            video_key = f"outputs/{os.path.basename(output_path)}"
+            _upload_video_with_retry(output_path, video_key)
             # Local mp4 is gone after upload (or never moved on LocalDisk
             # backend's same-file no-op). Clear task_states output_path
             # so /api/videos picks the storage_key redirect path instead
@@ -1226,9 +1212,9 @@ async def generate_video_task(
                 "completed_at": datetime.now(timezone.utc).isoformat(),
                 "generation_time_sec": round(generation_time, 2),
                 "video_url": f"/api/videos/{task_id}",
-                "video_storage_key": video_storage_key,
+                "video_key": video_key,
                 # PR S3+ invariant: never store an absolute filesystem
-                # path. /api/videos handler reads video_storage_key.
+                # path. /api/videos handler reads video_key.
                 "video_path": None,
                 "video_bytes": video_bytes,
                 "video_filename": os.path.basename(output_path),
@@ -1726,7 +1712,7 @@ async def preview_composite_together(
         urls: dict[str, str] = {}
         for k, v in results.items():
             extras = _upload_local_to_storage(v, "composites")
-            storage_keys[str(k)] = extras["storage_key"]
+            storage_keys[str(k)] = extras["key"]
             urls[str(k)] = extras["url"]
         # Always emit full_* keys (None when no full_image) so frontend C9
         # doesn't have to special-case key-presence vs key-absence.
@@ -1741,7 +1727,7 @@ async def preview_composite_together(
         if full_image:
             full_extras = _upload_local_to_storage(full_image, "composites")
             resp["full_image"] = full_image                     # legacy
-            resp["full_storage_key"] = full_extras["storage_key"]
+            resp["full_key"] = full_extras["key"]
             resp["full_url"] = full_extras["url"]
         return resp
     finally:
@@ -2273,7 +2259,7 @@ async def get_video(task_id: str, request: Request, download: bool = False):
     Resolution order:
       1. task_states[task_id]["output_path"] — the in-flight render's
          local mp4 (worker hasn't uploaded yet). Served via FileResponse.
-      2. studio_results.video_storage_key — persisted manifest's
+      2. studio_results.video_key — persisted manifest's
          storage_key. HEAD returns S3 head_object headers; GET returns
          a 302 to a presigned URL (TTL = S3_PRESIGN_TTL_VIDEO, 6h,
          covers byte-range seek sessions).
@@ -2302,7 +2288,9 @@ async def get_video(task_id: str, request: Request, download: bool = False):
         raise HTTPException(status_code=404, detail="Video not found")
 
     # 2. storage_key — S3-backed canonical resolution.
-    storage_key = doc.get("video_storage_key")
+    # `video_key` is the post-PR-4 column; legacy rows kept the longer
+    # `video_storage_key` until the backfill script renames them.
+    storage_key = doc.get("video_key") or doc.get("video_storage_key")
     if not storage_key:
         raise HTTPException(status_code=404, detail="Video not found")
 
@@ -2698,12 +2686,12 @@ async def generate_conversation_task(
                 script_summary += f" ... (+{len(dialog.turns) - 3}턴)"
 
             # Validate + upload with retry, then persist manifest. Same
-            # invariants as generate_video_task: video_storage_key only,
+            # invariants as generate_video_task: video_key only,
             # video_path = None.
             _ffprobe_validate(output_path)
             video_bytes = os.path.getsize(output_path)
-            video_storage_key = f"outputs/{os.path.basename(output_path)}"
-            _upload_video_with_retry(output_path, video_storage_key)
+            video_key = f"outputs/{os.path.basename(output_path)}"
+            _upload_video_with_retry(output_path, video_key)
             if task_id in task_states:
                 task_states[task_id]["output_path"] = None
             manifest = {
@@ -2713,7 +2701,7 @@ async def generate_conversation_task(
                 "completed_at": datetime.now(timezone.utc).isoformat(),
                 "generation_time_sec": round(generation_time, 2),
                 "video_url": f"/api/videos/{task_id}",
-                "video_storage_key": video_storage_key,
+                "video_key": video_key,
                 "video_path": None,
                 "video_bytes": video_bytes,
                 "video_filename": os.path.basename(output_path),
@@ -3021,47 +3009,74 @@ def _media_url(value: Optional[str], *, expires_in: Optional[int] = None) -> str
 
 
 def _ensure_manifest_urls(doc: dict) -> dict:
-    """Lazily populate `*url`/`*Url` fields on a result manifest so the
-    frontend can render media without string-mangling backend paths.
-    Idempotent: existing url fields are preserved as-is.
+    """Lazily populate `url` fields on a result manifest.
 
-    Touches three locations the frontend renders from:
-      - `meta.background.imageUrl` (alongside uploadPath)
-      - `params.audio_url` (alongside audio_path)
-      - `meta.products[].url` (alongside path / storage_key)
+    For rows that carry only a `key` (or legacy `path`/`storage_key`)
+    reference, populate the sibling `url` so the frontend can render
+    media without re-deriving anything. Idempotent: existing `url`
+    values pass through unchanged. Backfill (scripts/backfill_*.py)
+    rewrites the legacy field names; this helper handles read-time
+    URL minting (S3 presigned URLs need fresh TTLs on each render).
 
-    Why here, not at upsert time: legacy rows persisted before this lazy
-    helper land are still rendered correctly, and re-rendering picks up
-    fresh presigned URLs (TTL).
+    Touches three locations:
+      - `meta.background.url` (canonical), accepts legacy `imageUrl` /
+        `uploadPath` / `storage_key` as fallback inputs
+      - `params.audio_url` (canonical), accepts legacy `audio_path` /
+        `audio_storage_key` as fallback inputs
+      - `meta.products[].url` (canonical), accepts legacy `path` /
+        `storage_key` as fallback inputs
     """
     meta = doc.get("meta") if isinstance(doc.get("meta"), dict) else {}
     params = doc.get("params") if isinstance(doc.get("params"), dict) else {}
 
     bg = meta.get("background") if isinstance(meta.get("background"), dict) else None
-    if bg and bg.get("source") == "upload" and not bg.get("imageUrl"):
-        bg_ref = bg.get("storage_key") or bg.get("uploadPath")
-        if bg_ref:
-            url = _media_url(bg_ref)
-            if url:
-                bg["imageUrl"] = url
+    if bg and bg.get("source") == "upload":
+        if not bg.get("url"):
+            bg_ref = (
+                bg.get("key")
+                or bg.get("storage_key")
+                or bg.get("uploadPath")
+                or bg.get("imageUrl")
+            )
+            if bg_ref:
+                url = _media_url(bg_ref)
+                if url:
+                    bg["url"] = url
+        # Promote `key` if missing (frontend canonical)
+        if not bg.get("key"):
+            key = _normalize_to_storage_key(
+                bg.get("storage_key") or bg.get("uploadPath")
+            )
+            if key:
+                bg["key"] = key
 
-    audio_ref = params.get("audio_storage_key") or params.get("audio_path")
+    audio_ref = (
+        params.get("audio_key")
+        or params.get("audio_storage_key")
+        or params.get("audio_path")
+    )
     if audio_ref and not params.get("audio_url"):
         url = _media_url(audio_ref)
         if url:
             params["audio_url"] = url
+    if audio_ref and not params.get("audio_key"):
+        key = _normalize_to_storage_key(audio_ref)
+        if key:
+            params["audio_key"] = key
 
     products = meta.get("products") if isinstance(meta.get("products"), list) else []
     for p in products:
         if not isinstance(p, dict):
             continue
-        if p.get("url"):
-            continue
-        p_ref = p.get("storage_key") or p.get("path")
-        if p_ref:
+        p_ref = p.get("key") or p.get("storage_key") or p.get("path")
+        if p_ref and not p.get("url"):
             url = _media_url(p_ref)
             if url:
                 p["url"] = url
+        if p_ref and not p.get("key"):
+            key = _normalize_to_storage_key(p_ref)
+            if key:
+                p["key"] = key
 
     return doc
 
@@ -3270,7 +3285,7 @@ async def host_generate(
             if not local_path:
                 continue
             extras = _upload_local_to_storage(local_path, "hosts/saved", with_sidecar=True)
-            cand["storage_key"] = extras["storage_key"]
+            cand["key"] = extras["key"]
             cand["url"] = extras["url"]
         return result
     finally:
@@ -3368,13 +3383,13 @@ async def host_generate_stream(
                             _upload_local_to_storage,
                             local_path, "hosts/saved", with_sidecar=True,
                         )
-                        evt["storage_key"] = extras["storage_key"]
+                        evt["key"] = extras["key"]
                         evt["url"] = extras["url"]
                         # record_batch persists storage_keys to DB —
                         # swap the last entry so lifecycle bookkeeping
                         # uses the bucket-prefixed key, not the local
                         # disk path that S3 backend can't reverse-map.
-                        saved_paths[-1] = extras["storage_key"]
+                        saved_paths[-1] = extras["key"]
                     except Exception as ue:
                         logger.warning(
                             "host stream storage promote failed for %s: %s",
@@ -3490,7 +3505,7 @@ async def composite_generate(
             if not local_path:
                 continue
             extras = _upload_local_to_storage(local_path, "composites", with_sidecar=True)
-            cand["storage_key"] = extras["storage_key"]
+            cand["key"] = extras["key"]
             cand["url"] = extras["url"]
 
         # Lifecycle bookkeeping — tag fresh batch as draft, demote previous
@@ -3608,11 +3623,11 @@ async def composite_generate_stream(
                             _upload_local_to_storage,
                             local_path, "composites", with_sidecar=True,
                         )
-                        evt["storage_key"] = extras["storage_key"]
+                        evt["key"] = extras["key"]
                         evt["url"] = extras["url"]
                         # Same swap as host stream — record_batch wants
                         # storage_keys, not absolute paths, post-cutover.
-                        saved_paths[-1] = extras["storage_key"]
+                        saved_paths[-1] = extras["key"]
                     except Exception as ue:
                         logger.warning(
                             "composite stream storage promote failed for %s: %s",
@@ -3915,7 +3930,8 @@ async def delete_video(task_id: str, request: Request):
     state = task_states.get(task_id)
     local_in_flight = state.get("output_path") if state else None
     doc = await _result_repo.get(user["user_id"], task_id)
-    storage_key = (doc or {}).get("video_storage_key")
+    # `video_key` post-PR-4; older rows under `video_storage_key`.
+    storage_key = (doc or {}).get("video_key") or (doc or {}).get("video_storage_key")
     legacy_video_path = (doc or {}).get("video_path")
 
     deleted_video = False

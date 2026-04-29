@@ -53,24 +53,20 @@ def _now() -> datetime:
 
 def _serialize(doc: dict) -> dict:
     """Reduce a studio_hosts row to the minimal wizard-frontend shape
-    (image_id, path, url, batch_id, is_prev_selected, seed, storage_key).
-
-    PR S3+ contract: `storage_key` is the stable field. `path` is a
-    backwards-compat field — on LocalDisk it's the real disk path, on
-    S3 it falls back to the storage_key (frontend C9 picks `storage_key`
-    so the path field stops mattering)."""
+    (image_id, key, url, batch_id, is_prev_selected, seed)."""
     if doc is None:
         return None
-    storage_key = doc.get("storage_key", "")
+    # Mongo column historically named `storage_key`; the wire field is
+    # canonical `key`. Backfill renames in-place; this read is forward-
+    # compatible with both via the `or` fallback.
+    key = doc.get("key") or doc.get("storage_key") or ""
     try:
-        url = storage_module.media_store.url_for(storage_key) if storage_key else ""
+        url = storage_module.media_store.url_for(key) if key else ""
     except ValueError:
         url = ""
-    path = storage_module.legacy_path_for(storage_key)
     return {
         "image_id": doc.get("image_id"),
-        "storage_key": storage_key,
-        "path": path,
+        "key": key,
         "url": url,
         "batch_id": doc.get("batch_id"),
         "is_prev_selected": bool(doc.get("is_prev_selected")),

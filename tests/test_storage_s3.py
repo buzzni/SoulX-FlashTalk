@@ -367,20 +367,6 @@ def test_delete_missing_returns_false(s3_setup):
     assert store.delete("outputs/never-existed.mp4") is False
 
 
-# ── deprecated / not-applicable ─────────────────────────────────
-
-def test_local_path_for_raises_not_implemented(s3_setup):
-    _, store = s3_setup
-    with pytest.raises(NotImplementedError):
-        store.local_path_for("outputs/x.png")
-
-
-def test_key_from_path_raises_not_implemented(s3_setup):
-    _, store = s3_setup
-    with pytest.raises(NotImplementedError):
-        store.key_from_path("/abs/path/x.png")
-
-
 # ── C3 review fixes ──────────────────────────────────────────────
 
 def test_save_bytes_empty_data(s3_setup):

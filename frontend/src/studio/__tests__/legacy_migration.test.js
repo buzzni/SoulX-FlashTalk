@@ -43,10 +43,10 @@ describe('wizardStore — legacy showhost_state migration', () => {
         // migrator picks that as `generation.selected`.
         selectedSeed: 10,
         variants: [
-          { seed: 10, id: 'v10', url: '/api/files/host_a.png', path: '/srv/host_a.png' },
+          { seed: 10, id: 'v10', url: '/api/files/host_a.png', key: '/srv/host_a.png' },
         ],
       },
-      products: [{ id: 'p1', name: 'Product A', path: '/srv/p1.png' }],
+      products: [{ id: 'p1', name: 'Product A', key: '/srv/p1.png' }],
       background: { source: 'preset', preset: { id: 'cafe', label: 'Cafe' }, prompt: '' },
       composition: { shot: 'medium', temperature: 0.7, variants: [] },
       voice: { source: 'tts', voiceId: 'v_abc', script: '안녕하세요', paragraphs: ['안녕하세요'] },

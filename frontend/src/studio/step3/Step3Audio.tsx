@@ -358,7 +358,7 @@ export default function Step3Audio({ state, update }: Step3AudioProps) {
     (async () => {
       const res = await audioUpload.upload(local.file);
       if (!alive) return;
-      if (!res?.path) {
+      if (!res?.key) {
         if (audioUpload.error) setUploadErrorMsg(audioUpload.error);
         return;
       }
@@ -376,7 +376,7 @@ export default function Step3Audio({ state, update }: Step3AudioProps) {
         {
           ...cur,
           audio: {
-            path: res.path as string,
+            key: res.key as string,
             url: typeof res.url === 'string' ? res.url : undefined,
             name: local.name,
           },

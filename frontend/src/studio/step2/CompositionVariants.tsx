@@ -27,7 +27,7 @@ export function CompositionVariants({
 }: CompositionVariantsProps) {
   const cols = prevSelected ? 5 : 4;
   const idOf = (v: CompositionVariant): string | null =>
-    v.imageId ?? imageIdFromPath(v.path);
+    v.imageId ?? imageIdFromPath(v.key);
   const prevId = prevSelected ? idOf(prevSelected) : null;
   return (
     <div className="grid gap-2.5" style={{ gridTemplateColumns: `repeat(${cols}, 1fr)` }}>

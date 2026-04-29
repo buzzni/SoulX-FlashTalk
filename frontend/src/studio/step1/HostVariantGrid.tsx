@@ -41,7 +41,7 @@ export function HostVariantGrid({
   const cols = prevSelected ? 5 : 4;
   // Fall back to path-derived id for variants persisted before the imageId field existed.
   const idOf = (v: HostVariant): string | null =>
-    v.imageId ?? imageIdFromPath(v.path);
+    v.imageId ?? imageIdFromPath(v.key);
   const prevId = prevSelected ? idOf(prevSelected) : null;
   return (
     <div className="grid gap-2.5" style={{ gridTemplateColumns: `repeat(${cols}, 1fr)` }}>

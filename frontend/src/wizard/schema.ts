@@ -30,19 +30,18 @@ import { z } from 'zod';
  * filename).
  */
 export const ServerAssetSchema = z.object({
-  /** Legacy field: absolute filesystem path on LocalDisk, storage_key
-   * (`outputs/...`) post-PR S3+. Carries one or the other depending on
-   * which response shape produced the asset. */
-  path: z.string().optional(),
-  /** PR S3+ canonical reference: bucket-prefixed storage key
-   * (`outputs/...`, `uploads/...`). Backend writes this on upload
-   * responses; manifests written before C7 won't have it. */
-  storage_key: z.string().optional(),
+  /** Bucket-prefixed storage key (`outputs/...`, `uploads/...`,
+   * `examples/...`). The canonical backend identifier — round-trips
+   * through every form field that takes a server asset reference. */
+  key: z.string(),
+  /** Frontend-loadable URL. S3 mode: presigned absolute URL. LocalDisk
+   * (dev/test): root-relative `/api/files/<key>`. */
   url: z.string().optional(),
+  /** Display-only original filename. */
   name: z.string().optional(),
   /** Bytes — display-only, preserved across LocalAsset → ServerAsset
    * swap so the upload tile keeps showing the right KB after the
-   * upload completes. Not authoritative; backend never reads it. */
+   * upload completes. */
   size: z.number().optional(),
 });
 export type ServerAsset = z.infer<typeof ServerAssetSchema>;
@@ -101,7 +100,7 @@ export const HostVariantSchema = z.object({
   seed: z.number(),
   imageId: z.string(),
   url: z.string(),
-  path: z.string(),
+  key: z.string(),
 });
 export type HostVariant = z.infer<typeof HostVariantSchema>;
 
@@ -206,7 +205,7 @@ export const CompositionVariantSchema = z.object({
   seed: z.number(),
   imageId: z.string(),
   url: z.string(),
-  path: z.string(),
+  key: z.string(),
 });
 export type CompositionVariant = z.infer<typeof CompositionVariantSchema>;
 

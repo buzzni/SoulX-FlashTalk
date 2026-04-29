@@ -7,7 +7,7 @@ Schema (matches plan §4.3):
     {
       _id, user_id, task_id,
       type, status,                      // "generate"/"regenerate"; "completed"/"failed"/"running"
-      video_storage_key, video_bytes,
+      video_key, video_bytes,
       generation_time_sec, completed_at,
       params: { ...all generation params with paths normalized to storage_keys },
       meta:   { host:{...}, composition:{...}, products:[...], background:{...}, voice:{...} },
@@ -100,7 +100,7 @@ async def upsert(user_id: str, manifest: dict) -> None:
     before passing it in (the repo does no path scrubbing).
 
     PR S3+ invariant: completed manifests MUST carry a non-empty
-    `video_storage_key`. Without it the /api/videos handler can't
+    `video_key`. Without it the /api/videos handler can't
     serve the video after C13 cutover (S3 backend has no
     `local_path_for` fallback). Reject loudly so a regression in the
     generate task doesn't silently produce playable-only-on-LocalDisk
@@ -116,10 +116,10 @@ async def upsert(user_id: str, manifest: dict) -> None:
     task_id = manifest.get("task_id")
     if not task_id:
         raise ValueError("upsert requires manifest.task_id")
-    if manifest.get("status") == "completed" and not manifest.get("video_storage_key"):
+    if manifest.get("status") == "completed" and not manifest.get("video_key"):
         raise ValueError(
             f"upsert: completed manifest for {task_id} is missing "
-            "video_storage_key (post-C7 invariant)"
+            "video_key (post-C7 invariant)"
         )
     set_doc = dict(manifest)
     set_doc["user_id"] = user_id

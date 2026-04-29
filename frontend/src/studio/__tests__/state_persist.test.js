@@ -31,10 +31,10 @@ describe('wizardStore persistence', () => {
     // Phase 2b: host is schema-typed. Variants live on
     // host.generation.variants when state === 'ready', not as a flat array.
     const variants = [
-      { seed: 10, imageId: 'host_a', url: '/api/files/host_a.png', path: '/srv/host_a.png' },
-      { seed: 42, imageId: 'host_b', url: '/api/files/host_b.png', path: '/srv/host_b.png' },
-      { seed: 77, imageId: 'host_c', url: '/api/files/host_c.png', path: '/srv/host_c.png' },
-      { seed: 128, imageId: 'host_d', url: '/api/files/host_d.png', path: '/srv/host_d.png' },
+      { seed: 10, imageId: 'host_a', url: '/api/files/host_a.png', key: '/srv/host_a.png' },
+      { seed: 42, imageId: 'host_b', url: '/api/files/host_b.png', key: '/srv/host_b.png' },
+      { seed: 77, imageId: 'host_c', url: '/api/files/host_c.png', key: '/srv/host_c.png' },
+      { seed: 128, imageId: 'host_d', url: '/api/files/host_d.png', key: '/srv/host_d.png' },
     ];
     const state = {
       ...INITIAL_WIZARD_STATE,
@@ -81,8 +81,8 @@ describe('wizardStore persistence', () => {
   it('preserves finished composition variants (Step 2) symmetrically', () => {
     // Phase 2c.3: composition is schema-typed (settings + generation).
     const variants = [
-      { seed: 10, imageId: 'c_a', url: '/api/files/c_a.png', path: '/srv/c_a.png' },
-      { seed: 42, imageId: 'c_b', url: '/api/files/c_b.png', path: '/srv/c_b.png' },
+      { seed: 10, imageId: 'c_a', url: '/api/files/c_a.png', key: '/srv/c_a.png' },
+      { seed: 42, imageId: 'c_b', url: '/api/files/c_b.png', key: '/srv/c_b.png' },
     ];
     const state = {
       ...INITIAL_WIZARD_STATE,
@@ -100,7 +100,7 @@ describe('wizardStore persistence', () => {
     const restored = roundtrip(state);
     expect(restored.composition.generation.state).toBe('ready');
     expect(restored.composition.generation.variants).toHaveLength(2);
-    expect(restored.composition.generation.variants[0].path).toBe('/srv/c_a.png');
+    expect(restored.composition.generation.variants[0].key).toBe('/srv/c_a.png');
   });
 
   it('preserves image-mode host face/outfit ServerAsset refs across reload', () => {
@@ -113,8 +113,8 @@ describe('wizardStore persistence', () => {
         ...INITIAL_WIZARD_STATE.host,
         input: {
           kind: 'image',
-          faceRef: { path: '/srv/face_abc.png', url: '/api/files/face_abc.png', name: 'face.png' },
-          outfitRef: { path: '/srv/outfit_def.png', url: '/api/files/outfit_def.png', name: 'outfit.png' },
+          faceRef: { key: '/srv/face_abc.png', url: '/api/files/face_abc.png', name: 'face.png' },
+          outfitRef: { key: '/srv/outfit_def.png', url: '/api/files/outfit_def.png', name: 'outfit.png' },
           outfitText: '베이지 니트',
           extraPrompt: '',
           faceStrength: 0.7,
@@ -124,10 +124,10 @@ describe('wizardStore persistence', () => {
     };
     const restored = roundtrip(state);
     expect(restored.host.input.kind).toBe('image');
-    expect(restored.host.input.faceRef.path).toBe('/srv/face_abc.png');
+    expect(restored.host.input.faceRef.key).toBe('/srv/face_abc.png');
     expect(restored.host.input.faceRef.url).toBe('/api/files/face_abc.png');
     expect(restored.host.input.faceRef.file).toBeUndefined();  // No File handle in ServerAsset
-    expect(restored.host.input.outfitRef.path).toBe('/srv/outfit_def.png');
+    expect(restored.host.input.outfitRef.key).toBe('/srv/outfit_def.png');
   });
 
   it('drops LocalAsset face/outfit refs (File handle + transient blob URL) on persist', () => {
@@ -166,7 +166,7 @@ describe('wizardStore persistence', () => {
           name: 'Product A (uploaded)',
           source: {
             kind: 'uploaded',
-            asset: { path: '/srv/p1.png', url: '/api/files/p1.png', name: 'p1.png' },
+            asset: { key: '/srv/p1.png', url: '/api/files/p1.png', name: 'p1.png' },
           },
         },
         {
@@ -183,7 +183,7 @@ describe('wizardStore persistence', () => {
     const restored = roundtrip(state);
     expect(restored.products).toHaveLength(3);
     expect(restored.products[0].source.kind).toBe('uploaded');
-    expect(restored.products[0].source.asset.path).toBe('/srv/p1.png');
+    expect(restored.products[0].source.asset.key).toBe('/srv/p1.png');
     expect(restored.products[1].source.kind).toBe('empty');  // local → empty
     expect(restored.products[2].source.kind).toBe('url');
     expect(restored.products[2].source.url).toBe('https://x/y.png');
@@ -199,12 +199,12 @@ describe('wizardStore persistence', () => {
       ...INITIAL_WIZARD_STATE,
       voice: {
         source: 'upload',
-        audio: { path: '/srv/tts.wav', name: 'tts.wav' },
+        audio: { key: '/srv/tts.wav', name: 'tts.wav' },
         script: { paragraphs: ['caption'] },
       },
     };
     const restoredWithPath = roundtrip(withPath);
-    expect(restoredWithPath.voice.audio.path).toBe('/srv/tts.wav');
+    expect(restoredWithPath.voice.audio.key).toBe('/srv/tts.wav');
     expect(restoredWithPath.voice.audio.file).toBeUndefined();
 
     const onlyFile = {

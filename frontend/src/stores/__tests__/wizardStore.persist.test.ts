@@ -64,8 +64,8 @@ describe('Lane C — persist hydrate safeParse gate', () => {
         generation: {
           state: 'ready',
           batchId: 'b-001',
-          variants: [{ seed: 1, imageId: 'a', url: '/u/a.png', path: '/p/a.png' }],
-          selected: { seed: 1, imageId: 'a', url: '/u/a.png', path: '/p/a.png' },
+          variants: [{ seed: 1, imageId: 'a', url: '/u/a.png', key: '/p/a.png' }],
+          selected: { seed: 1, imageId: 'a', url: '/u/a.png', key: '/p/a.png' },
           prevSelected: null,
         },
       },

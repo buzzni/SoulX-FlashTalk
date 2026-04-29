@@ -81,11 +81,11 @@ export function useTTSGeneration(): UseTTSGenerationReturn {
       // canonical persisted identifier; URL is best-effort (the
       // backend may or may not return one).
       const audio: ServerAsset = {
-        path: res.audio_path ?? '',
+        key: res.audio_path ?? '',
         url: typeof res.url === 'string' ? res.url : undefined,
         name: 'tts.wav',
       };
-      if (audio.path) {
+      if (audio.key) {
         useWizardStore.getState().setVoice((prev) => {
           if (prev.source === 'upload') return prev;
           return { ...prev, generation: { state: 'ready', audio } };

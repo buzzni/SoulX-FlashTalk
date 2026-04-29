@@ -229,19 +229,6 @@ class S3MediaStore:
         self.upload(src, key)
         return key
 
-    # ── deprecated / not applicable on S3 ───────────────────────────
-    def local_path_for(self, key: str) -> Path:
-        raise NotImplementedError(
-            "S3MediaStore has no local path; use open_local() or "
-            "download_to() instead."
-        )
-
-    def key_from_path(self, abs_path) -> str:
-        raise NotImplementedError(
-            "S3MediaStore has no local path; build the storage_key "
-            "directly in the generator."
-        )
-
     # ── PR S3+ key-based API ────────────────────────────────────────
     def upload(self, src: Path, key: str) -> None:
         """Upload `src` to S3 at `key`.

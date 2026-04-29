@@ -86,7 +86,7 @@ export function HostReferenceUploader() {
     let alive = true;
     (async () => {
       const res = await faceUploadFn(local.file);
-      if (!alive || !res?.path) return;
+      if (!alive || !res?.key) return;
       const cur = getValues('input');
       if (
         cur.kind !== 'image' ||
@@ -99,7 +99,7 @@ export function HostReferenceUploader() {
       setValue(
         'input.faceRef',
         {
-          path: res.path as string,
+          key: res.key as string,
           url:
             typeof res.url === 'string'
               ? res.url
@@ -125,7 +125,7 @@ export function HostReferenceUploader() {
     let alive = true;
     (async () => {
       const res = await outfitUploadFn(local.file);
-      if (!alive || !res?.path) return;
+      if (!alive || !res?.key) return;
       const cur = getValues('input');
       if (
         cur.kind !== 'image' ||
@@ -138,7 +138,7 @@ export function HostReferenceUploader() {
       setValue(
         'input.outfitRef',
         {
-          path: res.path as string,
+          key: res.key as string,
           url:
             typeof res.url === 'string'
               ? res.url

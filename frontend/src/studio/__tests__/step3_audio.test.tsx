@@ -96,8 +96,8 @@ const READY_HOST = {
   generation: {
     state: 'ready' as const,
     batchId: 'b1',
-    variants: [{ seed: 1, imageId: 'h1', url: '/u/h1.png', path: '/p/h1.png' }],
-    selected: { seed: 1, imageId: 'h1', url: '/u/h1.png', path: '/p/h1.png' },
+    variants: [{ seed: 1, imageId: 'h1', url: '/u/h1.png', key: '/p/h1.png' }],
+    selected: { seed: 1, imageId: 'h1', url: '/u/h1.png', key: '/p/h1.png' },
     prevSelected: null,
   },
 };
@@ -234,7 +234,7 @@ describe('Step3Audio — eager upload effect', () => {
       script: { paragraphs: [''] },
     });
     audioUploadRun.mockResolvedValue({
-      path: '/srv/voice.mp3',
+      key: '/srv/voice.mp3',
       url: '/u/voice.mp3',
     });
     const file = new File(['fake-audio'], 'sample.mp3', { type: 'audio/mp3' });
@@ -256,8 +256,8 @@ describe('Step3Audio — eager upload effect', () => {
       () => {
         const v = useWizardStore.getState().voice;
         if (v.source !== 'upload') throw new Error('not upload');
-        if (!v.audio || !('path' in v.audio)) throw new Error('not server');
-        expect(v.audio.path).toBe('/srv/voice.mp3');
+        if (!v.audio || !('key' in v.audio)) throw new Error('not server');
+        expect(v.audio.key).toBe('/srv/voice.mp3');
       },
       { timeout: 1500 },
     );

@@ -69,9 +69,10 @@ def test_happy_path_returns_candidates(client, tmp_path):
     data = r.json()
     assert len(data["candidates"]) == 4
     assert data["partial"] is False
-    # PR S3+ C6a: each candidate now carries storage_key + url
+    # PR-4: each candidate carries {seed, key, url} — `path`/`storage_key`
+    # legacy fields removed.
     for cand in data["candidates"]:
-        assert cand["storage_key"].startswith("outputs/hosts/saved/host_s")
+        assert cand["key"].startswith("outputs/hosts/saved/host_s")
         assert cand["url"].startswith("/api/files/outputs/hosts/saved/")
 
 

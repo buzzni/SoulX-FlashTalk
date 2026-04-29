@@ -42,8 +42,8 @@ describe('migrateLegacy', () => {
         selectedSeed: 42,
         selectedImageId: 'host_abc_s42',
         variants: [
-          { seed: 10, id: 'v10', imageId: 'host_abc_s10', url: 'https://x/10.png', path: 'h/10.png' },
-          { seed: 42, id: 'v42', imageId: 'host_abc_s42', url: 'https://x/42.png', path: 'h/42.png' },
+          { seed: 10, id: 'v10', imageId: 'host_abc_s10', url: 'https://x/10.png', key: 'h/10.png' },
+          { seed: 42, id: 'v42', imageId: 'host_abc_s42', url: 'https://x/42.png', key: 'h/42.png' },
         ],
       },
     };
@@ -77,7 +77,7 @@ describe('migrateLegacy', () => {
     }).background;
     expect(upload).toEqual({
       kind: 'upload',
-      asset: { path: 'bg/foo.png', url: 'https://x/foo.png', name: 'foo.png' },
+      asset: { key: 'bg/foo.png', url: 'https://x/foo.png', name: 'foo.png' },
     });
   });
 
@@ -85,9 +85,9 @@ describe('migrateLegacy', () => {
     const out = migrateLegacy({
       background: { source: 'upload', uploadPath: 'bg/foo.png', imageUrl: 'blob:http://localhost/xxx' },
     });
-    if (out.background.kind === 'upload' && out.background.asset && 'path' in out.background.asset) {
+    if (out.background.kind === 'upload' && out.background.asset && 'key' in out.background.asset) {
       expect(out.background.asset.url).toBeUndefined();
-      expect(out.background.asset.path).toBe('bg/foo.png');
+      expect(out.background.asset.key).toBe('bg/foo.png');
     } else {
       throw new Error('expected uploaded server asset');
     }
@@ -145,13 +145,13 @@ describe('migrateLegacy', () => {
     const out = migrateLegacy({
       voice: {
         source: 'upload',
-        uploadedAudio: { path: 'audio/upload/foo.mp3', name: 'foo.mp3' },
+        uploadedAudio: { key: 'audio/upload/foo.mp3', name: 'foo.mp3' },
         script: 'subtitle line',
       },
     });
     expect(out.voice.source).toBe('upload');
     if (out.voice.source !== 'upload') throw new Error('narrowing');
-    expect(out.voice.audio).toEqual({ path: 'audio/upload/foo.mp3', name: 'foo.mp3' });
+    expect(out.voice.audio).toEqual({ key: 'audio/upload/foo.mp3', name: 'foo.mp3' });
   });
 
   it('falls back to default resolution + imageQuality when missing', () => {
@@ -219,7 +219,7 @@ describe('toPersistable', () => {
             },
           },
         },
-        { id: 'p2', source: { kind: 'uploaded', asset: { path: 'p/2.png' } } },
+        { id: 'p2', source: { kind: 'uploaded', asset: { key: 'p/2.png' } } },
       ],
     });
     expect(out.products[0]?.source.kind).toBe('empty');
@@ -257,12 +257,12 @@ describe('toPersistable', () => {
       voiceName: 'V',
       advanced: { speed: 1, stability: 0.5, style: 0.3, similarity: 0.75 },
       script: { paragraphs: ['hi'] },
-      generation: { state: 'ready', audio: { path: 'a/b.wav' } },
+      generation: { state: 'ready', audio: { key: 'a/b.wav' } },
     });
     if (out.source !== 'tts') throw new Error('narrowing');
     expect(out.generation.state).toBe('ready');
     if (out.generation.state === 'ready') {
-      expect(out.generation.audio.path).toBe('a/b.wav');
+      expect(out.generation.audio.key).toBe('a/b.wav');
     }
   });
 
@@ -309,7 +309,7 @@ describe('toPersistable', () => {
       seed: 1,
       imageId: 'host_x_s1',
       url: 'https://x/1.png',
-      path: 'h/1.png',
+      key: 'h/1.png',
     };
     const out = toPersistable({
       ...migrateLegacy({}),
@@ -333,7 +333,7 @@ describe('readiness predicates', () => {
     expect(isBackgroundReady({ kind: 'preset', presetId: null })).toBe(false);
     expect(isBackgroundReady({ kind: 'preset', presetId: 'studio_white' })).toBe(true);
     expect(isBackgroundReady({ kind: 'upload', asset: null })).toBe(false);
-    expect(isBackgroundReady({ kind: 'upload', asset: { path: 'a' } })).toBe(true);
+    expect(isBackgroundReady({ kind: 'upload', asset: { key: 'a' } })).toBe(true);
     expect(isBackgroundReady({ kind: 'url', url: '' })).toBe(false);
     expect(isBackgroundReady({ kind: 'url', url: 'https://x' })).toBe(true);
     expect(isBackgroundReady({ kind: 'prompt', prompt: '' })).toBe(false);
@@ -342,12 +342,12 @@ describe('readiness predicates', () => {
 
   it('isProductReady is false for empty, true for any other source', () => {
     expect(isProductReady({ id: 'a', source: { kind: 'empty' } })).toBe(false);
-    expect(isProductReady({ id: 'a', source: { kind: 'uploaded', asset: { path: 'p' } } })).toBe(true);
+    expect(isProductReady({ id: 'a', source: { kind: 'uploaded', asset: { key: 'p' } } })).toBe(true);
     expect(isProductReady({ id: 'a', source: { kind: 'url', url: 'https://x', urlInput: 'x' } })).toBe(true);
   });
 
   it('isHostReady requires ready state with non-null selected', () => {
-    const v = { seed: 1, imageId: 'a', url: 'https://x', path: 'h/a' };
+    const v = { seed: 1, imageId: 'a', url: 'https://x', key: 'h/a' };
     expect(
       isHostReady({
         input: { kind: 'text', prompt: '', negativePrompt: '', extraPrompt: '' },
@@ -389,7 +389,7 @@ describe('readiness predicates', () => {
         voiceName: 'V',
         advanced: { speed: 1, stability: 0.5, style: 0.3, similarity: 0.75 },
         script: { paragraphs: ['hi'] },
-        generation: { state: 'ready', audio: { path: 'a/b' } },
+        generation: { state: 'ready', audio: { key: 'a/b' } },
       }),
     ).toBe(true);
   });

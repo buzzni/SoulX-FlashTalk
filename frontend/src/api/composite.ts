@@ -43,7 +43,7 @@ export function buildCompositeBody({ host, products, background, composition }: 
   body.append('hostImagePath', host.selectedPath);
 
   const productPaths = (products || [])
-    .map((p) => p.path)
+    .map((p) => p.key)
     .filter((p): p is string => Boolean(p));
   body.append('productImagePaths', JSON.stringify(productPaths));
 

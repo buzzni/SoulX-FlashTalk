@@ -24,7 +24,7 @@ export interface CompositionVariant {
   id: string;
   imageId?: string | null;
   url?: string;
-  path?: string;
+  key?: string;
   placeholder: boolean;
   error?: string;
   /** True for the 5th "이전 선택" tile carried over from a prior batch. */
@@ -55,19 +55,19 @@ function liftSchemaVariant(v: SchemaCompositionVariant): CompositionVariant {
     id: `c${v.seed}`,
     imageId: v.imageId,
     url: v.url,
-    path: v.path,
+    key: v.key,
     placeholder: false,
   };
 }
 
 function lowerToSchema(variants: CompositionVariant[]): SchemaCompositionVariant[] {
   return variants
-    .filter((v) => !v.placeholder && !v.error && v.url && v.path && v.imageId)
+    .filter((v) => !v.placeholder && !v.error && v.url && v.key && v.imageId)
     .map((v) => ({
       seed: v.seed,
       imageId: v.imageId as string,
       url: v.url as string,
-      path: v.path as string,
+      key: v.key as string,
     }));
 }
 
@@ -164,14 +164,14 @@ export function useCompositeGeneration(): UseCompositeGenerationReturn {
             // direction_en (backend's English-translated direction) is
             // a debug field — drop on persist; not modeled in schema.
           } else if (evt.type === 'candidate') {
-            const path = evt.path as string;
+            const key = evt.key as string;
             currentVariants = currentVariants.map((v) =>
               v.seed === evt.seed
                 ? {
                     ...v,
                     url: evt.url as string,
-                    path,
-                    imageId: imageIdFromPath(path),
+                    key,
+                    imageId: imageIdFromPath(key),
                     placeholder: false,
                   }
                 : v,
@@ -218,7 +218,7 @@ export function useCompositeGeneration(): UseCompositeGenerationReturn {
               setBatchId(currentBatchId);
             }
             const prevRaw = evt.prev_selected as
-              | { image_id?: string; path?: string; url?: string; seed?: number; batch_id?: string }
+              | { image_id?: string; key?: string; url?: string; seed?: number; batch_id?: string }
               | null
               | undefined;
             if (prevRaw && prevRaw.image_id && prevRaw.url) {
@@ -227,7 +227,7 @@ export function useCompositeGeneration(): UseCompositeGenerationReturn {
                 id: `prev-${prevRaw.image_id}`,
                 imageId: prevRaw.image_id,
                 url: prevRaw.url,
-                path: prevRaw.path,
+                key: prevRaw.key,
                 placeholder: false,
                 isPrev: true,
               };
@@ -237,12 +237,12 @@ export function useCompositeGeneration(): UseCompositeGenerationReturn {
             setPrevSelected(currentPrev);
             const finalVariants = lowerToSchema(currentVariants);
             const prevSchema: SchemaCompositionVariant | null =
-              currentPrev && currentPrev.imageId && currentPrev.url && currentPrev.path
+              currentPrev && currentPrev.imageId && currentPrev.url && currentPrev.key
                 ? {
                     seed: currentPrev.seed,
                     imageId: currentPrev.imageId,
                     url: currentPrev.url,
-                    path: currentPrev.path,
+                    key: currentPrev.key,
                   }
                 : null;
             useWizardStore.getState().setComposition((prev) => ({

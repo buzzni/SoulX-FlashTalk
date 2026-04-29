@@ -57,18 +57,33 @@ def client(monkeypatch, tmp_path):
 
 
 def _assert_response_shape(body: dict, *, key_prefix: str):
-    """Verify the standard upload response shape."""
+    """Verify the PR-4 upload response shape: {filename, key, url}."""
     assert "filename" in body, f"missing filename in {body}"
-    assert "path" in body, f"missing path in {body}"
-    assert "storage_key" in body, f"missing storage_key in {body}"
+    assert "key" in body, f"missing key in {body}"
     assert "url" in body, f"missing url in {body}"
-    assert body["storage_key"].startswith(key_prefix), \
-        f"key {body['storage_key']!r} does not start with {key_prefix!r}"
+    # Legacy fields removed in PR-4
+    assert "path" not in body, f"unexpected legacy `path` in {body}"
+    assert "storage_key" not in body, f"unexpected legacy `storage_key` in {body}"
+    assert body["key"].startswith(key_prefix), \
+        f"key {body['key']!r} does not start with {key_prefix!r}"
     # url should serve the same key
-    assert body["storage_key"] in body["url"], \
-        f"url {body['url']!r} does not reference key {body['storage_key']!r}"
+    assert body["key"] in body["url"], \
+        f"url {body['url']!r} does not reference key {body['key']!r}"
     # filename should match the key's basename
-    assert body["filename"] == body["storage_key"].split("/")[-1]
+    assert body["filename"] == body["key"].split("/")[-1]
+
+
+def _resolve_local(client, key: str) -> Path:
+    """LocalDisk-mode helper: resolve a storage_key to its on-disk path
+    via the test's monkeypatched OUTPUTS_DIR/UPLOADS_DIR roots."""
+    head, _, rest = key.partition("/")
+    root = {"uploads": client._uploads_dir, "outputs": client._uploads_dir}
+    base = root.get(head) or client._uploads_dir
+    if head == "outputs":
+        # outputs root is sibling, but the upload endpoints in this test
+        # file all write under uploads — we never need outputs here.
+        pass
+    return Path(client._uploads_dir).parent / head / rest
 
 
 def test_upload_host_image_returns_storage_key(client):
@@ -77,9 +92,12 @@ def test_upload_host_image_returns_storage_key(client):
     assert r.status_code == 200, r.text
     body = r.json()
     _assert_response_shape(body, key_prefix="uploads/host_")
-    # Backwards-compat: path on LocalDisk is the absolute filesystem path
-    assert Path(body["path"]).exists()
-    assert Path(body["path"]).read_bytes() == _PNG_BYTES
+    # LocalDisk mode: the file should be readable via the storage_key
+    # resolver (replaces the old `path` field probe).
+    head, _, rest = body["key"].partition("/")
+    on_disk = Path(client._uploads_dir).parent / head / rest
+    assert on_disk.exists()
+    assert on_disk.read_bytes() == _PNG_BYTES
 
 
 def test_upload_background_image_returns_storage_key(client):

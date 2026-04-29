@@ -35,7 +35,7 @@ def _completed_doc(task_id: str, *, storage_key: str) -> dict:
         "task_id": task_id,
         "type": "generate",
         "status": "completed",
-        "video_storage_key": storage_key,
+        "video_key": storage_key,
         "video_path": None,
         "params": {},
         "meta": {},
@@ -46,7 +46,7 @@ def _completed_doc(task_id: str, *, storage_key: str) -> dict:
 
 def _legacy_doc(task_id: str, *, video_path: str) -> dict:
     """Pre-C7 row: video_path absolute, no storage_key. status='error'
-    so the post-C7 completed-invariant check (asserting video_storage_key)
+    so the post-C7 completed-invariant check (asserting video_key)
     doesn't apply — this is exactly the kind of row that legacy fallback
     serves."""
     now = datetime.now(timezone.utc)
@@ -55,7 +55,7 @@ def _legacy_doc(task_id: str, *, video_path: str) -> dict:
         "task_id": task_id,
         "type": "generate",
         "status": "error",
-        "video_storage_key": None,
+        "video_key": None,
         "video_path": video_path,
         "params": {},
         "meta": {},

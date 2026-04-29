@@ -201,8 +201,8 @@ describe('api.js — buildHostGenerateBody', () => {
 describe('api.js — buildCompositeBody', () => {
   const host = { selectedPath: '/uploads/host.png' };
   const products = [
-    { path: '/uploads/p1.png', name: 'p1' },
-    { path: '/uploads/p2.png', name: 'p2' },
+    { key: '/uploads/p1.png', name: 'p1' },
+    { key: '/uploads/p2.png', name: 'p2' },
   ];
   const composition = { direction: '밝은 분위기', shot: 'bust', angle: 'eye' };
 
@@ -293,11 +293,11 @@ describe('api.js — upload choreography', () => {
   it('posts to /api/upload/host-image and returns parsed JSON', async () => {
     global.fetch.mockResolvedValueOnce({
       ok: true,
-      json: async () => ({ path: '/uploads/host_123.png', filename: 'host_123.png' }),
+      json: async () => ({ key: '/uploads/host_123.png', filename: 'host_123.png' }),
     });
     const file = new File(['x'], 'host.png', { type: 'image/png' });
     const r = await uploadHostImage(file);
-    expect(r.path).toBe('/uploads/host_123.png');
+    expect(r.key).toBe('/uploads/host_123.png');
     expect(global.fetch).toHaveBeenCalledWith(
       expect.stringMatching(/\/api\/upload\/host-image$/),
       expect.objectContaining({ method: 'POST' }),
@@ -424,9 +424,9 @@ describe('api.js — generateVideo attaches full provenance meta', () => {
           state: 'ready',
           batchId: null,
           variants: [
-            { seed: 42, imageId: 'host_42', url: '/api/files/host_42.png', path: '/srv/host_42.png' },
+            { seed: 42, imageId: 'host_42', url: '/api/files/host_42.png', key: '/srv/host_42.png' },
           ],
-          selected: { seed: 42, imageId: 'host_42', url: '/api/files/host_42.png', path: '/srv/host_42.png' },
+          selected: { seed: 42, imageId: 'host_42', url: '/api/files/host_42.png', key: '/srv/host_42.png' },
           prevSelected: null,
         },
       },
@@ -443,16 +443,16 @@ describe('api.js — generateVideo attaches full provenance meta', () => {
           state: 'ready',
           batchId: null,
           variants: [
-            { seed: 77, imageId: 'c_77', url: '/api/files/c_77.png', path: '/srv/c_77.png' },
+            { seed: 77, imageId: 'c_77', url: '/api/files/c_77.png', key: '/srv/c_77.png' },
           ],
-          selected: { seed: 77, imageId: 'c_77', url: '/api/files/c_77.png', path: '/srv/c_77.png' },
+          selected: { seed: 77, imageId: 'c_77', url: '/api/files/c_77.png', key: '/srv/c_77.png' },
           prevSelected: null,
         },
       },
       // Phase 2c: schema-shaped products (tagged source).
       products: [
-        { id: 'p1', name: '쿠션', source: { kind: 'uploaded', asset: { path: '/srv/cushion.png' } } },
-        { id: 'p2', name: '소파', source: { kind: 'uploaded', asset: { path: '/srv/sofa.png' } } },
+        { id: 'p1', name: '쿠션', source: { kind: 'uploaded', asset: { key: '/srv/cushion.png' } } },
+        { id: 'p2', name: '소파', source: { kind: 'uploaded', asset: { key: '/srv/sofa.png' } } },
       ],
       // Phase 2a: schema-shaped tagged union. presetLabel is dropped
       // from the schema (it's a derived UI field, looked up from
