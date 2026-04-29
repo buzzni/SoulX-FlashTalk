@@ -31,7 +31,7 @@ describe('deleteVoice', () => {
     await deleteVoice('voice abc/xyz');
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    const [url, init] = fetchMock.mock.calls[0];
+    const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
     expect(url).toMatch(/\/api\/elevenlabs\/voices\/voice%20abc%2Fxyz$/);
     expect(init).toMatchObject({ method: 'DELETE' });
   });
