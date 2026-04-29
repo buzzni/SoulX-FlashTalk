@@ -3818,35 +3818,52 @@ async def delete_video(task_id: str, request: Request):
 
     removed_images = await host_repo.cascade_delete_by_video(user["user_id"], task_id)
 
-    # Resolve the video path: prefer in-memory state, then studio_results.
     from modules.repositories import studio_result_repo as _result_repo
-    video_path: Optional[str] = None
+    from modules import storage as _storage
+
+    # Inputs to the delete: in-flight worker temp + canonical storage_key from
+    # Mongo + legacy LocalDisk video_path (pre-PR S3+ rows).
     state = task_states.get(task_id)
-    if state and state.get("output_path"):
-        video_path = state["output_path"]
-    if not video_path:
-        doc = await _result_repo.get(user["user_id"], task_id)
-        if doc:
-            video_path = doc.get("video_path")
-            if not video_path and doc.get("video_storage_key"):
-                from modules import storage as _storage
-                try:
-                    video_path = str(_storage.media_store.local_path_for(doc["video_storage_key"]))
-                except ValueError:
-                    video_path = None
+    local_in_flight = state.get("output_path") if state else None
+    doc = await _result_repo.get(user["user_id"], task_id)
+    storage_key = (doc or {}).get("video_storage_key")
+    legacy_video_path = (doc or {}).get("video_path")
 
     deleted_video = False
-    if video_path and os.path.exists(video_path):
-        try:
-            os.unlink(video_path)
-            deleted_video = True
-        except OSError as e:
-            logger.warning("Failed to delete video file %s: %s", video_path, e)
 
-    # Result row (PR5 replacement for outputs/results/<task>.json + history.json).
+    # 1. Storage-aware delete via media_store. Works in both S3 and LocalDisk
+    #    modes via the MediaStore Protocol. On S3 backend, local_path_for() —
+    #    the previous resolution path — would have raised NotImplementedError;
+    #    media_store.delete() is the supported route. Best-effort: an S3
+    #    failure logs and falls through to Mongo row delete so the user-facing
+    #    delete still succeeds (orphan caught by S3 lifecycle when configured).
+    if storage_key:
+        try:
+            if _storage.media_store.delete(storage_key):
+                deleted_video = True
+        except Exception as e:
+            logger.warning(
+                "Failed to delete media object %s for task %s: %s",
+                storage_key, task_id, e,
+            )
+
+    # 2. Best-effort local cleanup: worker temp (pre-upload) + legacy absolute
+    #    paths from pre-PR S3+ rows. On LocalDisk backend, storage_key already
+    #    resolved to the same file in step 1, so the os.path.exists guards
+    #    short-circuit cleanly.
+    for candidate in (local_in_flight, legacy_video_path):
+        if candidate and os.path.exists(candidate):
+            try:
+                os.unlink(candidate)
+                deleted_video = True
+            except OSError as e:
+                logger.warning("Failed to delete local video file %s: %s", candidate, e)
+
+    # 3. Mongo row delete (PR5 replacement for outputs/results/<task>.json
+    #    + history.json).
     deleted_row = await _result_repo.delete(user["user_id"], task_id)
 
-    # In-memory task state (best effort)
+    # 4. In-memory task state (best effort).
     task_states.pop(task_id, None)
 
     # Failed/cancelled tasks own a studio_results row but no video file and
