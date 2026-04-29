@@ -329,3 +329,74 @@ attention before the migration is "done done".
 **Priority**: P2 (post-cutover follow-ups, before wider rollout).
 
 **Depends on / blocked by**: PR S3+ C13 cutover land.
+
+---
+
+## /api/host/generate/stream storage key ownership hardening (P1)
+
+**What**: Apply the `user_owns_storage_key(user_id, key)` primitive (introduced in saved-host PR1, `utils/security.py`) to `/api/host/generate/stream` for `faceRefPath`, `outfitRefPath`, and `styleRefPath` (`app.py:3503` area). Today `_validate_and_resolve` only validates storage-key shape — a user can pass another user's `outputs/<their-uuid>` key and generate a derivative.
+
+**Why**: Found by codex during saved-host /plan-eng-review (2026-04-29). Saved-host PR1 only fixes `/api/hosts/save`; the same hole survives in the variant-generate flow. Result: unauthorized derivative-generation path against any user whose storage_keys are guessable or leaked.
+
+**Pros**:
+- Closes the broader cross-user image-clone surface, not just the saved-host symptom.
+- Single primitive, applied consistently → low cognitive overhead going forward.
+- Backed by codex P0 finding (cross-model consensus).
+
+**Cons**:
+- Backfill scope: every endpoint that takes a storage_key arg needs the primitive applied. Touches `/api/host/generate/stream`, possibly composite/audio endpoints.
+- Test work: cross-user 거부 케이스를 endpoint마다.
+
+**Context**: `_validate_and_resolve` (`app.py:259`) only validates SHAPE via `safe_input_value` — `utils/security.py` doesn't currently know which user owns which key. The saved-host PR introduces `user_owns_storage_key(user_id, key) -> bool` based on bucket-prefix conventions (`outputs/<user_id>/...`, `uploads/<user_id>/...`, `examples/` shared). Apply to all key-accepting endpoints.
+
+**Effort**: human ~1일 / CC ~1시간 (audit + apply + tests).
+
+**Priority**: P1 (security; expand within ~1 sprint of saved-host PRs landing).
+
+**Depends on / blocked by**: Saved-host PR1 (introduces the primitive).
+
+---
+
+## /api/hosts list pagination + cap (P3)
+
+**What**: `studio_saved_host_repo.list_for_user` (`modules/repositories/studio_saved_host_repo.py:79`) loads all rows + signs URL for every item. v1엔 사용자 N<10 기대지만, power user가 50+ 만들면 sidebar count + library page 둘 다 무거워짐. Pagination (skip/limit) 또는 count-only endpoint 분리.
+
+**Why**: Codex finding (saved-host /plan-eng-review 2026-04-29). 현재 사용자 수 작아서 즉시 문제는 아니지만, scaling cliff.
+
+**Pros**: 
+- Library page lazy load (200+ host에서도 빠름).
+- Sidebar count는 `GET /api/hosts/count` 같은 lightweight endpoint로 분리 가능.
+
+**Cons**:
+- v1엔 over-engineering 가능성. N<50일 때 ROI 0.
+
+**Context**: react-query는 already pagination 지원 (`useInfiniteQuery`). 추가 cost 작음.
+
+**Effort**: human ~3시간 / CC ~30분.
+
+**Priority**: P3 (defer until N>50 user 발생).
+
+**Depends on / blocked by**: Saved-host PR1 land.
+
+---
+
+## api-mappers.ts:61 face-only mode='style-ref' contract clarification (P2)
+
+**What**: `frontend/src/wizard/api-mappers.ts:61`에서 image input + faceRef only가 mode='style-ref' but faceRefPath 보냄 (host.ts:41). 백엔드가 tolerate. saved-host 기능이 이 accidental compatibility 위에 ride 중.
+
+**Why**: Codex finding (2026-04-29). 깨끗한 contract 아님. 누가 한 군데를 fix하면 saved-host 기능이 silent break.
+
+**Pros**:
+- 명시적 contract: face-only는 'face-ref' mode + faceRefPath. style-only는 'style-ref' + styleRefPath. backend도 이걸 enforce.
+- saved-host의 face_ref-locked 흐름이 안전.
+
+**Cons**:
+- Frontend mapper + backend 양쪽 변경.
+
+**Context**: api-mappers.ts:61 lines + host.ts:41 + backend host generation router. 별도 PR로 cleanup.
+
+**Effort**: human ~4시간 / CC ~30분.
+
+**Priority**: P2 (saved-host PR3 ship 후 follow-up).
+
+**Depends on / blocked by**: 없음 (병렬 작업 가능).
