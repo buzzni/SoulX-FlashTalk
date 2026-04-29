@@ -68,13 +68,17 @@ def test_tts_writes_to_outputs_and_returns_serveable_url(client):
     assert "filename" in body
     assert "path" in body
     assert "url" in body, "frontend needs a serveable URL, not just filesystem path"
+    # PR S3+ C6a: response now includes the bucket-prefixed key.
+    assert body["storage_key"] == f"outputs/{body['filename']}"
 
     # File must land in OUTPUTS_DIR (a SAFE_ROOT) — not TEMP_DIR
     assert body["path"].startswith(config.OUTPUTS_DIR)
     assert os.path.exists(body["path"])
 
-    # URL is relative through /api/files/ so the Vite proxy can route it
-    assert body["url"] == f"/api/files/{body['filename']}"
+    # URL is relative through /api/files/ so the Vite proxy can route it.
+    # PR S3+ C6a: URL now carries the bucket-prefixed key
+    # (resolve_legacy_or_keyed accepts both old and new shapes).
+    assert body["url"] == f"/api/files/{body['storage_key']}"
     assert not body["url"].startswith("http")  # no host/port hardcoded
 
     # And /api/files/ actually serves it

@@ -564,6 +564,7 @@ def compose_agents_together(
     scene_prompt: str = "",
     reference_image_paths: Optional[List[str]] = None,
     multitalk: bool = False,
+    output_dir: Optional[str] = None,
 ) -> Dict[int, str]:
     """Compose multiple agents with Gemini-generated scene.
 
@@ -578,11 +579,17 @@ def compose_agents_together(
         target_size: (width, height) per agent output
         layout: "split", "switch", "pip"
         scene_prompt: description of the scene/background to generate
+        output_dir: where to write composed PNGs. None → derive from
+            bg_image_path's dir (legacy behaviour, usually UPLOADS_DIR).
+            PR S3+ callers should pass `OUTPUTS_DIR/composites` so
+            `media_store.upload(...)` sees a same-file no-op on
+            LocalDisk and the file lands in the right bucket on S3.
 
     Returns:
         {agent_index: composed_image_path}
     """
-    output_dir = os.path.dirname(bg_image_path) if bg_image_path else "uploads"
+    if output_dir is None:
+        output_dir = os.path.dirname(bg_image_path) if bg_image_path else "uploads"
     os.makedirs(output_dir, exist_ok=True)
     num_agents = len(host_image_paths)
 
@@ -667,9 +674,16 @@ def compose_agent_image(
     position: str = "center",
     scene_prompt: str = "",
     reference_image_paths: Optional[List[str]] = None,
+    output_dir: Optional[str] = None,
 ) -> str:
-    """Single agent composition with Gemini scene generation."""
-    output_dir = os.path.dirname(bg_image_path) if bg_image_path else "uploads"
+    """Single agent composition with Gemini scene generation.
+
+    `output_dir`: where to write the composed PNG. None → derive from
+    `bg_image_path`'s dir (legacy, typically UPLOADS_DIR). PR S3+
+    callers should pass `OUTPUTS_DIR/composites` for backend parity
+    (see compose_agents_together docstring)."""
+    if output_dir is None:
+        output_dir = os.path.dirname(bg_image_path) if bg_image_path else "uploads"
     os.makedirs(output_dir, exist_ok=True)
     output_path = os.path.join(output_dir, f"composed_{uuid.uuid4().hex[:8]}.png")
 

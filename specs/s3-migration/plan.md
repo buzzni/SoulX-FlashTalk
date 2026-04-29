@@ -198,7 +198,9 @@ finally:
 | **C3** | S3MediaStore 구현 + moto 테스트 | 두 클래스 공존. media_store 싱글톤은 여전히 LocalDisk |
 | **C4** | conftest.py moto autouse fixture | mock_aws() activate + media_store monkeypatch helper. 기존 fixture는 LocalDisk 모드로 호환 |
 | **C5** | upload 핸들러 dual-compatible | 응답에 `storage_key` 추가, `path`는 호환용 유지. tempfile + media_store.upload |
-| **C6** | generators dual-compatible | host/composite/elevenlabs/conversation/video_matting/multitalk. ffmpeg `-movflags +faststart` 추가. metadata sidecar 같이 처리 |
+| **C6a** | image+TTS generators dual-compatible (non-stream) | `/api/elevenlabs/generate`, `/api/host/generate`, `/api/composite/generate`, `/api/preview/composite`, `/api/preview/composite-together`. helper `_upload_local_to_storage(local_path, bucket_subpath, *, with_sidecar)`. compositor에 `output_dir` 인자 추가해서 caller가 OUTPUTS_DIR/composites 명시 (UPLOADS_DIR로 새는 leak 차단). sidecar는 `.meta.json` (`image_compositor.write_generation_metadata` 출력 형식과 일치). 응답에 `storage_key`/`url` 추가 |
+| **C6a-extra** | C6a 잔여: stream endpoints + clone-voice | `/api/host/generate/stream`, `/api/composite/generate/stream` (SSE — frame-by-frame storage promotion). `/api/elevenlabs/clone-voice` ref audio tempfile + cleanup (현재 UPLOADS_DIR 잔존). cutover 전까지 처리 |
+| **C6b** | video generators dual-compatible | conversation_generator / video_matting / multitalk_inference. 임시 dir 패턴 + media_store.upload. ffmpeg merge에 `-movflags +faststart` 추가 (byte-range seek 효율). `generate_video_task` 자체 전환은 C7 |
 | **C7** | generate_*_task download/upload 패턴 | with open_local + ctx 자식 종료까지. retry 3회. ffprobe 검증. job_dir cleanup |
 | **C8** | repos: legacy invariant 강제 | `studio_result_repo.upsert`에 `video_storage_key` 강제 가드, `video_path=None`. studio_host_repo `_serialize`/`_public`에서 path 필드 제거 |
 | **C9** | frontend contract 전환 | api/{upload,video,voice,file}.ts + lib/format.ts. utils/security.py를 storage_key 검증으로 교체 |

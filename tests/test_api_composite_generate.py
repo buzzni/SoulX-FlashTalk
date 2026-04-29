@@ -45,15 +45,30 @@ def client(monkeypatch, tmp_path):
 
 
 def _fake_result(n=4):
+    """Fake generate_composite_candidates() return value.
+
+    PR S3+ C6a: the endpoint now uploads each candidate's local PNG
+    into media_store, so the mock points at real on-disk files inside
+    the test's OUTPUTS_DIR/composites (created lazily here) — was
+    `/tmp/comp_s*.png` before.
+    """
+    import os
+    import config
+    composites_dir = os.path.join(config.OUTPUTS_DIR, "composites")
+    os.makedirs(composites_dir, exist_ok=True)
+    candidates = []
+    for s in (10, 42, 77, 128)[:n]:
+        p = os.path.join(composites_dir, f"comp_s{s}.png")
+        if not os.path.exists(p):
+            with open(p, "wb") as f:
+                f.write(b"\x89PNG\r\n\x1a\n")
+        candidates.append({
+            "seed": s,
+            "path": p,
+            "url": f"/api/files/composites/comp_s{s}.png",
+        })
     return {
-        "candidates": [
-            {
-                "seed": s,
-                "path": f"/tmp/comp_s{s}.png",
-                "url": f"/api/files/tmp/comp_s{s}.png",
-            }
-            for s in (10, 42, 77, 128)[:n]
-        ],
+        "candidates": candidates,
         "partial": False,
         "errors": None,
         "direction_ko": "밝고 친근한 홈쇼핑 분위기",

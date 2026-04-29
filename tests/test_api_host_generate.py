@@ -32,14 +32,27 @@ def client(monkeypatch, tmp_path):
         yield c
 
 
-def test_happy_path_returns_candidates(client):
-    """Mock Gemini; verify endpoint returns proper payload shape."""
+def test_happy_path_returns_candidates(client, tmp_path):
+    """Mock Gemini; verify endpoint returns proper payload shape.
+
+    PR S3+ C6a: the endpoint now uploads each candidate's local PNG
+    into media_store, so the mock has to point at real files on disk
+    (was a fake `/x/host_s*.png` before). Fixture's HOSTS_DIR is
+    `tmp_path/outputs/hosts/saved`, so we drop a 1-byte PNG-ish
+    placeholder there for each seed."""
+    import config
+    hosts_dir = config.HOSTS_DIR
+    paths = []
+    for seed in (10, 42, 77, 128):
+        p = f"{hosts_dir}/host_s{seed}.png"
+        with open(p, "wb") as f:
+            f.write(b"\x89PNG\r\n\x1a\n")  # minimal PNG magic — enough for shutil.copyfile
+        paths.append(p)
+
     fake_result = {
         "candidates": [
-            {"seed": 10, "path": "/x/host_s10.png", "url": "/api/files/x/host_s10.png"},
-            {"seed": 42, "path": "/x/host_s42.png", "url": "/api/files/x/host_s42.png"},
-            {"seed": 77, "path": "/x/host_s77.png", "url": "/api/files/x/host_s77.png"},
-            {"seed": 128, "path": "/x/host_s128.png", "url": "/api/files/x/host_s128.png"},
+            {"seed": s, "path": p, "url": f"/api/files/{p}"}
+            for s, p in zip((10, 42, 77, 128), paths)
         ],
         "partial": False,
         "errors": None,
@@ -56,6 +69,10 @@ def test_happy_path_returns_candidates(client):
     data = r.json()
     assert len(data["candidates"]) == 4
     assert data["partial"] is False
+    # PR S3+ C6a: each candidate now carries storage_key + url
+    for cand in data["candidates"]:
+        assert cand["storage_key"].startswith("outputs/hosts/saved/host_s")
+        assert cand["url"].startswith("/api/files/outputs/hosts/saved/")
 
 
 def test_invalid_mode_returns_400(client):

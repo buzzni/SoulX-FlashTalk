@@ -348,6 +348,45 @@ def _upload_response(key: str, *, extra: dict | None = None) -> dict:
     return body
 
 
+def _upload_local_to_storage(
+    local_path: str,
+    bucket_subpath: str = "",
+    *,
+    with_sidecar: bool = False,
+) -> dict:
+    """Upload a generator's local output to storage; return the standard
+    response shape {filename, path, storage_key, url}.
+
+    On LocalDisk this is a same-file no-op (`upload()` short-circuits
+    when src.resolve() == dst.resolve()), so generators that write
+    directly into config.HOSTS_DIR / OUTPUTS_DIR keep working unchanged.
+    On S3 it actually uploads. The caller still owns `local_path` —
+    cleanup (or keeping it as a cache) is up to the caller.
+
+    `bucket_subpath`: extra prefix under outputs/ (e.g. "hosts/saved",
+    "composites"). Empty string places the file directly under outputs/.
+
+    `with_sidecar`: if True and `<local_path>.meta.json` exists, also
+    upload it as `<key>.meta.json` so generator provenance (the
+    sidecar `image_compositor.write_generation_metadata` writes)
+    survives the move to S3.
+    """
+    from modules import storage as _storage
+    basename = os.path.basename(local_path)
+    key = f"outputs/{bucket_subpath}/{basename}" if bucket_subpath else f"outputs/{basename}"
+    _storage.media_store.upload(Path(local_path), key)
+    if with_sidecar:
+        sidecar = local_path + ".meta.json"
+        if os.path.exists(sidecar):
+            _storage.media_store.upload(Path(sidecar), key + ".meta.json")
+    return {
+        "filename": basename,
+        "path": _path_field_for_backwards_compat(key),
+        "storage_key": key,
+        "url": _storage.media_store.url_for(key),
+    }
+
+
 # ========================================
 # Pipeline Management
 # ========================================
@@ -1316,20 +1355,25 @@ async def preview_composite(
     loop = asyncio.get_event_loop()
     from modules.image_compositor import compose_agent_image, release_models
 
+    composites_dir = os.path.join(config.OUTPUTS_DIR, "composites")
     try:
-        # compose_agent_image expects (width, height)
+        # compose_agent_image expects (width, height). Output goes
+        # straight into OUTPUTS_DIR/composites so _upload_local_to_storage
+        # is a same-file no-op on LocalDisk and lands in the right bucket
+        # on S3 (no leftover copy in UPLOADS_DIR).
         result_path = await loop.run_in_executor(
             None,
             lambda: compose_agent_image(
                 host_image_path, bg_image_path,
                 target_size=(target_h, target_w),
                 scale=scale, position=position,
+                output_dir=composites_dir,
             )
         )
     finally:
         await loop.run_in_executor(None, release_models)
 
-    return {"path": result_path}
+    return _upload_local_to_storage(result_path, "composites")
 
 
 @app.post("/api/preview/composite-together")
@@ -1359,8 +1403,12 @@ async def preview_composite_together(
     loop = asyncio.get_event_loop()
     from modules.image_compositor import compose_agents_together, release_models
 
+    composites_dir = os.path.join(config.OUTPUTS_DIR, "composites")
     try:
-        # compositor expects (width, height) — "1280x720" → h=1280, w=720 → pass (h, w) as (w, h)
+        # compositor expects (width, height) — "1280x720" → h=1280, w=720 → pass (h, w) as (w, h).
+        # output_dir explicit so we don't write into UPLOADS_DIR (the
+        # default derived from bg_image_path) — keeps the file in the
+        # bucket location for media_store.upload no-op on LocalDisk.
         results = await loop.run_in_executor(
             None,
             lambda: compose_agents_together(
@@ -1370,15 +1418,36 @@ async def preview_composite_together(
                 layout=layout,
                 scene_prompt=scene_prompt,
                 reference_image_paths=ref_paths if ref_paths else None,
+                output_dir=composites_dir,
             )
         )
     finally:
         await loop.run_in_executor(None, release_models)
 
     full_image = results.pop("full", None)
-    resp = {"paths": {str(k): v for k, v in results.items()}}
+    # Promote each per-agent composite + the full image into storage.
+    # No-op on LocalDisk; real PUT on S3.
+    storage_keys: dict[str, str] = {}
+    urls: dict[str, str] = {}
+    for k, v in results.items():
+        extras = _upload_local_to_storage(v, "composites")
+        storage_keys[str(k)] = extras["storage_key"]
+        urls[str(k)] = extras["url"]
+    # Always emit full_* keys (None when no full_image) so frontend C9
+    # doesn't have to special-case key-presence vs key-absence.
+    resp: dict = {
+        "paths": {str(k): v for k, v in results.items()},   # legacy
+        "storage_keys": storage_keys,
+        "urls": urls,
+        "full_image": None,
+        "full_storage_key": None,
+        "full_url": None,
+    }
     if full_image:
-        resp["full_image"] = full_image
+        full_extras = _upload_local_to_storage(full_image, "composites")
+        resp["full_image"] = full_image                     # legacy
+        resp["full_storage_key"] = full_extras["storage_key"]
+        resp["full_url"] = full_extras["url"]
     return resp
 
 
@@ -1522,11 +1591,12 @@ async def generate_elevenlabs_speech(
             ),
         )
 
-        return {
-            "filename": filename,
-            "path": output_path,           # filesystem path — used by /api/generate as audio_path
-            "url": f"/api/files/{filename}",  # serveable URL — used by Step 3 <audio> preview
-        }
+        # Promote the local file into storage (no-op on LocalDisk; real
+        # PUT on S3) so the response carries `storage_key` + a URL the
+        # frontend can use without knowing which backend is live. The
+        # legacy `path` field remains so /api/generate's existing
+        # audio_path round-trip keeps working until C9.
+        return _upload_local_to_storage(output_path)
     except ElevenLabsQuotaExceeded as e:
         logger.warning(f"ElevenLabs quota exceeded: {e}")
         raise HTTPException(status_code=402, detail=f"ElevenLabs 크레딧이 부족합니다. {e}")
@@ -2695,6 +2765,17 @@ async def host_generate(
         raise HTTPException(status_code=400, detail=str(e))
     except RuntimeError as e:
         raise HTTPException(status_code=503, detail=str(e))
+    # Promote each candidate's local PNG (and its .metadata.json
+    # sidecar) into storage so the response carries storage_key + url
+    # the frontend can use without knowing the backend. No-op on
+    # LocalDisk; real PUT on S3.
+    for cand in result.get("candidates", []) or []:
+        local_path = cand.get("path")
+        if not local_path:
+            continue
+        extras = _upload_local_to_storage(local_path, "hosts/saved", with_sidecar=True)
+        cand["storage_key"] = extras["storage_key"]
+        cand["url"] = extras["url"]
     return result
 
 
@@ -2865,6 +2946,17 @@ async def composite_generate(
         raise HTTPException(status_code=400, detail=str(e))
     except RuntimeError as e:
         raise HTTPException(status_code=503, detail=str(e))
+
+    # Promote each candidate's local PNG (+ metadata sidecar) into
+    # storage so the response carries storage_key + url. No-op on
+    # LocalDisk; real PUT on S3.
+    for cand in result.get("candidates", []) or []:
+        local_path = cand.get("path")
+        if not local_path:
+            continue
+        extras = _upload_local_to_storage(local_path, "composites", with_sidecar=True)
+        cand["storage_key"] = extras["storage_key"]
+        cand["url"] = extras["url"]
 
     # Lifecycle bookkeeping — tag fresh batch as draft, demote previous
     # selected to is_prev_selected, evict the older prev marker. Augment
