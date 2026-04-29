@@ -348,6 +348,73 @@ def _upload_response(key: str, *, extra: dict | None = None) -> dict:
     return body
 
 
+def _ffprobe_validate(video_path: str) -> None:
+    """Cheap mp4 integrity check before storage upload.
+
+    Why: ffmpeg subprocess gets SIGKILL'd → output_path is partial bytes
+    on disk. Uploading that to S3 wastes the multipart cost and lands a
+    broken video the user will only discover on playback. ffprobe is
+    sub-second on a 30s mp4 and catches the truncated-moov / unreadable
+    headers cases.
+
+    Raises RuntimeError if the file isn't readable as a video.
+    """
+    import shutil as _sh
+    import subprocess
+    if _sh.which("ffprobe") is None:
+        # Distinguish "binary missing" from "video corrupt" so an
+        # ops misconfig doesn't surface as a generic task error.
+        raise RuntimeError(
+            "ffprobe binary not found on PATH — install ffmpeg or set up the runtime."
+        )
+    if not os.path.exists(video_path):
+        raise RuntimeError(f"video missing before upload: {video_path}")
+    if os.path.getsize(video_path) == 0:
+        raise RuntimeError(f"video is 0 bytes: {video_path}")
+    try:
+        subprocess.run(
+            ["ffprobe", "-v", "error", "-select_streams", "v:0",
+             "-show_entries", "stream=codec_name,duration",
+             "-of", "default=noprint_wrappers=1", video_path],
+            check=True, capture_output=True, timeout=30,
+        )
+    except subprocess.CalledProcessError as e:
+        stderr = (e.stderr.decode("utf-8", errors="replace") if e.stderr else "")[-300:]
+        raise RuntimeError(f"ffprobe rejected video {video_path}: {stderr}") from e
+    except subprocess.TimeoutExpired as e:
+        raise RuntimeError(f"ffprobe timed out on {video_path}") from e
+
+
+def _upload_video_with_retry(local_path: str, key: str, *, attempts: int = 2) -> None:
+    """Upload `local_path` to `media_store` at `key` with `attempts`
+    outer retries. Each attempt wraps boto3's own standard-mode retry
+    chain (`config.S3_MAX_RETRY_ATTEMPTS`, default 3), so the worst
+    case is `attempts` × `S3_MAX_RETRY_ATTEMPTS` = 6 — matches plan
+    §1 #6 budget.
+
+    Why a caller-side outer retry on top of boto3's: a single transient
+    ClientError after a 5-minute GPU job shouldn't lose the work. The
+    inference result is preserved in `local_path` until the upload
+    succeeds (or all attempts fail and the task is marked errored).
+    """
+    from modules import storage as _storage
+    last_exc: Exception | None = None
+    for attempt in range(1, attempts + 1):
+        try:
+            _storage.media_store.upload(Path(local_path), key)
+            return
+        except Exception as e:
+            last_exc = e
+            logger.warning(
+                "S3 upload attempt %d/%d failed for %s: %s",
+                attempt, attempts, key, e,
+            )
+    assert last_exc is not None
+    raise RuntimeError(
+        f"S3 upload failed after {attempts} attempts for {key}: {last_exc}"
+    ) from last_exc
+
+
 def _upload_local_to_storage(
     local_path: str,
     bucket_subpath: str = "",
@@ -944,12 +1011,14 @@ async def generate_video_task(
             # (resolution AFTER 16× snap, file stats, seed, output path) AND
             # the client snapshot (`meta`) when one was attached at dispatch.
             # Persisted to studio_results (PR5; was outputs/results/<task>.json).
-            video_bytes = os.path.getsize(output_path) if os.path.exists(output_path) else 0
-            from modules import storage as _storage
-            try:
-                video_storage_key = _storage.media_store.key_from_path(output_path)
-            except ValueError:
-                video_storage_key = None
+            # Validate the result mp4, then upload with caller-side
+            # retry. On LocalDisk this is a same-file no-op; on S3 it's
+            # the real PUT and the retry loop guards the multi-minute
+            # GPU work against a single transient ClientError.
+            _ffprobe_validate(output_path)
+            video_bytes = os.path.getsize(output_path)
+            video_storage_key = f"outputs/{os.path.basename(output_path)}"
+            _upload_video_with_retry(output_path, video_storage_key)
             manifest = {
                 "task_id": task_id,
                 "type": "generate",
@@ -958,7 +1027,12 @@ async def generate_video_task(
                 "generation_time_sec": round(generation_time, 2),
                 "video_url": f"/api/videos/{task_id}",
                 "video_storage_key": video_storage_key,
-                "video_path": output_path,
+                # PR S3+ invariant: never store an absolute filesystem
+                # path. /api/videos handler reads video_storage_key.
+                # `task_states[task_id]["output_path"]` still holds the
+                # local file for the duration of this process — that
+                # serves the "currently rendering" preview path.
+                "video_path": None,
                 "video_bytes": video_bytes,
                 "video_filename": os.path.basename(output_path),
                 "params": {
@@ -2344,13 +2418,13 @@ async def generate_conversation_task(
             if len(dialog.turns) > 3:
                 script_summary += f" ... (+{len(dialog.turns) - 3}턴)"
 
-            # Result manifest persisted to studio_results (PR5).
-            video_bytes = os.path.getsize(output_path) if os.path.exists(output_path) else 0
-            from modules import storage as _storage
-            try:
-                video_storage_key = _storage.media_store.key_from_path(output_path)
-            except ValueError:
-                video_storage_key = None
+            # Validate + upload with retry, then persist manifest. Same
+            # invariants as generate_video_task: video_storage_key only,
+            # video_path = None.
+            _ffprobe_validate(output_path)
+            video_bytes = os.path.getsize(output_path)
+            video_storage_key = f"outputs/{os.path.basename(output_path)}"
+            _upload_video_with_retry(output_path, video_storage_key)
             manifest = {
                 "task_id": task_id,
                 "type": "conversation",
@@ -2359,7 +2433,7 @@ async def generate_conversation_task(
                 "generation_time_sec": round(generation_time, 2),
                 "video_url": f"/api/videos/{task_id}",
                 "video_storage_key": video_storage_key,
-                "video_path": output_path,
+                "video_path": None,
                 "video_bytes": video_bytes,
                 "video_filename": os.path.basename(output_path),
                 "params": {

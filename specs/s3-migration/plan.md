@@ -207,7 +207,7 @@ finally:
 | **C10** | /api/files, /api/videos, /api/hosts → redirect + HEAD | 302 redirect (S3 presigned). HEAD는 head_object. `?download_filename=...` query를 핸들러가 받아: LocalDisk면 Content-Disposition 헤더 직접 박음, S3면 presigned URL의 ResponseContentDisposition으로 위임 |
 | **C11** | task_id 인덱스 + plan v2 close-out | `studio_results.create_index([("task_id", 1)])`. TODOS 정리 |
 | **C12** | examples/ S3 sync 스크립트 | scripts/upload_examples_to_s3.py + DEFAULT_HOST_IMAGE/AUDIO를 storage_key로 |
-| **C13** | **CUTOVER** + docs | 사전 게이트 4개: ① `examples/` S3 sync 완료 (C12 산출물), ② `rg "local_path_for\(\|key_from_path\(" app.py modules` 결과 0 (C8/C9 산출물), ③ startup hook이 `media_store.s3.head_bucket(Bucket=...)` 으로 자격증명 + 버킷 가능여부 sanity 체크 (실패 시 fail-fast), ④ 위 모두 통과 후 `app.py` `@app.on_event("startup")` 안에서 `from modules.storage_s3 import make_default_s3_store; modules.storage.media_store = make_default_s3_store()` (모듈 top-level import는 circular import 위험). `docs/s3-bucket-setup.md` 인프라팀 요청서 |
+| **C13** | **CUTOVER** + docs | 사전 게이트 5개: ① C10 완료 (`/api/files`·`/api/videos`·`/api/hosts` 모두 redirect로 전환되어 `local_path_for` 호출이 production code에 남아있지 않음 — S3MediaStore.local_path_for은 NotImplementedError), ② `examples/` S3 sync 완료 (C12 산출물), ③ `rg "local_path_for\(\|key_from_path\(" app.py modules` 결과 0 (C8/C9 산출물), ④ startup hook이 `media_store.s3.head_bucket(Bucket=...)` 으로 자격증명 + 버킷 가능여부 sanity 체크 (실패 시 fail-fast), ⑤ 위 모두 통과 후 `app.py` `@app.on_event("startup")` 안에서 `from modules.storage_s3 import make_default_s3_store; modules.storage.media_store = make_default_s3_store()` (모듈 top-level import는 circular import 위험). `docs/s3-bucket-setup.md` 인프라팀 요청서 |
 
 각 커밋 전:
 1. 변경 파일/줄 요약
