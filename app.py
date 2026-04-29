@@ -2229,8 +2229,12 @@ async def generate_video(
         except ElevenLabsAPIError as e:
             logger.error(f"ElevenLabs API error: {e}")
             raise HTTPException(status_code=502, detail="음성 합성에 실패했어요. 잠시 후 다시 시도해주세요")
+        # _upload_local_to_storage always returns a `storage_key` in
+        # outputs/<filename> form (or raises). No need for an absolute-path
+        # fallback — that would re-introduce the temp-path-in-queue bug
+        # we just fixed.
         promoted = _upload_local_to_storage(audio_local_path)
-        audio_path = promoted.get("storage_key") or audio_local_path
+        audio_path = promoted["storage_key"]
         audio_source_label = f"elevenlabs:{voice_id}"
 
     elif audio_source == "upload":
