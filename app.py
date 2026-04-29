@@ -16,7 +16,7 @@ from typing import Optional, List
 from datetime import datetime, timezone
 
 from fastapi import FastAPI, File, UploadFile, Form, HTTPException, Request
-from fastapi.responses import FileResponse, StreamingResponse, JSONResponse
+from fastapi.responses import FileResponse, StreamingResponse, JSONResponse, RedirectResponse, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 import uvicorn
@@ -269,6 +269,20 @@ def _path_field_for_backwards_compat(key: str) -> str:
     """
     from modules import storage as _storage
     return _storage.legacy_path_for(key)
+
+
+def _is_s3_backend() -> bool:
+    """True iff the active media_store is the S3 backend.
+
+    Explicit `isinstance(S3MediaStore)` (not `not isinstance(LocalDisk)`)
+    so a future GCS / fake / in-memory backend doesn't accidentally
+    fall into the S3 branch and try to mint a presigned URL it can't
+    produce. Lazy import keeps storage_s3 (which pulls boto3) out of
+    cold-import cost when the backend isn't S3 anyway.
+    """
+    from modules import storage_s3 as _s3
+    from modules import storage as _storage
+    return isinstance(_storage.media_store, _s3.S3MediaStore)
 
 
 def _input_path_or_key_valid(value: str | None) -> bool:
@@ -2151,36 +2165,96 @@ async def task_state_snapshot(task_id: str, request: Request):
 
 
 @app.api_route("/api/videos/{task_id}", methods=["GET", "HEAD"])
-async def get_video(task_id: str, download: bool = False):
-    """Serve generated video. HEAD returns headers only (used by the
-    RenderDashboard to pull Content-Length without downloading the mp4)."""
-    # Check task state
+async def get_video(task_id: str, request: Request, download: bool = False):
+    """Serve generated video.
+
+    Resolution order (post-PR S3+):
+      1. task_states[task_id]["output_path"] — the in-flight render's
+         local mp4 (preview while the task is still queued/running).
+         Always served via FileResponse; the worker hasn't uploaded yet.
+      2. studio_results.video_storage_key — the persisted manifest's
+         storage_key. On S3 backend → 302 redirect to a presigned GET
+         URL with TTL = S3_PRESIGN_TTL_VIDEO (6h, covers byte-range
+         seek sessions). On LocalDisk → FileResponse via
+         media_store.local_path_for resolution.
+      3. studio_results.video_path — legacy fallback for rows persisted
+         before C7 set video_path=None. Local file only.
+
+    HEAD: on S3 backend, fetches head_object and returns
+    Content-Length / ETag headers without redirecting (RenderDashboard
+    uses HEAD to pull file size without downloading).
+    `?download=true` triggers attachment disposition (LocalDisk: header
+    direct; S3: signed into presigned URL).
+    """
+    is_head = request.method == "HEAD"
+    from modules import storage as _storage
+    from modules.repositories import studio_result_repo as _result_repo
+
+    # 1. In-flight task — always local file (uploaded only at end).
     state = task_states.get(task_id)
     if state and state.get("output_path") and os.path.exists(state["output_path"]):
         headers = {}
         if download:
-            headers["Content-Disposition"] = f'attachment; filename="{os.path.basename(state["output_path"])}"'
+            headers["Content-Disposition"] = (
+                f'attachment; filename="{os.path.basename(state["output_path"])}"'
+            )
         else:
             headers["Content-Disposition"] = "inline"
         return FileResponse(state["output_path"], media_type="video/mp4", headers=headers)
 
-    # Fallback: studio_results lookup (no user filter — public endpoint per
-    # plan §6 because <video> tags can't send Authorization headers).
-    from modules.repositories import studio_result_repo as _result_repo
     doc = await _result_repo.find_by_task_id(task_id)
-    if doc:
-        # Prefer the absolute video_path the worker recorded; fall back to
-        # resolving the storage_key. Either way the file must still exist.
-        candidate = doc.get("video_path")
-        if not candidate and doc.get("video_storage_key"):
-            from modules import storage as _storage
-            try:
-                candidate = str(_storage.media_store.local_path_for(doc["video_storage_key"]))
-            except ValueError:
-                candidate = None
+    if not doc:
+        raise HTTPException(status_code=404, detail="Video not found")
+
+    # 2. storage_key path (post-C7 invariant for new rows).
+    storage_key = doc.get("video_storage_key")
+    if storage_key:
+        if _is_s3_backend():
+            if is_head:
+                # HEAD: read head_object and return its headers — no
+                # redirect, since browsers running HEAD don't follow
+                # redirects to gather Content-Length.
+                try:
+                    info = _storage.media_store.head(storage_key)
+                except FileNotFoundError:
+                    raise HTTPException(status_code=404, detail="Video not found")
+                headers = {
+                    "Content-Length": str(info["ContentLength"]),
+                    "Accept-Ranges": "bytes",
+                }
+                if info.get("ETag"):
+                    headers["ETag"] = info["ETag"]
+                return Response(headers=headers, media_type="video/mp4")
+            # GET: 302 to presigned URL, signing in download_filename
+            # so Content-Disposition round-trips through the redirect.
+            download_name = (
+                f"video_{task_id}.mp4" if download else None
+            )
+            url = _storage.media_store.url_for(
+                storage_key,
+                expires_in=config.S3_PRESIGN_TTL_VIDEO,
+                download_filename=download_name,
+            )
+            return RedirectResponse(url, status_code=302)
+        # LocalDisk: resolve to absolute path and FileResponse.
+        try:
+            candidate = str(_storage.media_store._validate_and_resolve(storage_key))
+        except (ValueError, AttributeError):
+            candidate = None
         if candidate and os.path.exists(candidate):
-            headers = {"Content-Disposition": "attachment" if download else "inline"}
+            headers = {
+                "Content-Disposition": (
+                    f'attachment; filename="video_{task_id}.mp4"'
+                    if download else "inline"
+                )
+            }
             return FileResponse(candidate, media_type="video/mp4", headers=headers)
+
+    # 3. Legacy fallback: video_path absolute path on disk.
+    legacy_path = doc.get("video_path")
+    if legacy_path and os.path.exists(legacy_path):
+        headers = {"Content-Disposition": "attachment" if download else "inline"}
+        return FileResponse(legacy_path, media_type="video/mp4", headers=headers)
 
     raise HTTPException(status_code=404, detail="Video not found")
 
@@ -2857,7 +2931,7 @@ async def get_result(task_id: str, request: Request):
 
 
 @app.get("/api/files/{filename:path}")
-async def get_file(filename: str):
+async def get_file(filename: str, download_filename: Optional[str] = None):
     """Serve files. Accepts both legacy (bucket-less) and PR3 storage_key forms.
 
     Examples:
@@ -2865,12 +2939,39 @@ async def get_file(filename: str):
       /api/files/hosts/saved/x.png           ← legacy (still resolves)
       /api/files/ref_img_abc.png             ← legacy (probes UPLOADS)
 
-    Bucket-prefixed keys go through `modules.storage` (rejects `..`).
-    Legacy filenames probe every bucket dir and pass through `safe_upload_path`
-    for the final realpath-containment check.
+    `?download_filename=<name>` triggers a download response with the
+    given filename (S3 backend signs `ResponseContentDisposition` into
+    the presigned URL; LocalDisk sets the header directly).
+
+    On S3 backend: 302 redirect to a presigned GET URL (TTL governed
+    by the storage layer). On LocalDisk: direct FileResponse — same
+    behaviour as before C10.
     """
     from utils.security import safe_upload_path
+    from modules import storage as _storage
     from modules.storage import resolve_legacy_or_keyed
+
+    # S3 backend: redirect bucket-prefixed keys directly. Legacy
+    # bucket-less paths fall back to the local probe (still useful
+    # during the cutover window when old manifests carry bare names).
+    if _is_s3_backend():
+        head, _, _ = filename.partition("/")
+        if head in ("outputs", "uploads", "examples"):
+            try:
+                url = _storage.media_store.url_for(
+                    filename,
+                    expires_in=config.S3_PRESIGN_TTL_IMAGE,
+                    download_filename=download_filename,
+                )
+            except ValueError as e:
+                # validate_key inside url_for rejects traversal
+                # (e.g. `outputs/../etc`) — surface as 400 instead of
+                # the generic 500 the unhandled exception would
+                # produce.
+                raise HTTPException(status_code=400, detail=str(e))
+            return RedirectResponse(url, status_code=302)
+        # Otherwise let the legacy resolver handle it (no S3 mapping
+        # for bucket-less keys; old manifests are LocalDisk-only).
 
     resolved = resolve_legacy_or_keyed(filename)
     if resolved is None:
@@ -2884,7 +2985,21 @@ async def get_file(filename: str):
         ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png",
         ".wav": "audio/wav", ".mp3": "audio/mpeg", ".mp4": "video/mp4",
     }
-    return FileResponse(filepath, media_type=media_types.get(ext, "application/octet-stream"))
+    headers = {}
+    if download_filename:
+        # LocalDisk-side equivalent of the S3 presigned
+        # ResponseContentDisposition: same filename round-trips the
+        # frontend regardless of backend.
+        from urllib.parse import quote
+        safe = "".join(c for c in download_filename if c not in '"\r\n\\')
+        headers["Content-Disposition"] = (
+            f'attachment; filename="{safe}"; filename*=UTF-8\'\'{quote(safe)}'
+        )
+    return FileResponse(
+        filepath,
+        media_type=media_types.get(ext, "application/octet-stream"),
+        headers=headers,
+    )
 
 
 # ========================================
