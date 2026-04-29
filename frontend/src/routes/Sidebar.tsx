@@ -17,12 +17,12 @@ import {
   Settings,
 } from 'lucide-react';
 import { Brand } from '../components/brand';
+import { useStartNewVideo } from '../components/start-new-video';
 import { useLastSavedAt } from '../stores/wizardStore';
 import { cn } from '@/lib/utils';
 import {
   formatDraftAge,
   resumeVideo,
-  startNewVideo,
   useDraftAgeTick,
 } from '../lib/wizardNav';
 
@@ -34,6 +34,7 @@ export function Sidebar({ active }: SidebarProps) {
   const navigate = useNavigate();
   const lastSavedAt = useLastSavedAt();
   useDraftAgeTick(lastSavedAt != null);
+  const { start: handleStartNew, modal: startNewModal } = useStartNewVideo();
 
   return (
     <aside className="hidden md:flex md:sticky md:top-0 md:h-screen flex-col bg-sidebar-background border-r border-sidebar-border px-3.5 py-4 overflow-y-auto">
@@ -46,13 +47,14 @@ export function Sidebar({ active }: SidebarProps) {
 
       <button
         type="button"
-        onClick={() => startNewVideo(navigate)}
+        onClick={handleStartNew}
         title="새 영상 만들기 (3단계 위저드)"
         className="flex items-center gap-2 w-full px-3 py-2.5 mb-2 bg-foreground text-background rounded-md font-semibold text-sm-tight tracking-tight transition-colors hover:bg-foreground/85 cursor-pointer"
       >
         <Plus className="size-4" />
         <span>새 영상 만들기</span>
       </button>
+      {startNewModal}
 
       {lastSavedAt != null && (
         <button

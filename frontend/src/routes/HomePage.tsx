@@ -22,9 +22,9 @@ import {
   outputsPathToUrl,
   videoTitle,
 } from '../lib/format';
-import { startNewVideo } from '../lib/wizardNav';
 import { cn } from '@/lib/utils';
 import { DraftBanner } from '../components/draft-banner';
+import { useStartNewVideo } from '../components/start-new-video';
 
 interface HistoryItem {
   task_id: string;
@@ -50,6 +50,7 @@ export function HomePage() {
 
   const [history, setHistory] = useState<HistoryItem[] | null>(null);
   const [historyTotal, setHistoryTotal] = useState<number | null>(null);
+  const { start: handleStartNew, modal: startNewModal } = useStartNewVideo();
 
   useEffect(() => {
     const ctl = new AbortController();
@@ -121,7 +122,7 @@ export function HomePage() {
         <div className="grid grid-cols-1 md:grid-cols-[1.3fr_1fr] gap-3.5 mb-8">
           <button
             type="button"
-            onClick={() => startNewVideo(navigate)}
+            onClick={handleStartNew}
             className="group surface-card-dark text-left p-6 cursor-pointer transition-all hover:translate-y-[-1px] hover:shadow-[var(--shadow-2)]"
           >
             <span className="inline-block px-2.5 py-1 rounded-full bg-white/15 text-[#b9d3ff] text-2xs font-semibold mb-4">
@@ -213,6 +214,8 @@ export function HomePage() {
           </section>
         )}
 
+        {startNewModal}
+
         {history && history.length === 0 && (
           <div className="surface-card">
             <EmptyState
@@ -222,7 +225,7 @@ export function HomePage() {
               action={
                 <button
                   type="button"
-                  onClick={() => startNewVideo(navigate)}
+                  onClick={handleStartNew}
                   className="inline-flex items-center gap-1.5 px-4 py-2 bg-primary text-primary-foreground rounded-md text-sm-tight font-semibold hover:bg-[var(--primary-hover)] transition-colors cursor-pointer"
                 >
                   지금 만들기 <ArrowRight className="size-3.5" />
