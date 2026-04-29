@@ -57,6 +57,15 @@ def _bypass_studio_auth(monkeypatch, request):
     monkeypatch.setattr("config.MONGO_URL", "mongodb://localhost:27017")
     monkeypatch.setattr("config.DB_NAME", _test_db_name())
 
+    # Suppress S3 cutover during tests — the startup hook flips
+    # media_store to S3MediaStore when both creds are non-empty (PR
+    # S3+ C13). LocalDisk is the assumption every API test fixture is
+    # built around (uploads_dir / outputs_dir tmp_path roots, real
+    # disk reads in assertions). Tests that exercise S3 explicitly
+    # use the s3_media_store_swap fixture instead.
+    monkeypatch.setattr("config.S3_ACCESS_KEY", "")
+    monkeypatch.setattr("config.S3_SECRET_KEY", "")
+
     # Drop all owned collections from a previous run/test so each test starts clean.
     from pymongo import MongoClient
     pre = MongoClient("mongodb://localhost:27017", serverSelectionTimeoutMS=2000)

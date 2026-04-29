@@ -271,6 +271,51 @@ def _path_field_for_backwards_compat(key: str) -> str:
     return _storage.legacy_path_for(key)
 
 
+async def _validate_and_resolve(value: str | None, cleanup_list: list) -> str | None:
+    """Endpoint-level dual-input resolver (PR S3+ C13-fix).
+
+    Validates `value` via `safe_input_value` (storage_key shape OR
+    SAFE_ROOTS-bound absolute path), then resolves to a local
+    filesystem path the inference / generator can consume.
+    storage_keys are downloaded to a tempfile via
+    `_resolve_input_to_local` (off-loaded to a thread so the sync
+    media_store.download_to doesn't block the event loop) and the
+    tempfile path is appended to `cleanup_list`. Absolute paths
+    pass through. None / empty passes through as None.
+
+    Storage-layer failures are translated to user-friendly
+    HTTPExceptions instead of the FastAPI default 500:
+
+      * FileNotFoundError → 404 (object missing for that key)
+      * boto3 ClientError → 503 (S3 reachability / permission)
+
+    Caller is responsible for `_cleanup_input_tempfiles(cleanup_list)`
+    in a `finally` AFTER any subprocess / inference using these paths
+    has finished.
+    """
+    if not value:
+        return None
+    from utils.security import safe_input_value
+    validated = safe_input_value(value)
+    try:
+        return await asyncio.to_thread(_resolve_input_to_local, validated, cleanup_list)
+    except FileNotFoundError:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Input not found in storage: {value}",
+        )
+    except Exception as exc:
+        # boto3 ClientError surfaces here on missing creds, 403, 5xx.
+        # We can't import botocore at module load (storage_s3 is lazy),
+        # so type-check the class name to avoid the import.
+        if exc.__class__.__name__ == "ClientError":
+            raise HTTPException(
+                status_code=503,
+                detail=f"Storage backend unavailable: {exc}",
+            )
+        raise
+
+
 def _is_s3_backend() -> bool:
     """True iff the active media_store is the S3 backend.
 
@@ -313,12 +358,16 @@ def _cleanup_input_tempfiles(paths: list[str]) -> None:
 
     Errors are swallowed (with a debug log) — the OS will GC the temp
     dir eventually anyway, and a failed unlink shouldn't poison the
-    task's success/failure result."""
+    task's success/failure result. The list is cleared after the loop
+    so a second call (e.g. on the SSE setup error path AND the
+    generator finally) is genuinely idempotent — not just "fails
+    silently on the second unlink"."""
     for p in paths:
         try:
             os.unlink(p)
         except OSError as e:
             logger.debug("input tempfile cleanup skipped %s: %s", p, e)
+    paths.clear()
 
 
 def _resolve_input_to_local(value: str | None, cleanup_list: list) -> str | None:
@@ -1570,41 +1619,42 @@ async def preview_composite(
     position: str = Form("center"),
 ):
     """Generate a single-agent composite preview image (host + background)."""
-    import asyncio
-    from utils.security import safe_upload_path
-
-    host_image_path = safe_upload_path(host_image_path)
-    bg_image_path = safe_upload_path(bg_image_path)
-    if not os.path.exists(host_image_path):
-        raise HTTPException(status_code=400, detail="Host image not found")
-    if not os.path.exists(bg_image_path):
-        raise HTTPException(status_code=400, detail="Background image not found")
-
-    res_parts = resolution.split("x")
-    target_h, target_w = int(res_parts[0]), int(res_parts[1])
-
-    loop = asyncio.get_event_loop()
-    from modules.image_compositor import compose_agent_image, release_models
-
-    composites_dir = os.path.join(config.OUTPUTS_DIR, "composites")
+    input_cleanup: list[str] = []
     try:
-        # compose_agent_image expects (width, height). Output goes
-        # straight into OUTPUTS_DIR/composites so _upload_local_to_storage
-        # is a same-file no-op on LocalDisk and lands in the right bucket
-        # on S3 (no leftover copy in UPLOADS_DIR).
-        result_path = await loop.run_in_executor(
-            None,
-            lambda: compose_agent_image(
-                host_image_path, bg_image_path,
-                target_size=(target_h, target_w),
-                scale=scale, position=position,
-                output_dir=composites_dir,
-            )
-        )
-    finally:
-        await loop.run_in_executor(None, release_models)
+        host_local = await _validate_and_resolve(host_image_path, input_cleanup)
+        bg_local = await _validate_and_resolve(bg_image_path, input_cleanup)
+        if not host_local or not os.path.exists(host_local):
+            raise HTTPException(status_code=400, detail="Host image not found")
+        if not bg_local or not os.path.exists(bg_local):
+            raise HTTPException(status_code=400, detail="Background image not found")
 
-    return _upload_local_to_storage(result_path, "composites")
+        res_parts = resolution.split("x")
+        target_h, target_w = int(res_parts[0]), int(res_parts[1])
+
+        loop = asyncio.get_event_loop()
+        from modules.image_compositor import compose_agent_image, release_models
+
+        composites_dir = os.path.join(config.OUTPUTS_DIR, "composites")
+        try:
+            # compose_agent_image expects (width, height). Output goes
+            # straight into OUTPUTS_DIR/composites so _upload_local_to_storage
+            # is a same-file no-op on LocalDisk and lands in the right bucket
+            # on S3 (no leftover copy in UPLOADS_DIR).
+            result_path = await loop.run_in_executor(
+                None,
+                lambda: compose_agent_image(
+                    host_local, bg_local,
+                    target_size=(target_h, target_w),
+                    scale=scale, position=position,
+                    output_dir=composites_dir,
+                )
+            )
+        finally:
+            await loop.run_in_executor(None, release_models)
+
+        return _upload_local_to_storage(result_path, "composites")
+    finally:
+        _cleanup_input_tempfiles(input_cleanup)
 
 
 @app.post("/api/preview/composite-together")
@@ -1616,70 +1666,76 @@ async def preview_composite_together(
     reference_image_paths: str = Form("[]"),  # JSON array of paths
 ):
     """Generate combined composite preview with Gemini scene generation."""
-    import asyncio
-
-    from utils.security import safe_upload_path
-
-    host_paths = [safe_upload_path(p) for p in json.loads(host_image_paths)]
-    ref_paths = [safe_upload_path(p) for p in json.loads(reference_image_paths)]
-    if not host_paths:
-        raise HTTPException(status_code=400, detail="No host images provided")
-    for p in host_paths:
-        if not os.path.exists(p):
-            raise HTTPException(status_code=400, detail=f"Host image not found: {p}")
-
-    res_parts = resolution.split("x")
-    target_h, target_w = int(res_parts[0]), int(res_parts[1])
-
-    loop = asyncio.get_event_loop()
-    from modules.image_compositor import compose_agents_together, release_models
-
-    composites_dir = os.path.join(config.OUTPUTS_DIR, "composites")
+    input_cleanup: list[str] = []
     try:
-        # compositor expects (width, height) — "1280x720" → h=1280, w=720 → pass (h, w) as (w, h).
-        # output_dir explicit so we don't write into UPLOADS_DIR (the
-        # default derived from bg_image_path) — keeps the file in the
-        # bucket location for media_store.upload no-op on LocalDisk.
-        results = await loop.run_in_executor(
-            None,
-            lambda: compose_agents_together(
-                host_image_paths=host_paths,
-                bg_image_path=os.path.join(config.UPLOADS_DIR, "dummy"),
-                target_size=(target_h, target_w),
-                layout=layout,
-                scene_prompt=scene_prompt,
-                reference_image_paths=ref_paths if ref_paths else None,
-                output_dir=composites_dir,
-            )
-        )
-    finally:
-        await loop.run_in_executor(None, release_models)
+        host_paths_raw = json.loads(host_image_paths)
+        ref_paths_raw = json.loads(reference_image_paths)
+        host_paths = [
+            await _validate_and_resolve(p, input_cleanup) for p in host_paths_raw
+        ]
+        ref_paths = [
+            await _validate_and_resolve(p, input_cleanup) for p in ref_paths_raw
+        ]
+        if not host_paths:
+            raise HTTPException(status_code=400, detail="No host images provided")
+        for p in host_paths:
+            if not p or not os.path.exists(p):
+                raise HTTPException(status_code=400, detail=f"Host image not found: {p}")
 
-    full_image = results.pop("full", None)
-    # Promote each per-agent composite + the full image into storage.
-    # No-op on LocalDisk; real PUT on S3.
-    storage_keys: dict[str, str] = {}
-    urls: dict[str, str] = {}
-    for k, v in results.items():
-        extras = _upload_local_to_storage(v, "composites")
-        storage_keys[str(k)] = extras["storage_key"]
-        urls[str(k)] = extras["url"]
-    # Always emit full_* keys (None when no full_image) so frontend C9
-    # doesn't have to special-case key-presence vs key-absence.
-    resp: dict = {
-        "paths": {str(k): v for k, v in results.items()},   # legacy
-        "storage_keys": storage_keys,
-        "urls": urls,
-        "full_image": None,
-        "full_storage_key": None,
-        "full_url": None,
-    }
-    if full_image:
-        full_extras = _upload_local_to_storage(full_image, "composites")
-        resp["full_image"] = full_image                     # legacy
-        resp["full_storage_key"] = full_extras["storage_key"]
-        resp["full_url"] = full_extras["url"]
-    return resp
+        res_parts = resolution.split("x")
+        target_h, target_w = int(res_parts[0]), int(res_parts[1])
+
+        loop = asyncio.get_event_loop()
+        from modules.image_compositor import compose_agents_together, release_models
+
+        composites_dir = os.path.join(config.OUTPUTS_DIR, "composites")
+        try:
+            # compositor expects (width, height) — "1280x720" → h=1280, w=720 → pass (h, w) as (w, h).
+            # output_dir explicit so we don't write into UPLOADS_DIR (the
+            # default derived from bg_image_path) — keeps the file in the
+            # bucket location for media_store.upload no-op on LocalDisk.
+            results = await loop.run_in_executor(
+                None,
+                lambda: compose_agents_together(
+                    host_image_paths=host_paths,
+                    bg_image_path=os.path.join(config.UPLOADS_DIR, "dummy"),
+                    target_size=(target_h, target_w),
+                    layout=layout,
+                    scene_prompt=scene_prompt,
+                    reference_image_paths=ref_paths if ref_paths else None,
+                    output_dir=composites_dir,
+                )
+            )
+        finally:
+            await loop.run_in_executor(None, release_models)
+
+        full_image = results.pop("full", None)
+        # Promote each per-agent composite + the full image into storage.
+        # No-op on LocalDisk; real PUT on S3.
+        storage_keys: dict[str, str] = {}
+        urls: dict[str, str] = {}
+        for k, v in results.items():
+            extras = _upload_local_to_storage(v, "composites")
+            storage_keys[str(k)] = extras["storage_key"]
+            urls[str(k)] = extras["url"]
+        # Always emit full_* keys (None when no full_image) so frontend C9
+        # doesn't have to special-case key-presence vs key-absence.
+        resp: dict = {
+            "paths": {str(k): v for k, v in results.items()},   # legacy
+            "storage_keys": storage_keys,
+            "urls": urls,
+            "full_image": None,
+            "full_storage_key": None,
+            "full_url": None,
+        }
+        if full_image:
+            full_extras = _upload_local_to_storage(full_image, "composites")
+            resp["full_image"] = full_image                     # legacy
+            resp["full_storage_key"] = full_extras["storage_key"]
+            resp["full_url"] = full_extras["url"]
+        return resp
+    finally:
+        _cleanup_input_tempfiles(input_cleanup)
 
 
 @app.post("/api/upload/reference-audio")
@@ -2442,6 +2498,36 @@ async def generate_conversation_task(
 
     start_time = time.time()
 
+    # Resolve any storage_key inputs in dialog_data to local files
+    # before parse_dialog_json constructs Agent objects (the downstream
+    # pipeline reads agent.face_image and friends as plain string paths).
+    # cleanup runs at the bottom of the function on both success and
+    # except branches — same pattern as generate_video_task.
+    #
+    # CRITICAL: deepcopy before mutating. dialog_data is shared with
+    # task_queue.json persistence (params dict is shallow-copied around
+    # task_queue retry / restart paths). If we mutated the original we'd
+    # poison the queue with `/tmp/job-input-...` paths that disappear
+    # the moment cleanup runs — retry/recovery would then start with
+    # broken inputs.
+    import copy as _copy
+    dialog_data = _copy.deepcopy(dialog_data)
+    input_cleanup: list[str] = []
+    for _agent_data in dialog_data.get("agents", []) or []:
+        if not isinstance(_agent_data, dict):
+            continue
+        face = _agent_data.get("face_image_path")
+        if face:
+            _agent_data["face_image_path"] = await _validate_and_resolve(face, input_cleanup)
+        bg = _agent_data.get("background_image_path")
+        if bg:
+            _agent_data["background_image_path"] = await _validate_and_resolve(bg, input_cleanup)
+        refs = _agent_data.get("reference_image_paths") or []
+        if isinstance(refs, list):
+            _agent_data["reference_image_paths"] = [
+                await _validate_and_resolve(p, input_cleanup) for p in refs
+            ]
+
     async with pipeline_lock:
         logger.info(f"Conversation task {task_id} acquired lock, starting generation...")
 
@@ -2679,6 +2765,9 @@ async def generate_conversation_task(
             except Exception:
                 pass
 
+            # Cleanup input tempfiles on the success path.
+            _cleanup_input_tempfiles(input_cleanup)
+
         except Exception as e:
             logger.error(f"Conversation task {task_id} failed: {e}")
             import traceback
@@ -2721,6 +2810,11 @@ async def generate_conversation_task(
                     torch.cuda.empty_cache()
             except Exception:
                 pass
+
+            # Cleanup input tempfiles before re-raising — same invariant
+            # as the success path: every subprocess has already finished
+            # by the time we hit the except block.
+            _cleanup_input_tempfiles(input_cleanup)
 
             # Re-raise so the queue worker records status="error" (same reason
             # as generate_video_task — prevents "completed + 404" ghost state).
@@ -3072,61 +3166,64 @@ async def host_generate(
     temperature: optional 0.0-2.0 sampling knob. None → Gemini default.
     UI exposes 0.4 (conservative) / 0.7 (balanced) / 1.0 (varied).
     """
-    from utils.security import safe_upload_path
     from modules.host_generator import generate_host_candidates
 
-    face = safe_upload_path(faceRefPath) if faceRefPath else None
-    outfit = safe_upload_path(outfitRefPath) if outfitRefPath else None
-    style = safe_upload_path(styleRefPath) if styleRefPath else None
-
-    builder_dict = None
-    if builder:
-        try:
-            builder_dict = json.loads(builder)
-            if not isinstance(builder_dict, dict):
-                raise ValueError
-        except (json.JSONDecodeError, ValueError):
-            raise HTTPException(status_code=400, detail="builder must be a JSON object")
-
-    if temperature is not None and not 0.0 <= temperature <= 2.0:
-        raise HTTPException(status_code=400, detail=f"temperature must be in [0.0, 2.0], got {temperature}")
-
-    parsed_seeds = _parse_seeds_form(seeds)
-
+    input_cleanup: list[str] = []
     try:
-        result = await generate_host_candidates(
-            mode=mode,
-            text_prompt=prompt,
-            face_ref_path=face,
-            outfit_ref_path=outfit,
-            style_ref_path=style,
-            extra_prompt=extraPrompt,
-            builder=builder_dict,
-            negative_prompt=negativePrompt,
-            face_strength=faceStrength,
-            outfit_strength=outfitStrength,
-            outfit_text=outfitText,
-            seeds=parsed_seeds,
-            image_size=_validate_image_size(imageSize),
-            n=n,
-            temperature=temperature,
-        )
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    except RuntimeError as e:
-        raise HTTPException(status_code=503, detail=str(e))
-    # Promote each candidate's local PNG (and its .metadata.json
-    # sidecar) into storage so the response carries storage_key + url
-    # the frontend can use without knowing the backend. No-op on
-    # LocalDisk; real PUT on S3.
-    for cand in result.get("candidates", []) or []:
-        local_path = cand.get("path")
-        if not local_path:
-            continue
-        extras = _upload_local_to_storage(local_path, "hosts/saved", with_sidecar=True)
-        cand["storage_key"] = extras["storage_key"]
-        cand["url"] = extras["url"]
-    return result
+        face = await _validate_and_resolve(faceRefPath, input_cleanup)
+        outfit = await _validate_and_resolve(outfitRefPath, input_cleanup)
+        style = await _validate_and_resolve(styleRefPath, input_cleanup)
+
+        builder_dict = None
+        if builder:
+            try:
+                builder_dict = json.loads(builder)
+                if not isinstance(builder_dict, dict):
+                    raise ValueError
+            except (json.JSONDecodeError, ValueError):
+                raise HTTPException(status_code=400, detail="builder must be a JSON object")
+
+        if temperature is not None and not 0.0 <= temperature <= 2.0:
+            raise HTTPException(status_code=400, detail=f"temperature must be in [0.0, 2.0], got {temperature}")
+
+        parsed_seeds = _parse_seeds_form(seeds)
+
+        try:
+            result = await generate_host_candidates(
+                mode=mode,
+                text_prompt=prompt,
+                face_ref_path=face,
+                outfit_ref_path=outfit,
+                style_ref_path=style,
+                extra_prompt=extraPrompt,
+                builder=builder_dict,
+                negative_prompt=negativePrompt,
+                face_strength=faceStrength,
+                outfit_strength=outfitStrength,
+                outfit_text=outfitText,
+                seeds=parsed_seeds,
+                image_size=_validate_image_size(imageSize),
+                n=n,
+                temperature=temperature,
+            )
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+        except RuntimeError as e:
+            raise HTTPException(status_code=503, detail=str(e))
+        # Promote each candidate's local PNG (and its .metadata.json
+        # sidecar) into storage so the response carries storage_key + url
+        # the frontend can use without knowing the backend. No-op on
+        # LocalDisk; real PUT on S3.
+        for cand in result.get("candidates", []) or []:
+            local_path = cand.get("path")
+            if not local_path:
+                continue
+            extras = _upload_local_to_storage(local_path, "hosts/saved", with_sidecar=True)
+            cand["storage_key"] = extras["storage_key"]
+            cand["url"] = extras["url"]
+        return result
+    finally:
+        _cleanup_input_tempfiles(input_cleanup)
 
 
 @app.post("/api/host/generate/stream")
@@ -3157,15 +3254,19 @@ async def host_generate_stream(
     Frontend consumes this via fetch + manual SSE parse (EventSource is GET-only)
     and appends each 'candidate' event to the variants grid as it arrives.
     """
-    from utils.security import safe_upload_path
     from modules.host_generator import stream_host_candidates
     from modules.repositories import studio_host_repo as host_repo
 
     user = auth_module.get_request_user(request)
     user_id = user["user_id"]
-    face = safe_upload_path(faceRefPath) if faceRefPath else None
-    outfit = safe_upload_path(outfitRefPath) if outfitRefPath else None
-    style = safe_upload_path(styleRefPath) if styleRefPath else None
+    input_cleanup: list[str] = []
+    try:
+        face = await _validate_and_resolve(faceRefPath, input_cleanup)
+        outfit = await _validate_and_resolve(outfitRefPath, input_cleanup)
+        style = await _validate_and_resolve(styleRefPath, input_cleanup)
+    except HTTPException:
+        _cleanup_input_tempfiles(input_cleanup)
+        raise
 
     builder_dict = None
     if builder:
@@ -3174,9 +3275,11 @@ async def host_generate_stream(
             if not isinstance(builder_dict, dict):
                 raise ValueError
         except (json.JSONDecodeError, ValueError):
+            _cleanup_input_tempfiles(input_cleanup)
             raise HTTPException(status_code=400, detail="builder must be a JSON object")
 
     if temperature is not None and not 0.0 <= temperature <= 2.0:
+        _cleanup_input_tempfiles(input_cleanup)
         raise HTTPException(status_code=400, detail=f"temperature must be in [0.0, 2.0], got {temperature}")
 
     async def events():
@@ -3238,6 +3341,11 @@ async def host_generate_stream(
         except Exception as e:
             logger.error("host stream failed: %s", e)
             yield f"data: {json.dumps({'type': 'fatal', 'error': str(e), 'status': 500})}\n\n"
+        finally:
+            # SSE generator close → unlink any storage_key tempfiles
+            # we downloaded for face/outfit/style refs. Idempotent so
+            # double-invocation is harmless.
+            _cleanup_input_tempfiles(input_cleanup)
 
     return StreamingResponse(
         events(),
@@ -3274,79 +3382,82 @@ async def composite_generate(
 
     Phase 2 — pipeline-v2 Stage 2. See specs/hoststudio-migration/plan.md §248.
     """
-    from utils.security import safe_upload_path
     from modules.composite_generator import generate_composite_candidates
 
-    host_resolved = safe_upload_path(hostImagePath)
-
+    input_cleanup: list[str] = []
     try:
-        products_raw = json.loads(productImagePaths)
-        if not isinstance(products_raw, list):
-            raise ValueError("productImagePaths must be a JSON array")
-    except (json.JSONDecodeError, ValueError) as e:
-        raise HTTPException(status_code=400, detail=f"Invalid productImagePaths: {e}")
+        host_resolved = await _validate_and_resolve(hostImagePath, input_cleanup)
 
-    products_resolved = [safe_upload_path(p) for p in products_raw]
-    bg_upload_resolved = (
-        safe_upload_path(backgroundUploadPath) if backgroundUploadPath else None
-    )
-
-    if temperature is not None and not 0.0 <= temperature <= 2.0:
-        raise HTTPException(status_code=400, detail=f"temperature must be in [0.0, 2.0], got {temperature}")
-
-    try:
-        result = await generate_composite_candidates(
-            host_image_path=host_resolved,
-            product_image_paths=products_resolved,
-            background_type=backgroundType,
-            background_preset_id=backgroundPresetId,
-            background_preset_label=backgroundPresetLabel,
-            background_upload_path=bg_upload_resolved,
-            background_prompt=backgroundPrompt,
-            direction_ko=direction,
-            shot=shot,
-            angle=angle,
-            n=n,
-            rembg_products=rembg,
-            temperature=temperature,
-            seeds=_parse_seeds_form(seeds),
-            image_size=_validate_image_size(imageSize),
-        )
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    except RuntimeError as e:
-        raise HTTPException(status_code=503, detail=str(e))
-
-    # Promote each candidate's local PNG (+ metadata sidecar) into
-    # storage so the response carries storage_key + url. No-op on
-    # LocalDisk; real PUT on S3.
-    for cand in result.get("candidates", []) or []:
-        local_path = cand.get("path")
-        if not local_path:
-            continue
-        extras = _upload_local_to_storage(local_path, "composites", with_sidecar=True)
-        cand["storage_key"] = extras["storage_key"]
-        cand["url"] = extras["url"]
-
-    # Lifecycle bookkeeping — tag fresh batch as draft, demote previous
-    # selected to is_prev_selected, evict the older prev marker. Augment
-    # the response so the frontend can render the 5-tile picker.
-    from modules.repositories import studio_host_repo as host_repo
-    user = auth_module.get_request_user(request)
-    user_id = user["user_id"]
-    saved_paths = [c.get("path") for c in (result.get("candidates") or []) if c.get("path")]
-    if saved_paths:
         try:
-            batch_id = f"batch_{uuid.uuid4().hex[:8]}"
-            await host_repo.record_batch(user_id, "2-composite", saved_paths, batch_id)
-            await host_repo.cleanup_after_generate(user_id, "2-composite", batch_id)
-            state = await host_repo.get_state(user_id, "2-composite")
-            result["batch_id"] = batch_id
-            result["prev_selected"] = state["prev_selected"]
-        except Exception as le:
-            logger.error("composite lifecycle bookkeeping failed: %s", le)
-            result["lifecycle_error"] = str(le)
-    return result
+            products_raw = json.loads(productImagePaths)
+            if not isinstance(products_raw, list):
+                raise ValueError("productImagePaths must be a JSON array")
+        except (json.JSONDecodeError, ValueError) as e:
+            raise HTTPException(status_code=400, detail=f"Invalid productImagePaths: {e}")
+
+        products_resolved = [
+            await _validate_and_resolve(p, input_cleanup) for p in products_raw
+        ]
+        bg_upload_resolved = await _validate_and_resolve(backgroundUploadPath, input_cleanup)
+
+        if temperature is not None and not 0.0 <= temperature <= 2.0:
+            raise HTTPException(status_code=400, detail=f"temperature must be in [0.0, 2.0], got {temperature}")
+
+        try:
+            result = await generate_composite_candidates(
+                host_image_path=host_resolved,
+                product_image_paths=products_resolved,
+                background_type=backgroundType,
+                background_preset_id=backgroundPresetId,
+                background_preset_label=backgroundPresetLabel,
+                background_upload_path=bg_upload_resolved,
+                background_prompt=backgroundPrompt,
+                direction_ko=direction,
+                shot=shot,
+                angle=angle,
+                n=n,
+                rembg_products=rembg,
+                temperature=temperature,
+                seeds=_parse_seeds_form(seeds),
+                image_size=_validate_image_size(imageSize),
+            )
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+        except RuntimeError as e:
+            raise HTTPException(status_code=503, detail=str(e))
+
+        # Promote each candidate's local PNG (+ metadata sidecar) into
+        # storage so the response carries storage_key + url. No-op on
+        # LocalDisk; real PUT on S3.
+        for cand in result.get("candidates", []) or []:
+            local_path = cand.get("path")
+            if not local_path:
+                continue
+            extras = _upload_local_to_storage(local_path, "composites", with_sidecar=True)
+            cand["storage_key"] = extras["storage_key"]
+            cand["url"] = extras["url"]
+
+        # Lifecycle bookkeeping — tag fresh batch as draft, demote previous
+        # selected to is_prev_selected, evict the older prev marker. Augment
+        # the response so the frontend can render the 5-tile picker.
+        from modules.repositories import studio_host_repo as host_repo
+        user = auth_module.get_request_user(request)
+        user_id = user["user_id"]
+        saved_paths = [c.get("path") for c in (result.get("candidates") or []) if c.get("path")]
+        if saved_paths:
+            try:
+                batch_id = f"batch_{uuid.uuid4().hex[:8]}"
+                await host_repo.record_batch(user_id, "2-composite", saved_paths, batch_id)
+                await host_repo.cleanup_after_generate(user_id, "2-composite", batch_id)
+                state = await host_repo.get_state(user_id, "2-composite")
+                result["batch_id"] = batch_id
+                result["prev_selected"] = state["prev_selected"]
+            except Exception as le:
+                logger.error("composite lifecycle bookkeeping failed: %s", le)
+                result["lifecycle_error"] = str(le)
+        return result
+    finally:
+        _cleanup_input_tempfiles(input_cleanup)
 
 
 @app.post("/api/composite/generate/stream")
@@ -3372,27 +3483,33 @@ async def composite_generate_stream(
     translated direction immediately, then one frame per completed candidate,
     then a terminal {type: "done"}.
     """
-    from utils.security import safe_upload_path
     from modules.composite_generator import stream_composite_candidates
     from modules.repositories import studio_host_repo as host_repo
 
     user = auth_module.get_request_user(request)
     user_id = user["user_id"]
-    host_resolved = safe_upload_path(hostImagePath)
-
+    input_cleanup: list[str] = []
     try:
-        products_raw = json.loads(productImagePaths)
-        if not isinstance(products_raw, list):
-            raise ValueError("productImagePaths must be a JSON array")
-    except (json.JSONDecodeError, ValueError) as e:
-        raise HTTPException(status_code=400, detail=f"Invalid productImagePaths: {e}")
+        host_resolved = await _validate_and_resolve(hostImagePath, input_cleanup)
 
-    products_resolved = [safe_upload_path(p) for p in products_raw]
-    bg_upload_resolved = (
-        safe_upload_path(backgroundUploadPath) if backgroundUploadPath else None
-    )
+        try:
+            products_raw = json.loads(productImagePaths)
+            if not isinstance(products_raw, list):
+                raise ValueError("productImagePaths must be a JSON array")
+        except (json.JSONDecodeError, ValueError) as e:
+            _cleanup_input_tempfiles(input_cleanup)
+            raise HTTPException(status_code=400, detail=f"Invalid productImagePaths: {e}")
+
+        products_resolved = [
+            await _validate_and_resolve(p, input_cleanup) for p in products_raw
+        ]
+        bg_upload_resolved = await _validate_and_resolve(backgroundUploadPath, input_cleanup)
+    except HTTPException:
+        _cleanup_input_tempfiles(input_cleanup)
+        raise
 
     if temperature is not None and not 0.0 <= temperature <= 2.0:
+        _cleanup_input_tempfiles(input_cleanup)
         raise HTTPException(status_code=400, detail=f"temperature must be in [0.0, 2.0], got {temperature}")
 
     async def events():
@@ -3451,6 +3568,10 @@ async def composite_generate_stream(
         except Exception as e:
             logger.error("composite stream failed: %s", e)
             yield f"data: {json.dumps({'type': 'fatal', 'error': str(e), 'status': 500})}\n\n"
+        finally:
+            # SSE generator close → unlink storage_key tempfiles for
+            # host/product/bg refs.
+            _cleanup_input_tempfiles(input_cleanup)
 
     return StreamingResponse(
         events(),
@@ -3484,19 +3605,24 @@ async def save_host(
     from pathlib import Path as _Path
     from modules import storage as storage_module
     from modules.repositories import studio_saved_host_repo
-    from utils.security import safe_upload_path
 
     user = auth_module.get_request_user(request)
 
-    # Guard source_path (must be in UPLOADS/OUTPUTS)
-    source = safe_upload_path(source_path)
-    if not os.path.exists(source):
-        raise HTTPException(status_code=404, detail="Source image not found")
+    # Accept either an absolute path (legacy) or a storage_key from a
+    # generate-candidate response. _validate_and_resolve downloads the
+    # latter to a local tempfile we can hand to media_store.save_path.
+    input_cleanup: list[str] = []
+    try:
+        source = await _validate_and_resolve(source_path, input_cleanup)
+        if not source or not os.path.exists(source):
+            raise HTTPException(status_code=404, detail="Source image not found")
 
-    host_id = uuid.uuid4().hex
-    storage_key = storage_module.media_store.save_path(
-        "hosts", _Path(source), basename=f"{host_id}.png"
-    )
+        host_id = uuid.uuid4().hex
+        storage_key = storage_module.media_store.save_path(
+            "hosts", _Path(source), basename=f"{host_id}.png"
+        )
+    finally:
+        _cleanup_input_tempfiles(input_cleanup)
 
     meta_dict = None
     if meta:
