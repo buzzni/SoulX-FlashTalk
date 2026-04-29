@@ -28,6 +28,7 @@ import type {
   Product,
   ResolutionKey,
   Voice,
+  VoiceCloneSample,
   WizardState,
 } from '../wizard/schema';
 import {
@@ -94,9 +95,41 @@ export interface WizardActions {
    * selectors when Phase 3 lands. */
   updateState: (updater: WizardState | ((state: WizardState) => WizardState | Partial<WizardState>)) => void;
   reset: () => void;
+  /** Set the voice clone cache. See `voiceCloneCache` below for the
+   * mode-swap recovery contract. Pass null to clear. */
+  setVoiceCloneCache: (
+    cache: { sample: VoiceCloneSample; pendingName: string } | null,
+  ) => void;
+  /** Set the voice tts cache. See `voiceTtsCache` below. */
+  setVoiceTtsCache: (
+    cache: { voiceId: string; voiceName: string | null } | null,
+  ) => void;
 }
 
-export type WizardStore = WizardState & WizardActions;
+/** Ephemeral mode-swap cache for the clone tab. The wizard voice slice
+ * is a discriminated union over `source`, so when the user toggles
+ * "목소리 고르기" → "새 클론 만들기" the clone-side fields (sample +
+ * pendingName) get overwritten by the tts shape. Persisting a snapshot
+ * here lets re-entering the clone tab restore the staged file or the
+ * cloned voice id. NEVER persisted — clone state is session-scoped. */
+export interface VoiceCloneCache {
+  sample: VoiceCloneSample;
+  pendingName: string;
+}
+
+/** Mirror cache for the tts tab — preserves the picked voiceId/voiceName
+ * across clone/upload swaps so swapping back to "목소리 고르기" doesn't
+ * land on a "목소리 안 골랐어요" state. Auto-populated by setVoice and
+ * read by switchAiSubMode on tab swap. */
+export interface VoiceTtsCache {
+  voiceId: string;
+  voiceName: string | null;
+}
+
+export type WizardStore = WizardState & WizardActions & {
+  voiceCloneCache: VoiceCloneCache | null;
+  voiceTtsCache: VoiceTtsCache | null;
+};
 
 // ────────────────────────────────────────────────────────────────────
 // Legacy migration — read the legacy `showhost_state` key once,
@@ -318,10 +351,41 @@ export const useWizardStore = create<WizardStore>()(
           lastSavedAt: Date.now(),
         })),
       setVoice: (next) =>
-        set((s) => ({
-          voice: typeof next === 'function' ? next(s.voice) : next,
-          lastSavedAt: Date.now(),
-        })),
+        set((s) => {
+          const newVoice = typeof next === 'function' ? next(s.voice) : next;
+          // Auto-cache mode-side snapshots so a tab swap can restore
+          // them. clone cache: source='clone' + non-empty sample.
+          // tts cache: source='tts' + voiceId. Either cache only
+          // updates while the corresponding mode is active, so old
+          // state survives until the user explicitly overwrites it.
+          let voiceCloneCache = s.voiceCloneCache;
+          let voiceTtsCache = s.voiceTtsCache;
+          if (
+            newVoice.source === 'clone' &&
+            newVoice.sample.state !== 'empty'
+          ) {
+            voiceCloneCache = {
+              sample: newVoice.sample,
+              pendingName: newVoice.pendingName,
+            };
+          }
+          if (newVoice.source === 'tts' && newVoice.voiceId) {
+            voiceTtsCache = {
+              voiceId: newVoice.voiceId,
+              voiceName: newVoice.voiceName,
+            };
+          }
+          return {
+            voice: newVoice,
+            voiceCloneCache,
+            voiceTtsCache,
+            lastSavedAt: Date.now(),
+          };
+        }),
+      voiceCloneCache: null,
+      voiceTtsCache: null,
+      setVoiceCloneCache: (cache) => set({ voiceCloneCache: cache }),
+      setVoiceTtsCache: (cache) => set({ voiceTtsCache: cache }),
       setResolution: (resolution) => set({ resolution, lastSavedAt: Date.now() }),
       setImageQuality: (imageQuality) => set({ imageQuality, lastSavedAt: Date.now() }),
       setPlaylistId: (playlistId) => set({ playlistId, lastSavedAt: Date.now() }),
@@ -337,6 +401,8 @@ export const useWizardStore = create<WizardStore>()(
         set((s) => ({
           ...INITIAL_WIZARD_STATE,
           wizardEpoch: ((s.wizardEpoch as number | undefined) ?? 0) + 1,
+          voiceCloneCache: null,
+          voiceTtsCache: null,
         })),
     }),
     {

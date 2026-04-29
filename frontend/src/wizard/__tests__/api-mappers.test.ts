@@ -189,6 +189,7 @@ describe('toVoiceGenerateRequest', () => {
     const v: Voice = {
       source: 'clone',
       sample: { state: 'cloned', voiceId: 'cloned_001', name: '내 목소리' },
+      pendingName: '',
       advanced: ADVANCED,
       script: SCRIPT,
       generation: { state: 'idle' },
@@ -204,6 +205,7 @@ describe('toVoiceGenerateRequest', () => {
     const v: Voice = {
       source: 'clone',
       sample: { state: 'empty' },
+      pendingName: '',
       advanced: ADVANCED,
       script: SCRIPT,
       generation: { state: 'idle' },

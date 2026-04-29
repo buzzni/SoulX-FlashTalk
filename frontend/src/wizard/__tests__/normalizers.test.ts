@@ -271,6 +271,7 @@ describe('toPersistable', () => {
     const out = persistVoice({
       source: 'clone',
       sample: { state: 'pending', asset: { file, previewUrl: 'blob:x', name: 'sample.wav' } },
+      pendingName: '',
       advanced: { speed: 1, stability: 0.5, style: 0.3, similarity: 0.75 },
       script: { paragraphs: ['hi'] },
       generation: { state: 'idle' },
@@ -283,6 +284,7 @@ describe('toPersistable', () => {
     const out = persistVoice({
       source: 'clone',
       sample: { state: 'cloned', voiceId: 'cv_xyz', name: '내 목소리' },
+      pendingName: '',
       advanced: { speed: 1, stability: 0.5, style: 0.3, similarity: 0.75 },
       script: { paragraphs: ['hi'] },
       generation: { state: 'idle' },

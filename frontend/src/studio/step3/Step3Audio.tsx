@@ -66,7 +66,7 @@ import { useFormZustandSync } from '@/hooks/wizard/useFormZustandSync';
 import { useDebouncedFormSync } from '@/hooks/wizard/useDebouncedFormSync';
 import { AudioPlayer } from '../shared/AudioPlayer';
 import { VoicePicker } from './VoicePicker';
-import { VoiceCloner } from './VoiceCloner';
+import { VoiceCloner, defaultClonedName } from './VoiceCloner';
 import { AudioUploader } from './AudioUploader';
 import { ScriptEditor, buildScript, SCRIPT_LIMIT, clampParagraphs } from './ScriptEditor';
 import { VoiceAdvancedSettings } from './VoiceAdvancedSettings';
@@ -114,6 +114,20 @@ function carryScript(prev: VoiceFormValues): { paragraphs: string[] } {
 
 function toTTSForm(prev: VoiceFormValues): VoiceFormValues {
   if (prev.source === 'tts') return prev;
+  // If we're swapping out of clone with an already-cloned sample, the
+  // cloned voice_id is a valid TTS voiceId — carry it forward so the
+  // user doesn't land on a "목소리 안 골랐어요" state right after
+  // generating audio. The cloned voice also shows up in the picker's
+  // "내 클론 목소리" column so the selection reads consistently.
+  if (prev.source === 'clone' && prev.sample.state === 'cloned') {
+    return {
+      source: 'tts',
+      voiceId: prev.sample.voiceId,
+      voiceName: prev.sample.name,
+      advanced: carryAdvanced(prev),
+      script: carryScript(prev),
+    };
+  }
   return {
     source: 'tts',
     voiceId: null,
@@ -128,6 +142,7 @@ function toCloneForm(prev: VoiceFormValues): VoiceFormValues {
   return {
     source: 'clone',
     sample: { state: 'empty' },
+    pendingName: '',
     advanced: carryAdvanced(prev),
     script: carryScript(prev),
   };
@@ -160,6 +175,9 @@ export default function Step3Audio({ state, update }: Step3AudioProps) {
   const sample = useWizardStore((s) =>
     s.voice.source === 'clone' ? s.voice.sample : null,
   );
+  const pendingName = useWizardStore((s) =>
+    s.voice.source === 'clone' ? s.voice.pendingName : '',
+  );
   const audioFromStore = useWizardStore((s) =>
     s.voice.source === 'upload' ? s.voice.audio : null,
   );
@@ -189,6 +207,7 @@ export default function Step3Audio({ state, update }: Step3AudioProps) {
         voice: {
           source: 'clone',
           sample: sample!,
+          pendingName,
           advanced: advanced!,
           script,
         },
@@ -203,7 +222,7 @@ export default function Step3Audio({ state, update }: Step3AudioProps) {
         script,
       },
     };
-  }, [source, script, advanced, voiceId, voiceName, sample, audioFromStore]);
+  }, [source, script, advanced, voiceId, voiceName, sample, pendingName, audioFromStore]);
 
   const form = useForm<Step3FormValues>({
     resolver: zodResolver(Step3FormValuesSchema),
@@ -279,15 +298,51 @@ export default function Step3Audio({ state, update }: Step3AudioProps) {
       });
     }
   };
+  // Mode-swap caches (clone-side + tts-side) live in the store. Both
+  // are auto-populated inside `wizardStore.setVoice`. On re-entry to
+  // either tab we read the matching cache so the user lands on their
+  // last selection instead of an empty state.
+  const voiceCloneCache = useWizardStore((s) => s.voiceCloneCache);
+  const voiceTtsCache = useWizardStore((s) => s.voiceTtsCache);
+
   const switchAiSubMode = (next: 'tts' | 'clone') => {
     const cur = form.getValues('voice');
     if (cur.source === next) return;
     abortInflight();
-    form.setValue(
-      'voice',
-      next === 'tts' ? toTTSForm(cur) : toCloneForm(cur),
-      { shouldDirty: true, shouldValidate: true },
-    );
+    if (next === 'tts') {
+      const fresh = toTTSForm(cur);
+      // Restore last picked voiceId/voiceName so the tts tab doesn't
+      // open on "목소리 안 골랐어요". toTTSForm already carries a
+      // cloned sample's voiceId; the cache covers stock voices and
+      // older clones still in the catalogue.
+      const restored: VoiceFormValues =
+        fresh.source === 'tts' && !fresh.voiceId && voiceTtsCache?.voiceId
+          ? {
+              ...fresh,
+              voiceId: voiceTtsCache.voiceId,
+              voiceName: voiceTtsCache.voiceName,
+            }
+          : fresh;
+      form.setValue('voice', restored, {
+        shouldDirty: true,
+        shouldValidate: true,
+      });
+      return;
+    }
+    // next === 'clone' — restore staged file or cloned voice id.
+    const fresh = toCloneForm(cur);
+    const restored: VoiceFormValues =
+      fresh.source === 'clone' && voiceCloneCache?.sample
+        ? {
+            ...fresh,
+            sample: voiceCloneCache.sample,
+            pendingName: voiceCloneCache.pendingName,
+          }
+        : fresh;
+    form.setValue('voice', restored, {
+      shouldDirty: true,
+      shouldValidate: true,
+    });
   };
 
   // Eager upload — when upload-mode voice has a LocalAsset audio
@@ -362,11 +417,21 @@ export default function Step3Audio({ state, update }: Step3AudioProps) {
           setVoice((prev) => formValuesToVoiceSlice(v, prev));
 
           if (v.source === 'clone' && v.sample.state === 'pending') {
-            const cloneResult = await cloner.clone(v.sample.asset.file);
+            // User-typed name (always-visible input) wins; fall back to
+            // the filename stem so the ElevenLabs catalog never gets a
+            // generic 'HostStudio 클론'.
+            const typed = (v.pendingName ?? '').trim();
+            const cloneName =
+              typed || defaultClonedName(v.sample.asset.name) || '내 클론 목소리';
+            const cloneResult = await cloner.clone(v.sample.asset.file, cloneName);
             if (!cloneResult?.voice_id) {
               if (cloner.error) setErrorMsg(cloner.error);
               return;
             }
+            // Refresh the voices catalogue so "목소리 고르기 → 내 클론
+            // 목소리" reflects the just-cloned voice immediately. Fire-
+            // and-forget — we already proceed to TTS with the new id.
+            void voiceList.refresh();
           }
           if (v.source === 'clone' && v.sample.state === 'empty') {
             throw new Error('클론용 샘플 음성을 올려주세요');
@@ -420,15 +485,14 @@ export default function Step3Audio({ state, update }: Step3AudioProps) {
               active={isAi}
               icon={<Sparkles className="size-4" />}
               title="AI로 음성 만들기"
-              desc="대본을 적으면 AI가 읽어줘요"
+              desc="대본을 글로 적으면 AI가 골라준 목소리로 읽어줘요"
               onClick={switchToAi}
             />
             <OptionCard
               active={!isAi}
               icon={<MicVocal className="size-4" />}
               title="내 녹음 그대로 쓰기"
-              desc="이미 녹음한 음성 파일을 사용해요"
-              meta="즉시 적용"
+              desc="이미 있는 녹음 파일을 영상에 그대로 넣어요 (자막만 별도로 적어요)"
               onClick={switchToRawAudio}
             />
           </div>
@@ -444,7 +508,7 @@ export default function Step3Audio({ state, update }: Step3AudioProps) {
                     목소리 고르기
                   </WizardTab>
                   <WizardTab value="clone" icon={<Copy className="size-3.5" />}>
-                    내 목소리 복제
+                    새 클론 만들기
                   </WizardTab>
                 </WizardTabs>
               </div>

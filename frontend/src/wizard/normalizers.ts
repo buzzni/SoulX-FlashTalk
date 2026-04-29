@@ -407,7 +407,7 @@ function migrateVoice(raw: unknown): Voice {
       typeof c.voiceId === 'string'
         ? { state: 'cloned', voiceId: c.voiceId, name: typeof c.name === 'string' ? c.name : '내 목소리' }
         : { state: 'empty' };
-    return { source: 'clone', sample, advanced, script, generation };
+    return { source: 'clone', sample, pendingName: '', advanced, script, generation };
   }
 
   return {

@@ -122,6 +122,7 @@ export const VoiceFormValuesSchema = z.discriminatedUnion('source', [
   z.object({
     source: z.literal('clone'),
     sample: VoiceCloneSampleSchema,
+    pendingName: z.string(),
     advanced: VoiceAdvancedSchema,
     script: ScriptSchema,
   }),
@@ -146,6 +147,7 @@ export function voiceSliceToFormValues(voice: Voice): VoiceFormValues {
     return {
       source: 'clone',
       sample: voice.sample,
+      pendingName: voice.pendingName,
       advanced: voice.advanced,
       script: voice.script,
     };
@@ -161,17 +163,23 @@ export function voiceSliceToFormValues(voice: Voice): VoiceFormValues {
 
 /**
  * Re-attach `generation` from the previous slice when committing form
- * values back to the store. Same-variant swaps preserve the lifecycle
- * (e.g. user edits script while TTS is `ready` — keep `ready`); cross-
- * variant swaps reset to `idle` (stale lifecycle from a different
- * source isn't valid). Upload variant has no generation field.
+ * values back to the store. tts ↔ clone share the same TTS generation
+ * pipeline (same `useTTSGeneration` hook, same `voice.generation`
+ * shape, same audio path). Swapping between those two sub-modes must
+ * preserve a `ready` audio result so the user doesn't lose the audio
+ * they just generated. Only ai ↔ upload is a real pipeline change
+ * that justifies resetting to `idle`. Upload variant has no
+ * generation field.
  */
 export function formValuesToVoiceSlice(values: VoiceFormValues, prev: Voice): Voice {
   if (values.source === 'upload') {
     return { source: 'upload', audio: values.audio, script: values.script };
   }
   const prevGen: VoiceGeneration =
-    prev.source !== 'upload' && prev.source === values.source
+    // Both prev and values are ai-side (tts or clone) — carry the
+    // generation. This includes tts↔clone swaps. ai↔upload still
+    // resets because the upload branch has no generation field at all.
+    prev.source !== 'upload'
       ? prev.generation
       : { state: 'idle' };
   if (values.source === 'tts') {
@@ -187,6 +195,7 @@ export function formValuesToVoiceSlice(values: VoiceFormValues, prev: Voice): Vo
   return {
     source: 'clone',
     sample: values.sample,
+    pendingName: values.pendingName,
     advanced: values.advanced,
     script: values.script,
     generation: prevGen,

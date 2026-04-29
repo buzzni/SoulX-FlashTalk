@@ -160,17 +160,53 @@ describe('Step3 voice form mappers', () => {
     expect(next.generation).toBe(READY_TTS.generation); // ref preserved
   });
 
-  it('formValuesToVoiceSlice resets generation to idle on cross-variant swap', () => {
-    // Was tts (ready), now form switched to clone via setValue
+  it('formValuesToVoiceSlice carries generation across tts ↔ clone (same TTS pipeline)', () => {
+    // Was tts (ready audio), now form switched to clone sub-mode.
+    // Both share the useTTSGeneration pipeline + same voice.generation
+    // shape, so the audio result must survive the swap.
     const cloneForm = {
       source: 'clone' as const,
       sample: { state: 'empty' as const },
+      pendingName: '',
       advanced: ADVANCED,
       script: SCRIPT,
     };
     const next = formValuesToVoiceSlice(cloneForm, READY_TTS);
     expect(next.source).toBe('clone');
     if (next.source !== 'clone') throw new Error('narrow');
+    expect(next.generation).toBe(READY_TTS.generation); // ref preserved
+  });
+
+  it('formValuesToVoiceSlice resets generation to idle on ai → upload swap', () => {
+    // Upload bypasses TTS entirely (no generation field at all). The
+    // discriminator change forces a real lifecycle reset.
+    const uploadForm = {
+      source: 'upload' as const,
+      audio: null,
+      script: SCRIPT,
+    };
+    const next = formValuesToVoiceSlice(uploadForm, READY_TTS);
+    expect(next.source).toBe('upload');
+    if (next.source !== 'upload') throw new Error('narrow');
+    expect((next as Record<string, unknown>).generation).toBeUndefined();
+  });
+
+  it('formValuesToVoiceSlice resets generation to idle on upload → ai swap', () => {
+    const uploadVoice: Voice = {
+      source: 'upload',
+      audio: null,
+      script: SCRIPT,
+    };
+    const ttsForm = {
+      source: 'tts' as const,
+      voiceId: null,
+      voiceName: null,
+      advanced: ADVANCED,
+      script: SCRIPT,
+    };
+    const next = formValuesToVoiceSlice(ttsForm, uploadVoice);
+    expect(next.source).toBe('tts');
+    if (next.source !== 'tts') throw new Error('narrow');
     expect(next.generation).toEqual({ state: 'idle' });
   });
 

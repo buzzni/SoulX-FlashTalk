@@ -1,6 +1,27 @@
 import { useState, useRef } from 'react';
-import { Upload, RefreshCcw, Trash2 } from 'lucide-react';
+import {
+  Upload,
+  RefreshCcw,
+  Trash2,
+  Music as MusicIcon,
+  FileText as FileIcon,
+} from 'lucide-react';
 import { cn } from '@/lib/utils';
+
+const IMAGE_EXT = /\.(png|jpe?g|gif|webp|svg|bmp|avif)$/i;
+const AUDIO_EXT = /\.(mp3|wav|m4a|ogg|aac|flac|opus)$/i;
+
+function classifyFile(name?: string, type?: string): 'image' | 'audio' | 'other' {
+  if (type) {
+    if (type.startsWith('image/')) return 'image';
+    if (type.startsWith('audio/')) return 'audio';
+  }
+  if (name) {
+    if (IMAGE_EXT.test(name)) return 'image';
+    if (AUDIO_EXT.test(name)) return 'audio';
+  }
+  return 'other';
+}
 
 /**
  * UploadTile — file dropzone with click / drag / paste.
@@ -113,22 +134,34 @@ export function UploadTile({
           className={cn(UPLOAD_TILE_THUMB_CLASS, 'cursor-pointer')}
           onClick={() => openPicker()}
         >
-          {file.url ? (
-            <img
-              src={file.url}
-              alt={file.name ?? ''}
-              className="w-full h-full object-cover block"
-            />
-          ) : (
-            <div className="striped-placeholder">
-              {(file.name ?? '').toLowerCase().endsWith('.mp3') ||
-              (file.name ?? '').toLowerCase().endsWith('.wav')
-                ? 'AUDIO'
-                : 'IMAGE'}
-              <br />
-              reference
-            </div>
-          )}
+          {(() => {
+            const kind = classifyFile(file.name, file.type);
+            // Image preview only for actual images. Audio gets a music
+            // icon (browsers can't render audio binary as <img> anyway —
+            // the old code printed a broken thumb). Anything else gets
+            // a generic file icon.
+            if (kind === 'image' && file.url) {
+              return (
+                <img
+                  src={file.url}
+                  alt={file.name ?? ''}
+                  className="w-full h-full object-cover block"
+                />
+              );
+            }
+            if (kind === 'audio') {
+              return (
+                <div className="grid place-items-center w-full h-full text-muted-foreground">
+                  <MusicIcon className="size-7" strokeWidth={1.6} aria-label="오디오 파일" />
+                </div>
+              );
+            }
+            return (
+              <div className="grid place-items-center w-full h-full text-muted-foreground">
+                <FileIcon className="size-7" strokeWidth={1.6} aria-label="파일" />
+              </div>
+            );
+          })()}
         </div>
         <div className="flex flex-col gap-0.5 min-w-0 flex-1 text-[13px] text-foreground">
           <span className="truncate font-semibold tracking-tight">{file.name ?? ''}</span>

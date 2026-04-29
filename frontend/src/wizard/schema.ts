@@ -279,6 +279,11 @@ export const VoiceSchema = z.discriminatedUnion('source', [
   z.object({
     source: z.literal('clone'),
     sample: VoiceCloneSampleSchema,
+    /** What the user typed as the clone label. Lives on the source
+     * (not on `sample.pending`) so the input can stay visible — and
+     * carry user input — across empty/pending state transitions. Only
+     * read at clone-submit time; ignored once `sample.state === 'cloned'`. */
+    pendingName: z.string(),
     advanced: VoiceAdvancedSchema,
     script: ScriptSchema,
     generation: VoiceGenerationSchema,
