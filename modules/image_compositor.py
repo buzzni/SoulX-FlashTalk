@@ -24,7 +24,15 @@ logger = logging.getLogger(__name__)
 GEMINI_IMAGE_MODEL = "gemini-3.1-flash-image-preview"
 
 _gemini_client = None
-_rembg_session = None
+_rembg_sessions: Dict[str, object] = {}
+
+# Per-kind rembg model selection. Host images are head-and-shoulders against a
+# studio backdrop — u2net's saliency-detection lineage handles that fine.
+# Product cutouts are dichotomous segmentation (DIS-style: thin handles, white
+# packaging on white seamless), where u2net collapses to ~0.39 IoU on DIS5K.
+# birefnet-general-lite is the same size class (~178MB) but trained against
+# the DIS lineage and ships at ~0.85+ IoU on the same benchmark.
+_REMBG_MODEL_BY_KIND = {"host": "u2net", "product": "birefnet-general-lite"}
 
 # Retry config for transient Gemini failures. The caller already has
 # min_success=2 tolerance for the slowest-N-of-4 pattern, but per-candidate
@@ -304,20 +312,20 @@ def _get_gemini_client():
     return _gemini_client
 
 
-def _get_rembg_session():
-    """Lazy-load rembg session."""
-    global _rembg_session
-    if _rembg_session is None:
+def _get_rembg_session(kind: str = "host"):
+    """Lazy-load rembg session for the given kind ('host' or 'product')."""
+    model = _REMBG_MODEL_BY_KIND.get(kind, "u2net")
+    if model not in _rembg_sessions:
         from rembg import new_session
-        _rembg_session = new_session("u2net")
-        logger.info("rembg session loaded (u2net)")
-    return _rembg_session
+        _rembg_sessions[model] = new_session(model)
+        logger.info("rembg session loaded (%s)", model)
+    return _rembg_sessions[model]
 
 
-def _remove_bg(image_path: str) -> Image.Image:
+def _remove_bg(image_path: str, kind: str = "host") -> Image.Image:
     """Remove background using rembg. Returns RGBA."""
     from rembg import remove
-    session = _get_rembg_session()
+    session = _get_rembg_session(kind)
     img = Image.open(image_path).convert("RGB")
     return remove(img, session=session)
 
@@ -521,7 +529,10 @@ def _gemini_generate_scene(
             "You are a scene generator. Preserve the foreground subjects (people) "
             "from the provided image exactly as-is; only compose the background/scene "
             "around them. Do not add any text, watermarks, or logos. "
-            "Keep lighting and shadows consistent across all subjects."
+            "Keep lighting and shadows consistent across all subjects. "
+            "Each product reference image represents EXACTLY ONE physical item. "
+            "Render only one of each — never a pair, twin, mirrored copy, or "
+            "duplicate placed elsewhere in the scene."
         )
         def _do():
             return client.models.generate_content(

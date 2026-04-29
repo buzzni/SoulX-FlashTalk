@@ -268,6 +268,11 @@ def _build_v2(
 
     # [6] CONSTRAINTS — Gemini 3.x ordering rule: strict constraints LAST
     constraints = [
+        "Render exactly one of each provided product. Never a pair, "
+        "twin, mirrored copy, or duplicate placed elsewhere in the "
+        "scene. Each product must be fully visible — naturally held "
+        "by the HOST or placed on a surface beside them at "
+        "appropriate scale. Never crop a product.",
         "Output a single photograph. Never include text, captions, "
         "logos, watermarks, UI overlays, or floating product cards.",
         "Never duplicate any object. If any object appears in any "
@@ -331,8 +336,11 @@ def _build_v2_1(
         "Gesture, head turn, and gaze MAY adapt to the DIRECTION. "
         "NEVER re-pose the full-body stance away from Image 1.\n"
         "Subsequent images labeled PRODUCT #1, #2, ... must preserve "
-        "original shape, colors, and visible branding. NO floating "
-        "products — each one rests on a surface or is held by the host."
+        "original shape, colors, and visible branding. Each PRODUCT "
+        "reference represents EXACTLY ONE physical item — render only "
+        "one of each. NEVER a pair, twin, mirrored copy, or duplicate "
+        "placed elsewhere. NO floating products — each one rests on a "
+        "surface or is held by the host."
     )
 
     if background_type == "upload":
@@ -404,6 +412,11 @@ def _build_v2_1(
         blocks.append(f"[5] DIRECTION (한국어 원문)\n{direction.strip()}")
 
     constraints = [
+        "Render EXACTLY ONE of each provided product. NEVER a pair, "
+        "twin, mirrored copy, or duplicate placed elsewhere in the "
+        "scene. Each product is fully visible — naturally held by the "
+        "HOST or placed on a surface beside them at appropriate scale. "
+        "NO cropped products.",
         "Output a single photograph. NEVER include text, captions, "
         "logos, watermarks, UI overlays, or floating product cards.",
         "NEVER duplicate any object. If any object appears in any "
@@ -482,25 +495,40 @@ def _build_compact(
         parts.append(f"DIRECTION (한국어): {direction.strip()}")
 
     parts.append(
-        "CONSTRAINTS: NEVER duplicate any object. NO cropped limbs. NO "
-        "floating products — every product casts a contact shadow and "
-        "matches scene lighting. NO text, logos, watermarks."
+        "CONSTRAINTS: Render EXACTLY ONE of each provided product — "
+        "NEVER a pair, twin, mirrored copy, or duplicate elsewhere. "
+        "Each product fully visible, naturally held by the host or "
+        "placed on a surface beside them at appropriate scale. NO "
+        "cropped products, NO cropped limbs. NO floating products — "
+        "every product casts a contact shadow and matches scene "
+        "lighting. NO text, logos, watermarks."
     )
 
     return "\n\n".join(parts)
 
 
 def _preprocess_product(path: str, tmp_dir: str, apply_rembg: bool) -> str:
-    """Optionally run rembg on a product image; return path to processed PNG."""
+    """Run rembg on a product image and flatten onto white. Returns path to RGB PNG.
+
+    Flatten step matters: downstream `_sync_generate` reads each ref image with
+    `Image.open(p).convert("RGB")`, which fills alpha=0 with BLACK. Gemini then
+    sees the product as a black silhouette and either drops it or duplicates a
+    distorted copy. Flattening to white at preprocess time hands Gemini a clean
+    product-on-white reference instead.
+    """
     if not apply_rembg:
         return path
 
     from modules.image_compositor import _remove_bg
 
-    rgba = _remove_bg(path)
+    rgba = _remove_bg(path, kind="product")
+    if rgba.mode != "RGBA":
+        rgba = rgba.convert("RGBA")
+    flattened = Image.new("RGB", rgba.size, (255, 255, 255))
+    flattened.paste(rgba, mask=rgba.split()[3])
     os.makedirs(tmp_dir, exist_ok=True)
     out_path = os.path.join(tmp_dir, f"product_rembg_{uuid.uuid4().hex[:8]}.png")
-    rgba.save(out_path, "PNG")
+    flattened.save(out_path, "PNG", optimize=True)
     logger.info("Product rembg preprocess: %s → %s", path, out_path)
     return out_path
 
@@ -857,13 +885,25 @@ def _sync_generate(
     host_rgba = _remove_bg(host_image_path)
     people_canvas = _build_people_canvas([host_rgba], target_size, scale=0.75)
 
-    # Assemble reference images (products + optional background image)
+    # Assemble reference images (products + optional background image).
+    # PR S3+ debug: log each product path resolution so we can tell
+    # which step lost the product (download missing? preprocess fail?
+    # path mismatch?). Drop these once the issue is diagnosed.
     ref_images: List[Image.Image] = []
     for p in product_image_paths:
         if os.path.exists(p):
-            ref_images.append(Image.open(p).convert("RGB"))
+            try:
+                ref_images.append(Image.open(p).convert("RGB"))
+                logger.info("composite[seed=%s] product OK: %s", seed, p)
+            except Exception as e:
+                logger.warning("composite[seed=%s] product Image.open failed: %s -> %s", seed, p, e)
+        else:
+            logger.warning("composite[seed=%s] product MISSING: %s", seed, p)
     if background_upload_path and os.path.exists(background_upload_path):
         ref_images.append(Image.open(background_upload_path).convert("RGB"))
+    logger.info("composite[seed=%s] ref_images count=%d (products=%d, bg=%s)",
+                seed, len(ref_images), len(product_image_paths),
+                bool(background_upload_path))
 
     # _gemini_generate_scene now raises GeminiImageError on failure (was
     # returning None before). Propagate so the stream layer shows category.
