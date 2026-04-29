@@ -81,8 +81,28 @@ class ElevenLabsTTS:
                     "category": v.get("category", ""),
                     "labels": v.get("labels", {}),
                     "preview_url": v.get("preview_url", ""),
+                    "description": v.get("description", "") or "",
                 })
             return voices
+
+    def get_voice(self, voice_id: str) -> dict:
+        """Fetch a single voice's metadata. Used post-clone to populate the
+        DB row with name/labels/preview_url without a list scan."""
+        with httpx.Client(timeout=30) as client:
+            resp = client.get(
+                f"{ELEVENLABS_BASE_URL}/voices/{voice_id}",
+                headers=self.headers,
+            )
+            resp.raise_for_status()
+            v = resp.json()
+            return {
+                "voice_id": v["voice_id"],
+                "name": v.get("name", ""),
+                "category": v.get("category", "cloned"),
+                "labels": v.get("labels", {}),
+                "preview_url": v.get("preview_url", ""),
+                "description": v.get("description", "") or "",
+            }
 
     def generate_speech(
         self,

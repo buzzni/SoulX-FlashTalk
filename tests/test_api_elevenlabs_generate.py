@@ -37,6 +37,15 @@ def client(monkeypatch, tmp_path):
 
     from fastapi.testclient import TestClient
     import app as app_module
+
+    # Voice ownership is now checked at /api/elevenlabs/generate. These tests
+    # exist to verify the audio file plumbing (write to OUTPUTS_DIR, return
+    # serveable URL), not the ownership rule — separate file covers that.
+    # Stub the helper to always pass so the tests stay focused.
+    async def _allow(user_id, voice_id, *, is_admin=False):
+        return True
+    monkeypatch.setattr(app_module, "_validate_voice_access", _allow)
+
     with TestClient(app_module.app) as c:
         yield c
 

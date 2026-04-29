@@ -1808,23 +1808,64 @@ async def upload_audio(file: UploadFile = File(...)):
 
 # --- ElevenLabs TTS Endpoints ---
 
+# Stock voice cache — populated lazily on first GET /voices. Kept per-process
+# (per uvicorn worker) with a 30-minute TTL because stock voices are stable;
+# the alternative was an ElevenLabs API call on every page load.
+def _build_elevenlabs_stock_cache():
+    from modules.elevenlabs_stock_cache import ElevenLabsStockCache
+    from modules.elevenlabs_tts import ElevenLabsTTS
+
+    def _factory():
+        if not config.ELEVENLABS_API_KEY:
+            raise RuntimeError("ELEVENLABS_API_KEY not configured")
+        return ElevenLabsTTS(api_key=config.ELEVENLABS_API_KEY)
+
+    return ElevenLabsStockCache(_factory)
+
+
+_elevenlabs_stock_cache = _build_elevenlabs_stock_cache()
+
+
+async def _validate_voice_access(user_id: str, voice_id: str, *, is_admin: bool = False) -> bool:
+    """True iff `user_id` may use `voice_id` for TTS / generation.
+
+    Stock voices (in the workspace cache) are usable by everyone — they're
+    not per-user assets. Cloned voices are owner-scoped. Admin role bypasses
+    the owner check (mirrors task_queue's admin-override pattern).
+    """
+    from modules.repositories import elevenlabs_voice_repo
+
+    if is_admin:
+        return True
+    stock = await _elevenlabs_stock_cache.get()
+    if any(v.get("voice_id") == voice_id for v in stock):
+        return True
+    return await elevenlabs_voice_repo.is_owner(user_id, voice_id)
+
+
 @app.get("/api/elevenlabs/voices")
-async def list_elevenlabs_voices():
-    """List available ElevenLabs voices"""
+async def list_elevenlabs_voices(request: Request):
+    """List voices for the authenticated user: shared stock voices + their
+    own cloned voices. ElevenLabs API call is reserved for the stock cache
+    (30-min TTL); cloned voices come from our DB so list latency is a single
+    Mongo read.
+    """
+    user = auth_module.get_request_user(request)
     if not config.ELEVENLABS_API_KEY:
         raise HTTPException(status_code=400, detail="ElevenLabs API key not configured. Set ELEVENLABS_API_KEY env var.")
 
-    try:
-        from modules.elevenlabs_tts import ElevenLabsTTS
-        tts = ElevenLabsTTS(api_key=config.ELEVENLABS_API_KEY)
-        voices = tts.list_voices()
-        return {"voices": voices}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    from modules.repositories import elevenlabs_voice_repo
+    stock = await _elevenlabs_stock_cache.get()
+    cloned = await elevenlabs_voice_repo.list_for_user(user["user_id"])
+    # Frontend (VoicePicker.tsx) splits on category — stock voices come back
+    # with whatever category ElevenLabs assigned (premade/professional);
+    # cloned voices carry "cloned" from the repo projection.
+    return {"voices": [*stock, *cloned]}
 
 
 @app.post("/api/elevenlabs/generate")
 async def generate_elevenlabs_speech(
+    request: Request,
     text: str = Form(...),
     voice_id: str = Form(...),
     stability: float = Form(0.5),
@@ -1837,7 +1878,16 @@ async def generate_elevenlabs_speech(
     speed: 0.5-1.8 multiplier (v3 voice_settings.speed). Previously the endpoint
     hardcoded this from config; now passed through so the Step 3 UI slider
     actually controls playback rate.
+
+    Voice access is checked: stock voices for everyone, cloned voices only
+    for the owner (admin bypass). Foreign voice_ids return 404 — same surface
+    as missing-voice so existence is not leaked.
     """
+    user = auth_module.get_request_user(request)
+    is_admin = user.get("role") in ("admin", "master")
+    if not await _validate_voice_access(user["user_id"], voice_id, is_admin=is_admin):
+        raise HTTPException(status_code=404, detail="Voice not found")
+
     if not config.ELEVENLABS_API_KEY:
         raise HTTPException(status_code=400, detail="ElevenLabs API key not configured")
 
@@ -1879,7 +1929,12 @@ async def generate_elevenlabs_speech(
         # frontend can use without knowing which backend is live. The
         # legacy `path` field remains so /api/generate's existing
         # audio_path round-trip keeps working until C9.
-        return _upload_local_to_storage(output_path)
+        result = _upload_local_to_storage(output_path)
+        # Best-effort timestamp update so /voices can sort by last_used_at
+        # in v2. Failures are swallowed inside the repo helper.
+        from modules.repositories import elevenlabs_voice_repo
+        await elevenlabs_voice_repo.touch_last_used(user["user_id"], voice_id)
+        return result
     except ElevenLabsQuotaExceeded as e:
         logger.warning(f"ElevenLabs quota exceeded: {e}")
         raise HTTPException(status_code=402, detail=f"ElevenLabs 크레딧이 부족합니다. {e}")
@@ -1893,6 +1948,7 @@ async def generate_elevenlabs_speech(
 
 @app.post("/api/elevenlabs/clone-voice")
 async def clone_voice(
+    request: Request,
     name: str = Form(...),
     file: UploadFile = File(...),
     description: str = Form(""),
@@ -1903,7 +1959,12 @@ async def clone_voice(
     persist it ourselves (no `storage_key` in the response). Pre-S3
     this handler kept the ref in UPLOADS_DIR forever; now it goes to
     a tempfile (config.TEMP_DIR) and is unlinked after the API call.
+
+    On success, persists (user_id, voice_id, metadata) to elevenlabs_voices
+    so subsequent /api/elevenlabs/voices reads serve owner-scoped lists
+    without re-hitting ElevenLabs.
     """
+    user = auth_module.get_request_user(request)
     if not config.ELEVENLABS_API_KEY:
         raise HTTPException(status_code=400, detail="ElevenLabs API key not configured")
 
@@ -1913,6 +1974,7 @@ async def clone_voice(
     try:
         save_upload_file(file, ref_tmp)
         from modules.elevenlabs_tts import ElevenLabsTTS
+        from modules.repositories import elevenlabs_voice_repo
         tts = ElevenLabsTTS(api_key=config.ELEVENLABS_API_KEY)
 
         loop = asyncio.get_event_loop()
@@ -1920,8 +1982,29 @@ async def clone_voice(
             None,
             lambda: tts.clone_voice(name=name, reference_audio_path=ref_tmp, description=description),
         )
+        # Pull full metadata so we can persist it (and avoid a list_voices
+        # roundtrip on the next read). If get_voice fails, we still record
+        # the minimal pair — the repo upsert tolerates empty labels/preview.
+        try:
+            meta = await loop.run_in_executor(None, lambda: tts.get_voice(voice_id))
+        except Exception as e:
+            logger.warning("get_voice after clone failed (%s) — recording minimal row", e)
+            meta = {"voice_id": voice_id, "name": name, "category": "cloned",
+                    "labels": {}, "preview_url": "", "description": description or ""}
 
-        return {"voice_id": voice_id, "name": name}
+        await elevenlabs_voice_repo.add(
+            user["user_id"],
+            voice_id=voice_id,
+            name=meta.get("name") or name,
+            description=meta.get("description") or description or "",
+            preview_url=meta.get("preview_url", ""),
+            labels=meta.get("labels") or {},
+            category=meta.get("category") or "cloned",
+        )
+
+        return {"voice_id": voice_id, "name": meta.get("name") or name}
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Voice cloning failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -1930,6 +2013,61 @@ async def clone_voice(
             os.unlink(ref_tmp)
         except OSError:
             pass
+
+
+@app.delete("/api/elevenlabs/voices/{voice_id}")
+async def delete_elevenlabs_voice(voice_id: str, request: Request):
+    """Delete a cloned voice. Owner-scoped (admin/master can delete any).
+
+    Stock voices (premade/professional) are not deletable through this
+    endpoint — they're shared workspace assets, not user-owned. Trying
+    returns 403 to surface the intent ('not yours, also can't be removed').
+
+    Order: ElevenLabs delete first, then DB delete. If ElevenLabs fails we
+    keep the DB row (502) so a retry can succeed; if ElevenLabs succeeds
+    but DB delete fails the next /voices call won't see it anyway since
+    list_for_user reads our DB. Either failure is recoverable.
+    """
+    from modules.repositories import elevenlabs_voice_repo
+
+    user = auth_module.get_request_user(request)
+    is_admin = user.get("role") in ("admin", "master")
+
+    # Stock voice guard — these come from the workspace cache, not the DB,
+    # so list_for_user will never include them. Refuse explicitly.
+    stock = await _elevenlabs_stock_cache.get()
+    if any(v.get("voice_id") == voice_id for v in stock):
+        raise HTTPException(status_code=403, detail="Stock voice cannot be deleted")
+
+    owner = await elevenlabs_voice_repo.get_owner(voice_id)
+    if owner is None:
+        raise HTTPException(status_code=404, detail="Voice not found")
+    if not is_admin and owner != user["user_id"]:
+        # Don't leak existence — same surface as not-found.
+        raise HTTPException(status_code=404, detail="Voice not found")
+
+    if not config.ELEVENLABS_API_KEY:
+        raise HTTPException(status_code=400, detail="ElevenLabs API key not configured")
+
+    from modules.elevenlabs_tts import ElevenLabsTTS
+    tts = ElevenLabsTTS(api_key=config.ELEVENLABS_API_KEY)
+    loop = asyncio.get_event_loop()
+    try:
+        ok = await loop.run_in_executor(None, lambda: tts.delete_voice(voice_id))
+    except Exception as e:
+        logger.warning("ElevenLabs delete failed for %s: %s", voice_id, e)
+        raise HTTPException(status_code=502, detail="ElevenLabs delete failed; please retry")
+    if not ok:
+        raise HTTPException(status_code=502, detail="ElevenLabs delete returned non-200")
+
+    # Owner-scoped delete on the DB row. Admin override sends user_id of
+    # the actual owner so the row matches.
+    deleted = await elevenlabs_voice_repo.delete(owner, voice_id)
+    if not deleted:
+        # Race: row vanished between get_owner and delete. Idempotent OK.
+        logger.info("voice %s already absent from DB at delete time", voice_id)
+
+    return {"ok": True, "voice_id": voice_id}
 
 
 # --- Video Generation Endpoints ---
@@ -1979,6 +2117,13 @@ async def generate_video(
     """
     from utils.security import safe_input_value
 
+    # Auth resolved up front so the audio_source=elevenlabs branch can
+    # validate voice ownership before paying for ElevenLabs TTS. Without
+    # this, /api/generate was a back-door around /api/elevenlabs/generate's
+    # ownership check (any user could synthesize using any cloned voice_id).
+    user = auth_module.get_request_user(request)
+    is_admin = user.get("role") in ("admin", "master")
+
     # Resolve + guard host image (body-field path traversal fix)
     if host_image_path:
         try:
@@ -2008,6 +2153,8 @@ async def generate_video(
             raise HTTPException(status_code=400, detail="Voice ID required for ElevenLabs TTS")
         if not config.ELEVENLABS_API_KEY:
             raise HTTPException(status_code=400, detail="ElevenLabs API key not configured")
+        if not await _validate_voice_access(user["user_id"], voice_id, is_admin=is_admin):
+            raise HTTPException(status_code=404, detail="Voice not found")
 
         # Generate TTS audio
         from modules.elevenlabs_tts import ElevenLabsTTS, ElevenLabsQuotaExceeded, ElevenLabsAPIError
@@ -2071,7 +2218,7 @@ async def generate_video(
         except json.JSONDecodeError as e:
             logger.warning("Invalid meta JSON on /api/generate: %s", e)
 
-    user = auth_module.get_request_user(request)
+    # `user` already resolved at the top of this handler.
     # Normalize empty-string playlist_id to None — frontends can't always
     # send null in multipart/form-data.
     pid = playlist_id if playlist_id not in ("", "null", None) else None
@@ -2800,7 +2947,16 @@ async def generate_conversation_endpoint(
     # Symmetry with /api/generate — see comment there.
     playlist_id: Optional[str] = Form(None),
 ):
-    """Generate multi-agent conversation video."""
+    """Generate multi-agent conversation video.
+
+    Voice ownership is checked here too — every agent's voice_id must be
+    a stock voice or owned by the requesting user. Without this guard the
+    /api/elevenlabs/generate ownership check is bypassable by stuffing
+    foreign voice_ids into dialog_data.
+    """
+    user = auth_module.get_request_user(request)
+    is_admin = user.get("role") in ("admin", "master")
+
     try:
         parsed_data = json.loads(dialog_data)
     except json.JSONDecodeError:
@@ -2810,6 +2966,16 @@ async def generate_conversation_endpoint(
         raise HTTPException(status_code=400, detail="최소 2명의 에이전트가 필요합니다")
     if not parsed_data.get("dialog") or len(parsed_data["dialog"]) == 0:
         raise HTTPException(status_code=400, detail="최소 1개의 대화 턴이 필요합니다")
+
+    # Validate every agent's voice_id before paying for ElevenLabs synthesis.
+    # Each agent dict carries `voice_id`; we 404 the whole request on the
+    # first miss to avoid leaking which voices exist via partial failures.
+    for agent in parsed_data["agents"]:
+        agent_voice_id = agent.get("voice_id")
+        if not agent_voice_id:
+            raise HTTPException(status_code=400, detail="Agent missing voice_id")
+        if not await _validate_voice_access(user["user_id"], agent_voice_id, is_admin=is_admin):
+            raise HTTPException(status_code=404, detail="Voice not found")
 
     if not prompt:
         # Use MultiTalk prompt for split layout with 2 agents
@@ -2826,7 +2992,7 @@ async def generate_conversation_endpoint(
     dialog_turns = parsed_data.get("dialog", [])
     label = dialog_turns[0]["text"][:50] if dialog_turns else "Conversation"
 
-    user = auth_module.get_request_user(request)
+    # `user` already resolved at the top of this handler.
     pid = playlist_id if playlist_id not in ("", "null", None) else None
     await task_queue.enqueue(
         task_id=task_id,
