@@ -369,7 +369,9 @@ def _upload_local_to_storage(
     `with_sidecar`: if True and `<local_path>.meta.json` exists, also
     upload it as `<key>.meta.json` so generator provenance (the
     sidecar `image_compositor.write_generation_metadata` writes)
-    survives the move to S3.
+    survives the move to S3. Sidecar upload failures are swallowed
+    with a warning — the main image is what the user actually sees,
+    so a broken provenance file shouldn't fail the request.
     """
     from modules import storage as _storage
     basename = os.path.basename(local_path)
@@ -378,7 +380,10 @@ def _upload_local_to_storage(
     if with_sidecar:
         sidecar = local_path + ".meta.json"
         if os.path.exists(sidecar):
-            _storage.media_store.upload(Path(sidecar), key + ".meta.json")
+            try:
+                _storage.media_store.upload(Path(sidecar), key + ".meta.json")
+            except Exception as e:
+                logger.warning("sidecar upload failed for %s: %s", sidecar, e)
     return {
         "filename": basename,
         "path": _path_field_for_backwards_compat(key),
@@ -1614,29 +1619,39 @@ async def clone_voice(
     file: UploadFile = File(...),
     description: str = Form(""),
 ):
-    """Clone a voice from reference audio using ElevenLabs"""
+    """Clone a voice from reference audio using ElevenLabs.
+
+    The reference audio is sent to ElevenLabs and discarded — we never
+    persist it ourselves (no `storage_key` in the response). Pre-S3
+    this handler kept the ref in UPLOADS_DIR forever; now it goes to
+    a tempfile (config.TEMP_DIR) and is unlinked after the API call.
+    """
     if not config.ELEVENLABS_API_KEY:
         raise HTTPException(status_code=400, detail="ElevenLabs API key not configured")
 
-    # Save uploaded file
-    ext = os.path.splitext(file.filename)[1]
-    ref_path = os.path.join(config.UPLOADS_DIR, f"clone_ref_{uuid.uuid4().hex[:8]}{ext}")
-    save_upload_file(file, ref_path)
-
+    ext = os.path.splitext(file.filename or "")[1] or ".wav"
+    fd, ref_tmp = tempfile.mkstemp(suffix=ext, dir=_tempfile_dir())
+    os.close(fd)
     try:
+        save_upload_file(file, ref_tmp)
         from modules.elevenlabs_tts import ElevenLabsTTS
         tts = ElevenLabsTTS(api_key=config.ELEVENLABS_API_KEY)
 
         loop = asyncio.get_event_loop()
         voice_id = await loop.run_in_executor(
             None,
-            lambda: tts.clone_voice(name=name, reference_audio_path=ref_path, description=description),
+            lambda: tts.clone_voice(name=name, reference_audio_path=ref_tmp, description=description),
         )
 
         return {"voice_id": voice_id, "name": name}
     except Exception as e:
         logger.error(f"Voice cloning failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        try:
+            os.unlink(ref_tmp)
+        except OSError:
+            pass
 
 
 # --- Video Generation Endpoints ---
@@ -2851,7 +2866,27 @@ async def host_generate_stream(
                 temperature=temperature,
             ):
                 if evt.get("type") == "candidate" and evt.get("path"):
-                    saved_paths.append(evt["path"])
+                    local_path = evt["path"]
+                    saved_paths.append(local_path)
+                    # Promote each candidate to storage as it arrives.
+                    # Off-loaded to a thread so the sync S3 PUT (~tens
+                    # of ms on cutover) doesn't block the SSE event
+                    # loop and break the progressive UX. No-op on
+                    # LocalDisk. Failure surfaces a flag so frontend
+                    # can fall back to the legacy `path` field.
+                    try:
+                        extras = await asyncio.to_thread(
+                            _upload_local_to_storage,
+                            local_path, "hosts/saved", with_sidecar=True,
+                        )
+                        evt["storage_key"] = extras["storage_key"]
+                        evt["url"] = extras["url"]
+                    except Exception as ue:
+                        logger.warning(
+                            "host stream storage promote failed for %s: %s",
+                            local_path, ue,
+                        )
+                        evt["storage_promote_failed"] = True
                 if evt.get("type") == "done" and saved_paths:
                     try:
                         await host_repo.record_batch(user_id, "1-host", saved_paths, batch_id)
@@ -3047,7 +3082,24 @@ async def composite_generate_stream(
                 image_size=_validate_image_size(imageSize),
             ):
                 if evt.get("type") == "candidate" and evt.get("path"):
-                    saved_paths.append(evt["path"])
+                    local_path = evt["path"]
+                    saved_paths.append(local_path)
+                    # Same per-candidate storage promotion as the host
+                    # stream above — to_thread to keep the SSE loop
+                    # responsive, fail-flag for frontend fallback.
+                    try:
+                        extras = await asyncio.to_thread(
+                            _upload_local_to_storage,
+                            local_path, "composites", with_sidecar=True,
+                        )
+                        evt["storage_key"] = extras["storage_key"]
+                        evt["url"] = extras["url"]
+                    except Exception as ue:
+                        logger.warning(
+                            "composite stream storage promote failed for %s: %s",
+                            local_path, ue,
+                        )
+                        evt["storage_promote_failed"] = True
                 if evt.get("type") == "done" and saved_paths:
                     try:
                         await host_repo.record_batch(user_id, "2-composite", saved_paths, batch_id)
