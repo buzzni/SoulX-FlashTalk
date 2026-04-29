@@ -199,8 +199,14 @@ export default function Step3Audio({ state, update }: Step3AudioProps) {
   // arrives we drop any selection that isn't represented — UI then
   // shows "보이스를 골라주세요" instead of letting Step 3 look valid
   // and 404-ing at generate time. Still loading → don't touch.
+  //
+  // Race guard: an empty voices array with isLoading=false can also
+  // come from a fetch error. Wiping a valid voiceId on a transient
+  // network failure is worse than letting the user try to generate and
+  // get a 404 — so only wipe when the list actually loaded with rows.
   useEffect(() => {
     if (source !== 'tts' || !voiceId || voiceList.isLoading) return;
+    if (voiceList.voices.length === 0) return;
     const exists = voiceList.voices.some((v) => v.voice_id === voiceId);
     if (!exists) {
       setVoice((prev) => (prev.source === 'tts'

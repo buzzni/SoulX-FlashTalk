@@ -373,16 +373,21 @@ export default function ResultPage() {
     }
 
     // ── Resolution + image quality + playlist ────────────────────────
+    // Backend stores `resolution_requested` as H×W (portrait canonical —
+    // see ProvenanceCard.jsx note + app.py snap-to-16 logic). Match by
+    // both digits unordered so we work whether the row was written by the
+    // H×W convention or any future swap.
     let nextResolution: ResolutionKey = INITIAL_WIZARD_STATE.resolution;
     const resReq =
       typeof params.resolution_requested === 'string' ? params.resolution_requested : '';
     const m = /^(\d+)\s*x\s*(\d+)$/.exec(resReq);
     if (m) {
-      const w = Number(m[1]);
-      const h = Number(m[2]);
-      const matched = (Object.keys(RESOLUTION_META) as ResolutionKey[]).find(
-        (k) => RESOLUTION_META[k].width === w && RESOLUTION_META[k].height === h,
-      );
+      const a = Number(m[1]);
+      const b = Number(m[2]);
+      const matched = (Object.keys(RESOLUTION_META) as ResolutionKey[]).find((k) => {
+        const r = RESOLUTION_META[k];
+        return (r.width === a && r.height === b) || (r.width === b && r.height === a);
+      });
       if (matched) nextResolution = matched;
     }
     const iqRaw = str(meta.imageQuality);

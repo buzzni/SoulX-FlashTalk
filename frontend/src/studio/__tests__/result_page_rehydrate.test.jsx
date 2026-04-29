@@ -136,6 +136,64 @@ describe('doEditAndRetry — audio guard', () => {
     expect(v.generation.audio.key).toBe('outputs/tts_clean.wav');
   });
 
+  it('matches resolution_requested whether stored as H×W or W×H', async () => {
+    // Backend stores resolution_requested in H×W (portrait canonical).
+    // Pre-fix `doEditAndRetry` parsed m[1]=w, m[2]=h, so "768x448" never
+    // matched a RESOLUTION_META entry and fell back to default 448p
+    // — but RESOLUTION_META uses W×H (448×768). The fix matches both
+    // orderings.
+    renderAt('hxw-resolution', {
+      task_id: 'hxw-resolution',
+      type: 'generate',
+      status: 'error',
+      completed_at: '2026-04-29T10:00:00',
+      video_url: '',
+      error: 'failed',
+      retried_from: 'prev_task',
+      params: {
+        host_image: 'outputs/composites/comp_ok.png',
+        audio_path: 'outputs/tts_x.wav',
+        // 768×448 = H×W form. RESOLUTION_META has 448p with W=448 H=768.
+        resolution_requested: '768x448',
+        script_text: 'hi',
+      },
+      meta: {
+        host: { mode: 'text', selectedPath: 'outputs/hosts/saved/host.png', selectedSeed: 1 },
+        composition: { selectedPath: 'outputs/composites/comp_ok.png', selectedSeed: 1, shot: 'medium', angle: 'eye' },
+        voice: { source: 'tts', voiceId: 'v1', voiceName: 'Joy', script: 'hi' },
+      },
+    });
+    await clickEditAndRetry();
+    const s = useWizardStore.getState();
+    expect(s.resolution).toBe('448p');
+  });
+
+  it('matches W×H form too (defensive)', async () => {
+    renderAt('wxh-resolution', {
+      task_id: 'wxh-resolution',
+      type: 'generate',
+      status: 'error',
+      completed_at: '2026-04-29T10:00:00',
+      video_url: '',
+      error: 'failed',
+      retried_from: 'prev_task',
+      params: {
+        host_image: 'outputs/composites/comp_ok.png',
+        audio_path: 'outputs/tts_x.wav',
+        resolution_requested: '720x1280', // W×H form
+        script_text: 'hi',
+      },
+      meta: {
+        host: { mode: 'text', selectedPath: 'outputs/hosts/saved/host.png', selectedSeed: 1 },
+        composition: { selectedPath: 'outputs/composites/comp_ok.png', selectedSeed: 1, shot: 'medium', angle: 'eye' },
+        voice: { source: 'tts', voiceId: 'v1', voiceName: 'Joy', script: 'hi' },
+      },
+    });
+    await clickEditAndRetry();
+    const s = useWizardStore.getState();
+    expect(s.resolution).toBe('720p');
+  });
+
   it('prefers params.audio_key over audio_path', async () => {
     renderAt('canonical-key', {
       task_id: 'canonical-key',
