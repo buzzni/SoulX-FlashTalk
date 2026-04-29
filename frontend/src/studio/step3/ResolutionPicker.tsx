@@ -19,7 +19,7 @@ export interface ResolutionPickerProps {
 
 export function ResolutionPicker({ selectedKey, onSelect }: ResolutionPickerProps) {
   return (
-    <div className="grid grid-cols-[repeat(auto-fill,minmax(110px,1fr))] gap-2.5">
+    <div className="grid grid-cols-4 gap-2.5">
       {RES_OPTION_KEYS.map((key) => {
         const r = RESOLUTION_META[key];
         const on = selectedKey === r.key;
