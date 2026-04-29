@@ -16,10 +16,8 @@ OUTPUTS_DIR = os.path.join(PROJECT_ROOT, "outputs")
 TEMP_DIR = os.path.join(PROJECT_ROOT, "temp")
 EXAMPLES_DIR = os.path.join(PROJECT_ROOT, "examples")
 HOSTS_DIR = os.path.join(OUTPUTS_DIR, "hosts", "saved")
-# Per-task result manifests (one JSON per completed video), used by
-# /api/results/{task_id} and the frontend /result/:taskId page. Queue entries
-# get truncated to last 20; manifests are permanent.
-RESULTS_DIR = os.path.join(OUTPUTS_DIR, "results")
+# (Removed RESULTS_DIR — PR5 moved per-task manifests into studio_results
+# in Mongo. The directory was an empty makedirs target with no readers.)
 
 # Whitelisted roots for path-traversal-safe file access (CSO audit).
 # Used by _safe_upload_path() helper; no PROJECT_ROOT fallback.
@@ -130,10 +128,19 @@ STUDIO_JWT_SECRET = os.environ.get("STUDIO_JWT_SECRET", "")
 STUDIO_JWT_TTL_DAYS = int(os.environ.get("STUDIO_JWT_TTL_DAYS", "7"))
 
 # CORS (Phase 0 D12, §4.0.5)
+# Default list covers local dev (Vite on 5173, FastAPI on 8001), Studio
+# wizard dev port (5555), and the production deploy where frontend lives
+# on a separate origin from the API host. Override with the CORS_ORIGINS
+# env var when adding staging environments — comma-separated.
 CORS_ORIGINS = [
     o.strip() for o in os.environ.get(
         "CORS_ORIGINS",
-        "http://localhost:5173,http://localhost:8001",
+        ",".join([
+            "http://localhost:5173",
+            "http://localhost:5555",
+            "http://localhost:8001",
+            "http://imseller-maker.viskits.ai",
+        ]),
     ).split(",") if o.strip()
 ]
 

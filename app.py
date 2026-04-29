@@ -18,7 +18,6 @@ from datetime import datetime, timezone
 from fastapi import FastAPI, File, UploadFile, Form, HTTPException, Request
 from fastapi.responses import FileResponse, StreamingResponse, JSONResponse, RedirectResponse, Response
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
 import uvicorn
 
 import config
@@ -81,12 +80,12 @@ app.add_middleware(ContentLengthLimit)
 async def _studio_auth(request, call_next):
     return await auth_module.auth_middleware(request, call_next)
 
-# Create directories
-for d in [config.UPLOADS_DIR, config.OUTPUTS_DIR, config.TEMP_DIR, config.EXAMPLES_DIR, config.HOSTS_DIR, config.RESULTS_DIR]:
+# Create LocalDisk staging directories. These remain meaningful as the
+# inference-time scratch area even after PR S3+ cutover (workers write
+# locally, then upload). Removed RESULTS_DIR — manifests live in
+# studio_results (Mongo) since PR5; the directory was no-op makedirs.
+for d in [config.UPLOADS_DIR, config.OUTPUTS_DIR, config.TEMP_DIR, config.EXAMPLES_DIR, config.HOSTS_DIR]:
     os.makedirs(d, exist_ok=True)
-
-# Mount static files (UPLOADS only — NOT PROJECT_ROOT; Phase 0 Critical #1)
-app.mount("/static", StaticFiles(directory=config.UPLOADS_DIR), name="static")
 
 
 # ========================================
