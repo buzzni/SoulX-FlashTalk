@@ -5,6 +5,7 @@ Provides REST API with SSE progress, file uploads, ElevenLabs TTS, and video gen
 
 import os
 import sys
+import tempfile
 import uuid
 import asyncio
 import logging
@@ -245,6 +246,106 @@ def save_upload_file(upload_file: UploadFile, destination: str, max_bytes: int |
         return destination
     finally:
         upload_file.file.close()
+
+
+# ── PR S3+ upload helpers ─────────────────────────────────────────
+#
+# Upload handlers stream the request body to a tempfile, validate magic
+# bytes, then hand the tempfile to `media_store.upload(tmp, key)`. The
+# tempfile is unlinked in `finally` so over-size aborts and validation
+# failures don't leak partial objects into the bucket. This is the
+# pattern every /api/upload/* handler uses (the audio one adds an ffmpeg
+# transcode step in between).
+
+def _path_field_for_backwards_compat(key: str) -> str:
+    """Best-effort `path` field for legacy upload response shape.
+
+    The frontend currently round-trips the absolute disk path through
+    the `path` field into generate-task bodies. C9 migrates frontend to
+    `storage_key`; until then we keep emitting `path` for compat:
+
+    - LocalDisk backend: returns the resolved on-disk path.
+    - S3 backend (post-C13): no canonical local path — we return the
+      storage_key so the response is well-formed even before C9 lands.
+
+    Uses `_validate_and_resolve()` rather than `local_path_for()` to
+    avoid the deprecation warning + the process-global
+    `warnings.catch_warnings()` filter race that comes with suppressing
+    it under concurrent requests.
+    """
+    from modules import storage as _storage
+    store = _storage.media_store
+    if isinstance(store, _storage.LocalDiskMediaStore):
+        return str(store._validate_and_resolve(key))
+    # S3 (or any non-LocalDisk) backend: emit the storage_key.
+    return key
+
+
+def _tempfile_dir() -> str | None:
+    """Return config.TEMP_DIR for tempfile.mkstemp(dir=...) so we don't
+    depend on /tmp (which is often a small tmpfs partition that fills
+    up under concurrent uploads). Falls back to mkstemp's default if
+    the dir can't be created."""
+    try:
+        os.makedirs(config.TEMP_DIR, exist_ok=True)
+        return config.TEMP_DIR
+    except OSError:
+        return None
+
+
+def _save_upload_to_key(
+    upload_file: UploadFile,
+    key: str,
+    *,
+    max_bytes: int | None = None,
+    validate=None,
+) -> str:
+    """Stream `upload_file` to a tempfile, run `validate(tmp_path)`,
+    then upload to `media_store` at `key`. Returns the storage_key.
+
+    Tempfile is unlinked in `finally` — partial / over-size / failed
+    validation never reach the bucket. Tempfile dir is `config.TEMP_DIR`
+    so we don't fill /tmp under concurrent large uploads.
+
+    Contract:
+      - `validate(tmp_path: str) -> None`. Must raise `HTTPException`
+        on bad content (other exceptions surface as 500 to the client).
+      - Consumes and closes the `UploadFile` — caller must not reuse it.
+      - Size enforcement is done inside `save_upload_file()`; passing
+        a `validate` that also size-checks is harmless but redundant.
+    """
+    from modules import storage as _storage
+    fd, tmp = tempfile.mkstemp(suffix=Path(key).suffix or ".bin", dir=_tempfile_dir())
+    os.close(fd)
+    try:
+        save_upload_file(upload_file, tmp, max_bytes=max_bytes)
+        if validate is not None:
+            validate(tmp)
+        _storage.media_store.upload(Path(tmp), key)
+        return key
+    finally:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+
+
+def _upload_response(key: str, *, extra: dict | None = None) -> dict:
+    """Standard /api/upload/* response shape (PR S3+).
+
+    `path` is kept for backwards compat (frontend C9 will drop it).
+    `storage_key` and `url` are the new stable fields.
+    """
+    from modules import storage as _storage
+    body = {
+        "filename": Path(key).name,
+        "path": _path_field_for_backwards_compat(key),
+        "storage_key": key,
+        "url": _storage.media_store.url_for(key),
+    }
+    if extra:
+        body.update(extra)
+    return body
 
 
 # ========================================
@@ -1048,11 +1149,9 @@ async def upload_host_image(file: UploadFile = File(...)):
         raise HTTPException(status_code=400, detail="File must be an image")
 
     ext = os.path.splitext(file.filename or "")[1] or ".png"
-    filename = f"host_{uuid.uuid4().hex[:8]}{ext}"
-    filepath = os.path.join(config.UPLOADS_DIR, filename)
-    save_upload_file(file, filepath)
-    validate_image_upload(filepath)  # Pillow magic-byte
-    return {"filename": filename, "path": filepath}
+    key = f"uploads/host_{uuid.uuid4().hex[:16]}{ext}"
+    _save_upload_to_key(file, key, validate=validate_image_upload)
+    return _upload_response(key)
 
 
 @app.post("/api/upload/background-image")
@@ -1064,11 +1163,9 @@ async def upload_background_image(file: UploadFile = File(...)):
         raise HTTPException(status_code=400, detail="File must be an image")
 
     ext = os.path.splitext(file.filename or "")[1] or ".png"
-    filename = f"bg_{uuid.uuid4().hex[:8]}{ext}"
-    filepath = os.path.join(config.UPLOADS_DIR, filename)
-    save_upload_file(file, filepath)
-    validate_image_upload(filepath)
-    return {"filename": filename, "path": filepath}
+    key = f"uploads/bg_{uuid.uuid4().hex[:16]}{ext}"
+    _save_upload_to_key(file, key, validate=validate_image_upload)
+    return _upload_response(key)
 
 
 @app.get("/api/upload/list")
@@ -1154,17 +1251,30 @@ async def upload_json(request: Request):
         ext = os.path.splitext(filename_in)[1] or ".png"
         prefix = {"host-image": "host", "background-image": "bg", "reference-image": "ref_img"}.get(kind, "ref_img")
 
-    out_name = f"{prefix}_{uuid.uuid4().hex[:8]}{ext}"
-    out_path = os.path.join(config.UPLOADS_DIR, out_name)
-    with open(out_path, "wb") as f:
-        f.write(raw)
+    from modules import storage as _storage
 
-    if is_audio:
-        validate_audio_upload(out_path)
-    else:
-        validate_image_upload(out_path)
+    out_name = f"{prefix}_{uuid.uuid4().hex[:16]}{ext}"
+    key = f"uploads/{out_name}"
 
-    return {"filename": out_name, "path": out_path, "kind": kind, "size": len(raw)}
+    # Validate via tempfile so a malicious payload never lands in the
+    # bucket; cleanup is unconditional. Tempfile dir = TEMP_DIR (not
+    # /tmp) so we don't fill a small tmpfs under concurrent uploads.
+    fd, tmp = tempfile.mkstemp(suffix=ext, dir=_tempfile_dir())
+    os.close(fd)
+    try:
+        Path(tmp).write_bytes(raw)
+        if is_audio:
+            validate_audio_upload(tmp)
+        else:
+            validate_image_upload(tmp)
+        _storage.media_store.upload(Path(tmp), key)
+    finally:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+
+    return _upload_response(key, extra={"kind": kind, "size": len(raw)})
 
 
 @app.post("/api/upload/reference-image")
@@ -1176,11 +1286,9 @@ async def upload_reference_image(file: UploadFile = File(...)):
         raise HTTPException(status_code=400, detail="File must be an image")
 
     ext = os.path.splitext(file.filename or "")[1] or ".png"
-    filename = f"ref_img_{uuid.uuid4().hex[:8]}{ext}"
-    filepath = os.path.join(config.UPLOADS_DIR, filename)
-    save_upload_file(file, filepath)
-    validate_image_upload(filepath)
-    return {"filename": filename, "path": filepath}
+    key = f"uploads/ref_img_{uuid.uuid4().hex[:16]}{ext}"
+    _save_upload_to_key(file, key, validate=validate_image_upload)
+    return _upload_response(key)
 
 
 @app.post("/api/preview/composite")
@@ -1282,36 +1390,68 @@ async def upload_reference_audio(file: UploadFile = File(...)):
         raise HTTPException(status_code=400, detail="File must be an audio file")
 
     ext = os.path.splitext(file.filename or "")[1] or ".mp3"
-    filename = f"ref_{uuid.uuid4().hex[:8]}{ext}"
-    filepath = os.path.join(config.UPLOADS_DIR, filename)
-    save_upload_file(file, filepath)
-    validate_audio_upload(filepath)  # ffprobe magic-byte
-    return {"filename": filename, "path": filepath}
+    key = f"uploads/ref_{uuid.uuid4().hex[:16]}{ext}"
+    _save_upload_to_key(file, key, validate=validate_audio_upload)
+    return _upload_response(key)
 
 
 @app.post("/api/upload/audio")
 async def upload_audio(file: UploadFile = File(...)):
-    """Upload audio file directly for video generation (any audio)"""
+    """Upload audio file for video generation. Always converts to 16kHz
+    mono WAV before storing — downstream inference (FlashTalk / wav2vec)
+    expects that format. Original (non-WAV) bytes are discarded after
+    transcoding."""
     from utils.security import validate_audio_upload
+    from modules import storage as _storage
 
-    ext = os.path.splitext(file.filename or "")[1] or ".mp3"
-    filename = f"audio_{uuid.uuid4().hex[:8]}{ext}"
-    filepath = os.path.join(config.UPLOADS_DIR, filename)
-    save_upload_file(file, filepath)
-    validate_audio_upload(filepath)
+    import subprocess
 
-    # Convert to 16kHz WAV if needed
-    wav_path = filepath
-    if not filepath.lower().endswith(".wav"):
-        import subprocess
-        wav_path = filepath.rsplit(".", 1)[0] + ".wav"
-        subprocess.run(
-            ["ffmpeg", "-y", "-i", filepath, "-ar", "16000", "-ac", "1", wav_path],
-            check=True, capture_output=True,
-        )
-        os.remove(filepath)
-
-    return {"filename": os.path.basename(wav_path), "path": wav_path}
+    src_ext = os.path.splitext(file.filename or "")[1] or ".mp3"
+    tmp_dir = _tempfile_dir()
+    fd_in, tmp_in = tempfile.mkstemp(suffix=src_ext, dir=tmp_dir)
+    os.close(fd_in)
+    fd_out, tmp_out = tempfile.mkstemp(suffix=".wav", dir=tmp_dir)
+    os.close(fd_out)
+    try:
+        save_upload_file(file, tmp_in)
+        validate_audio_upload(tmp_in)
+        # Always transcode to 16kHz mono WAV — even if the source is
+        # already WAV the bitrate / channel layout might not match.
+        # Run inside a thread so the synchronous subprocess doesn't
+        # block the FastAPI event loop (other requests would queue
+        # behind a long transcode otherwise).
+        def _ffmpeg_transcode():
+            return subprocess.run(
+                ["ffmpeg", "-y", "-i", tmp_in, "-ar", "16000", "-ac", "1", tmp_out],
+                check=True, capture_output=True, timeout=120,
+            )
+        loop = asyncio.get_event_loop()
+        try:
+            await loop.run_in_executor(None, _ffmpeg_transcode)
+        except subprocess.CalledProcessError as e:
+            stderr_tail = (
+                e.stderr.decode("utf-8", errors="replace")[-500:]
+                if e.stderr else ""
+            )
+            logger.error("ffmpeg audio transcode failed: %s", stderr_tail)
+            raise HTTPException(
+                status_code=400,
+                detail="Audio could not be transcoded — verify the source file.",
+            )
+        except subprocess.TimeoutExpired:
+            raise HTTPException(
+                status_code=504,
+                detail="Audio transcode timed out (>120s).",
+            )
+        key = f"uploads/audio_{uuid.uuid4().hex[:16]}.wav"
+        _storage.media_store.upload(Path(tmp_out), key)
+        return _upload_response(key)
+    finally:
+        for tmp in (tmp_in, tmp_out):
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
 
 
 # --- ElevenLabs TTS Endpoints ---
