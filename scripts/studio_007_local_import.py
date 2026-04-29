@@ -287,7 +287,7 @@ def _result_doc(owner: str, payload: dict) -> Optional[dict]:
     scrubbed = _scrub_paths(payload)
 
     video_path = scrubbed.get("video_path")
-    video_storage_key = video_path if (video_path and not video_path.startswith("/")) else None
+    video_key = video_path if (video_path and not video_path.startswith("/")) else None
 
     doc = {
         "user_id": owner,
@@ -297,7 +297,7 @@ def _result_doc(owner: str, payload: dict) -> Optional[dict]:
         "completed_at": scrubbed.get("completed_at"),
         "generation_time_sec": scrubbed.get("generation_time_sec"),
         "video_url": scrubbed.get("video_url") or f"/api/videos/{task_id}",
-        "video_storage_key": video_storage_key,
+        "video_key": video_key,
         "video_path": payload.get("video_path"),  # keep original abs path too
         "video_bytes": scrubbed.get("video_bytes"),
         "video_filename": scrubbed.get("video_filename"),
