@@ -29,12 +29,12 @@ function extractAudioKey(voice: Unknown): string {
   const v = voice as Record<string, Unknown>;
   if (v.source === 'upload') {
     const a = v.audio as Record<string, Unknown> | null | undefined;
-    return a && typeof a.path === 'string' ? a.path : '';
+    return a && typeof a.key === 'string' ? a.key : '';
   }
   const gen = v.generation as Record<string, Unknown> | null | undefined;
   if (gen && gen.state === 'ready') {
     const audio = gen.audio as Record<string, Unknown> | null | undefined;
-    if (audio && typeof audio.path === 'string') return audio.path;
+    if (audio && typeof audio.key === 'string') return audio.key;
   }
   return '';
 }
@@ -58,7 +58,7 @@ function readReadyPath(node: Record<string, Unknown> | null | undefined): string
   if (!gen || gen.state !== 'ready') return '';
   const sel = gen.selected as Record<string, Unknown> | null | undefined;
   if (!sel) return '';
-  if (typeof sel.path === 'string') return sel.path;
+  if (typeof sel.key === 'string') return sel.key;
   if (typeof sel.url === 'string') return sel.url;
   return '';
 }

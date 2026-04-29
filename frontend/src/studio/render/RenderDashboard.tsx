@@ -104,19 +104,20 @@ export default function RenderDashboard({
         clearDispatchSnapshot();
         clearDispatchInflight();
 
-        // Audio path lives on `voice.generation.audio.path` (tts /
-        // clone) or `voice.audio.path` (upload mode, once the file
-        // has uploaded — LocalAsset means still uploading and surfaces
-        // the same "missing audio" error).
+        // Audio key lives on `voice.generation.audio.key` (tts/clone)
+        // or `voice.audio.key` (upload mode, once the file has uploaded —
+        // LocalAsset means still uploading). Backend's /api/generate
+        // accepts the storage_key under the legacy form-field name
+        // `audio_path` (wire compat).
         const audio_path = (() => {
           const v = state.voice;
           if (!v || typeof v !== 'object') return '';
           if (v.source === 'upload') {
             const a = v.audio;
-            return a && typeof a === 'object' && 'path' in a ? (a.path as string) : '';
+            return a && typeof a === 'object' && 'key' in a ? (a.key as string) : '';
           }
           const gen = v.generation;
-          if (gen && gen.state === 'ready' && gen.audio?.path) return gen.audio.path as string;
+          if (gen && gen.state === 'ready' && gen.audio?.key) return gen.audio.key as string;
           return '';
         })();
         if (!audio_path) {

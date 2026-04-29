@@ -73,11 +73,21 @@ export async function generateVideo(
   const meta = {
     host: hostProvenance(state.host),
     composition: compositionProvenance(state.composition),
-    products: (state.products || []).map((p) => ({
-      name: p.name || '',
-      path: p.path || '',
-      url: p.url || '',
-    })),
+    products: (state.products || []).map((raw) => {
+      // state.products is schema-typed (Product[]) at runtime even though
+      // GenerateVideoInput keeps a loose type. Pull the canonical key/url
+      // from source.asset; ignore url/empty/localFile sources.
+      const p = raw as unknown as { name?: string; source?: { kind?: string; asset?: { key?: string; url?: string } } };
+      const asset = p.source?.kind === 'uploaded' ? p.source.asset : null;
+      return {
+        name: p.name || '',
+        // wire form keeps `path`/`url` field names so backend manifest +
+        // ProvenanceCard hydration don't need a coordinated swap; values
+        // are storage_keys.
+        path: asset?.key || '',
+        url: asset?.url || '',
+      };
+    }),
     background: backgroundProvenance(state.background),
     voice: voiceProvenance(state.voice),
     imageQuality: state.imageQuality || '1K',

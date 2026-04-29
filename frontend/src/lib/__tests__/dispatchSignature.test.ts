@@ -8,11 +8,11 @@ describe('computeDispatchSignature', () => {
   const baseState = {
     voice: {
       source: 'tts',
-      generation: { state: 'ready', audio: { path: '/uploads/tts.wav' } },
+      generation: { state: 'ready', audio: { key: '/uploads/tts.wav' } },
       script: { paragraphs: ['안녕하세요', '오늘 소개할 제품은'] },
     },
     composition: {
-      generation: { state: 'ready', selected: { path: '/composites/c1.png' } },
+      generation: { state: 'ready', selected: { key: '/composites/c1.png' } },
     },
     host: null,
     resolution: '1080p',
@@ -31,7 +31,7 @@ describe('computeDispatchSignature', () => {
       ...baseState,
       voice: {
         ...baseState.voice,
-        generation: { state: 'ready', audio: { path: '/uploads/tts-other.wav' } },
+        generation: { state: 'ready', audio: { key: '/uploads/tts-other.wav' } },
       },
     });
     expect(a).not.toBe(b);
@@ -42,7 +42,7 @@ describe('computeDispatchSignature', () => {
     const b = computeDispatchSignature({
       ...baseState,
       composition: {
-        generation: { state: 'ready', selected: { path: '/composites/c2.png' } },
+        generation: { state: 'ready', selected: { key: '/composites/c2.png' } },
       },
     });
     expect(a).not.toBe(b);
@@ -71,7 +71,7 @@ describe('computeDispatchSignature', () => {
       ...baseState,
       composition: null,
       host: {
-        generation: { state: 'ready', selected: { path: '/hosts/h1.png' } },
+        generation: { state: 'ready', selected: { key: '/hosts/h1.png' } },
       },
     };
     const sig = computeDispatchSignature(noComp);
@@ -83,7 +83,7 @@ describe('computeDispatchSignature', () => {
       ...baseState,
       voice: {
         source: 'upload',
-        audio: { path: '/uploads/raw.wav' },
+        audio: { key: '/uploads/raw.wav' },
         script: { paragraphs: [] },
       },
     };

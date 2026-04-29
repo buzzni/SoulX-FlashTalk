@@ -70,21 +70,20 @@ export interface GenerateVoiceInput {
     style?: number;
     similarity?: number;
     speed?: number;
-    uploadedAudio?: { path?: string | null };
+    uploadedAudio?: { key?: string | null };
   };
 }
 
 /**
  * Either returns the already-uploaded audio (source='upload' shortcut),
- * or posts to /api/elevenlabs/generate and returns the generated
- * audio_path / duration / etc.
+ * or posts to /api/elevenlabs/generate and returns `{key, url, ...}`.
  */
 export async function generateVoice(
   { voice }: GenerateVoiceInput,
   { signal }: CallOptions = {},
-): Promise<{ audio_path?: string; source?: string; [key: string]: unknown }> {
+): Promise<{ key?: string; url?: string; source?: string; [k: string]: unknown }> {
   if (voice.source === 'upload') {
-    return { audio_path: voice.uploadedAudio?.path ?? undefined, source: 'upload' };
+    return { key: voice.uploadedAudio?.key ?? undefined, source: 'upload' };
   }
   // source is narrowed to 'tts' | 'clone' | null | undefined here (the
   // 'upload' branch returned above). Both 'tts' and 'clone' want the v3
@@ -107,12 +106,9 @@ export async function generateVoice(
     headers: getAuthHeaders(),
     signal,
   });
-  // Backend returns { filename, path, url }. Callers (useTTSGeneration) read
-  // `audio_path` per this function's signature, so normalize here — without
-  // this the schema voice.generation never transitions to 'ready', which
-  // hides the Step 3 audio preview AND keeps "영상 만들기 시작" disabled.
+  // Backend returns { filename, key, url }. PR-4 collapsed legacy
+  // `path`/`storage_key`/`audio_path` shapes onto the canonical pair —
+  // useTTSGeneration commits `key` to schema voice.generation.audio.key.
   const json = (await parseResponse(res, '음성 생성')) as Record<string, unknown>;
-  const path = typeof json.audio_path === 'string' ? json.audio_path
-    : typeof json.path === 'string' ? json.path : undefined;
-  return { ...json, audio_path: path };
+  return json as { key?: string; url?: string; source?: string; [k: string]: unknown };
 }

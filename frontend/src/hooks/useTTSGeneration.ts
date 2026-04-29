@@ -23,9 +23,11 @@ import { toVoiceGenerateRequest } from '../wizard/api-mappers';
 import type { ServerAsset } from '../wizard/schema';
 
 export interface TTSResult {
-  audio_path?: string;
+  key?: string;
+  url?: string;
+  filename?: string;
   source?: string;
-  [key: string]: unknown;
+  [k: string]: unknown;
 }
 
 export interface UseTTSGenerationReturn {
@@ -81,7 +83,7 @@ export function useTTSGeneration(): UseTTSGenerationReturn {
       // canonical persisted identifier; URL is best-effort (the
       // backend may or may not return one).
       const audio: ServerAsset = {
-        key: res.audio_path ?? '',
+        key: res.key ?? '',
         url: typeof res.url === 'string' ? res.url : undefined,
         name: 'tts.wav',
       };
