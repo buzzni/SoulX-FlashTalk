@@ -114,6 +114,15 @@ async def init_indexes() -> None:
         [("user_id", 1), ("playlist_id", 1), ("completed_at", -1)],
         name="user_playlist_completed",
     )
+    # Public-endpoint lookup for /api/videos/{task_id} (PR S3+ C11).
+    # The handler queries by task_id alone (no user_id) because
+    # <video> tags can't send Authorization headers, so it can't use
+    # the user_task_uniq compound index. Without this dedicated
+    # single-field index it would fall back to a collection scan.
+    await db.studio_results.create_index(
+        [("task_id", 1)],
+        name="task_id_public_lookup",
+    )
     # studio_playlists (per-user playlists)
     await db.studio_playlists.create_index(
         [("user_id", 1), ("playlist_id", 1)],

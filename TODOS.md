@@ -239,3 +239,93 @@ Deferred work captured during plan reviews. Each entry includes context for futu
 **Priority**: P2 (defer until prompt lever 입증).
 
 **Depends on / blocked by**: MVP admin page (prompt only) 구현 + 5-7번 prompt 변형 시도 + RUBRIC blind score 의 yes-rate 평가.
+
+---
+
+## Wizard 입력 UX + prompt capability 재검토 (B1/B3/C2/C3)
+
+**What**: 현재 wizard UI에 노출돼 있거나 노출 가치가 있는 입력값들의 **사용자 명료성 + 모델 capability 활용**을 design 시점에서 재검토. 4가지 묶음:
+
+1. **B1 Step 1 strength UI** (`HostReferenceUploader.tsx:37-40`) — 4단계 칩 (느슨하게/참고만/가깝게/똑같이)이 0.15/0.45/0.7/0.95에 매핑. 사용자가 같은 값으로 4장 후보를 받으므로 strength 효과를 비교 학습 불가능. 옵션: 라벨 아래 결과 영향 1줄 설명 (γ) / 4장을 4 strength로 분산 생성 (α) / hover 비교 이미지 (β).
+2. **B3 Step 3 advanced 미리듣기** (`VoiceAdvancedSettings.tsx`) — stability/style/similarity/speed slider 변경 시 미리듣기 부재 → "음성 만들기" 다시 눌러야 들음. 짧은 sample script + debounce 방식 도입 검토. ElevenLabs character 비용 분석 필요.
+3. **C2 image-mode negativePrompt** (`schema.ts:HostInputSchema` image variant) — text mode에는 negativePrompt 입력 있음, image mode에는 없음. backend는 mode 무관하게 처리. 대칭 회복 가치 검토.
+4. **C3 FlashTalk T5 prompt 노출** (`config.py:45`) — 모든 영상이 default 'calmly speaking' prompt 동일. Step 3에 "영상 톤" 3-preset segmented 노출 검토. lip-sync 품질 영향 사전 실험 필요.
+
+**Why**: `/plan-eng-review` 2026-04-29 매핑 일관성 정리 (`specs/wizard-input-prompt-coherence/plan.md`)에서 도출. 매핑 cleanup은 PR 분리, UX 결정은 design-review 영역으로 이관됨. 묶음으로 검토해야 wizard 전체 UX 일관성 확보.
+
+**Pros**:
+- 사용자가 입력한 값이 "결과를 어떻게 바꾸는지" 명료해짐 → 후보 선택 학습 가속
+- text/image mode UX 비대칭 해소
+- FlashTalk 영상 톤 자유도 = 동일 호스트로 다양한 콘텐츠 톤 가능
+
+**Cons**:
+- B3는 ElevenLabs character 비용 증가 가능성 (debounce 설정에 의존)
+- C3는 lip-sync 품질에 영향 — default prompt 변경 자체가 위험
+- 4건 묶음 처리 시 PR scope ↑
+
+**Context**: `specs/wizard-input-prompt-coherence/plan.md` 참고. plan-eng-review에서 매핑 정리만 채택하고 UX/capability 결정은 모두 defer. 다음 단계는 `/plan-design-review specs/wizard-input-prompt-coherence/plan.md` 또는 별도 design 세션.
+
+**Effort**: human ~1주 / CC ~6-8시간 (각 항목 디자인 + 구현 + 테스트).
+
+**Priority**: P3 (매핑 cleanup 먼저 land 후 진행).
+
+**Depends on / blocked by**: 매핑 cleanup PR (A1+A2+A3+A4) 머지. C3는 lip-sync 품질 사전 실험 (3 preset prompt × 5 영상 비교).
+
+---
+
+## PR S3+ cutover follow-ups
+
+**What**: Items deferred from the S3 migration commits (C1–C13). All
+non-blocking for the cutover itself but should land before the
+PoC demo handoff goes wider than the current customer.
+
+1. **`generate_conversation_task` dual-input handling** — C9 left
+   conversation worker on absolute-path-only inputs. PoC demo doesn't
+   exercise the conversation page much, so it's fine through cutover,
+   but frontend C9 changes will break it the moment a user submits a
+   conversation with storage_key inputs. Mirror the
+   `_resolve_input_to_local` + `_cleanup_input_tempfiles` pattern from
+   `generate_video_task` (~30 lines).
+
+2. **task_states cleanup post-upload** — C7 review #4 / C10 review #4:
+   `task_states[task_id]["output_path"]` keeps pointing at the LocalDisk
+   mp4 even after the worker has uploaded to S3. `/api/videos` then
+   serves the local copy in preference to the S3 redirect. Pop the dict
+   entry once `_upload_video_with_retry` returns OK.
+
+3. **Local OUTPUTS_DIR cleanup cron** — C7 review #3: inference results
+   stay in OUTPUTS_DIR forever post-cutover even though S3 has the
+   canonical copy. Disk-full risk on the GPU box. Either a daily cron
+   that deletes mp4s older than 7 days, or hook the cleanup into
+   `_upload_video_with_retry` success path.
+
+4. **`generate_video_task` cancel-safe try/finally** — C9 review #2:
+   `_cleanup_input_tempfiles` runs in the success path and the except
+   branch but not on `asyncio.CancelledError` / `KeyboardInterrupt`.
+   PoC demo doesn't exercise queue cancel often, but the temp leak
+   accumulates across cancels. Wrap the body in try/finally (large
+   indent diff but mechanical).
+
+5. **frontend strict schema migration** — C8 review #5: `_serialize` /
+   `_public` now emit `storage_key`. If frontend zod schemas are strict
+   they'll reject the new field. Either add `storage_key` to the schemas
+   or set them to `extra='allow'`. Same for `/api/upload/*`'s
+   `storage_key` / `url` additions.
+
+6. **`/api/files` legacy bare-name backfill** — C10 review #7:
+   pre-PR3 manifests stored URLs like `/api/files/host_a.png`
+   (no bucket prefix). On S3 cutover those resolve to nothing.
+   Either a one-shot DB scan that rewrites the URLs to the new
+   `outputs/...` shape, or extend the S3 branch in `/api/files` to
+   probe `uploads/` for bare names.
+
+**Why**: The cutover is safe to ship without these — every item is
+either rare in the PoC demo (#1, #4) or has a graceful fallback
+(#5, #6) or is a slow-burn cost (#2, #3). But each needs the
+attention before the migration is "done done".
+
+**Effort**: human ~1 day total / CC ~3 hours total.
+
+**Priority**: P2 (post-cutover follow-ups, before wider rollout).
+
+**Depends on / blocked by**: PR S3+ C13 cutover land.
