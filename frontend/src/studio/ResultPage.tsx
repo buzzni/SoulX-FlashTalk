@@ -92,7 +92,6 @@ export default function ResultPage() {
   const [result, setResult] = useState<ResultManifest | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [copied, setCopied] = useState(false);
   const [retrying, setRetrying] = useState(false);
   const [retryError, setRetryError] = useState<string | null>(null);
   // null = no modal open; otherwise the action that's pending confirmation.
@@ -488,20 +487,6 @@ export default function ResultPage() {
           ? 'cancelled'
           : 'processing';
 
-  const handleCopyShare = async () => {
-    if (!taskId) return;
-    const url = result?.video_url || `/api/videos/${taskId}`;
-    const link = url.startsWith('http') ? url : `${window.location.origin}${url}`;
-    try {
-      await navigator.clipboard.writeText(link);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1800);
-    } catch {
-      /* ignore clipboard failures */
-    }
-  };
-
-
   return (
     <div className="studio-root" data-density="comfortable">
       <div className="app-shell" data-screen-label="06 Result">
@@ -647,8 +632,6 @@ export default function ResultPage() {
                     status={primaryStatus}
                     taskId={taskId}
                     retriedFrom={result.retried_from ?? null}
-                    copied={copied}
-                    onCopyShare={handleCopyShare}
                     onEdit={() => setConfirmAction('edit')}
                     onRetry={() => setConfirmAction('retry')}
                     onNew={() => navigate('/')}

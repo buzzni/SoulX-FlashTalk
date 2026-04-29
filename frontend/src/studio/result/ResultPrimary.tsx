@@ -43,8 +43,6 @@ export interface ResultPrimaryProps {
   /** Lineage from the result manifest. Non-null = depth ≥ 1 → swap the
    *  error-status primary from 재시도 to 수정해서 다시 만들기 (D3A). */
   retriedFrom: string | null | undefined;
-  copied: boolean;
-  onCopyShare: () => void;
   onEdit: () => void;
   onRetry: () => void;
   onNew: () => void;
@@ -60,8 +58,6 @@ export function ResultPrimary({
   status,
   taskId,
   retriedFrom,
-  copied,
-  onCopyShare,
   onEdit,
   onRetry,
   onNew,
@@ -104,21 +100,13 @@ export function ResultPrimary({
         data-status="processing"
         className="flex flex-row gap-2 mt-auto justify-end"
       >
-        <KebabMenu
-          showShare={false}
-          copied={copied}
-          onCopyShare={onCopyShare}
-          onEdit={onEdit}
-          onNew={onNew}
-        />
+        <KebabMenu onEdit={onEdit} />
       </div>
     );
   }
 
   // For completed/error/cancelled: primary fills the row, kebab is the
   // fixed square on the right.
-  const showShareInKebab = status === 'completed';
-
   return (
     <div
       data-testid="result-primary"
@@ -133,13 +121,7 @@ export function ResultPrimary({
         onEdit={onEdit}
         onNew={onNew}
       />
-      <KebabMenu
-        showShare={showShareInKebab}
-        copied={copied}
-        onCopyShare={onCopyShare}
-        onEdit={onEdit}
-        onNew={onNew}
-      />
+      <KebabMenu onEdit={onEdit} />
     </div>
   );
 }
@@ -230,20 +212,10 @@ function PrimaryButton({
 // ── Kebab menu ────────────────────────────────────────────────────────
 
 interface KebabMenuProps {
-  showShare: boolean;
-  copied: boolean;
-  onCopyShare: () => void;
   onEdit: () => void;
-  onNew: () => void;
 }
 
-function KebabMenu({
-  showShare,
-  copied,
-  onCopyShare,
-  onEdit,
-  onNew,
-}: KebabMenuProps) {
+function KebabMenu({ onEdit }: KebabMenuProps) {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
@@ -258,19 +230,9 @@ function KebabMenu({
         </button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="min-w-[200px]">
-        {showShare && (
-          <DropdownMenuItem onSelect={onCopyShare}>
-            <Icon name={copied ? 'check' : 'link'} size={14} />
-            {copied ? '링크 복사됨' : '공유 링크 복사'}
-          </DropdownMenuItem>
-        )}
         <DropdownMenuItem onSelect={onEdit}>
           <Icon name="settings" size={14} />
           수정해서 다시 만들기
-        </DropdownMenuItem>
-        <DropdownMenuItem onSelect={onNew}>
-          <Icon name="plus" size={14} />
-          새로 만들기
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>

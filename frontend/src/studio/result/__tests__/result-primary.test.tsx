@@ -1,10 +1,12 @@
 /**
- * ResultPrimary unit tests — full 19/19 coverage per eng-review 3T.
+ * ResultPrimary unit tests.
  *
  * Status mapping (5): completed/error/cancelled/loading/processing each
  *   render the correct primary text (or no primary, in the processing case).
- * Kebab contents (3): completed has 공유 링크 복사; error+cancelled don't;
- *   all three have the common 새로 만들기 + 수정해서 다시 만들기 pair.
+ * Kebab contents: only 수정해서 다시 만들기 across all status rows. 공유 링크
+ *   복사 and 새로 만들기 were removed from the menu — the share link wasn't
+ *   actually shareable (the URL hits an authed backend) and 새로 만들기 is
+ *   already reachable via the home page.
  * Retry depth (3): retriedFrom=null → 재시도; retriedFrom="abc" →
  *   수정해서 다시 만들기; one-deep heuristic short-circuits the chain walk.
  * Layout + touch targets (1): always flex-row — primary grows (flex-1),
@@ -25,8 +27,6 @@ function renderPrimary(overrides: Partial<React.ComponentProps<typeof ResultPrim
     status: 'completed',
     taskId: 't_test',
     retriedFrom: null,
-    copied: false,
-    onCopyShare: noop,
     onEdit: noop,
     onRetry: noop,
     onNew: noop,
@@ -108,31 +108,31 @@ function menuItemTexts(): string[] {
 }
 
 describe('ResultPrimary — kebab contents per status', () => {
-  it('completed: kebab includes 공유 링크 복사 + the common pair', async () => {
+  it('completed: kebab contains only 수정해서 다시 만들기', async () => {
     renderPrimary({ status: 'completed' });
     await openKebab();
     const items = menuItemTexts();
-    expect(items.some((t) => t.includes('공유 링크 복사'))).toBe(true);
     expect(items.some((t) => t.includes('수정해서 다시 만들기'))).toBe(true);
-    expect(items.some((t) => t.includes('새로 만들기'))).toBe(true);
+    expect(items.some((t) => t.includes('공유 링크 복사'))).toBe(false);
+    expect(items.some((t) => t.includes('새로 만들기'))).toBe(false);
   });
 
-  it('error: kebab does NOT include 공유 링크 복사', async () => {
+  it('error: kebab contains only 수정해서 다시 만들기', async () => {
     renderPrimary({ status: 'error' });
     await openKebab();
     const items = menuItemTexts();
-    expect(items.some((t) => t.includes('공유 링크 복사'))).toBe(false);
     expect(items.some((t) => t.includes('수정해서 다시 만들기'))).toBe(true);
-    expect(items.some((t) => t.includes('새로 만들기'))).toBe(true);
+    expect(items.some((t) => t.includes('공유 링크 복사'))).toBe(false);
+    expect(items.some((t) => t.includes('새로 만들기'))).toBe(false);
   });
 
-  it('cancelled: kebab does NOT include 공유 링크 복사', async () => {
+  it('cancelled: kebab contains only 수정해서 다시 만들기', async () => {
     renderPrimary({ status: 'cancelled' });
     await openKebab();
     const items = menuItemTexts();
-    expect(items.some((t) => t.includes('공유 링크 복사'))).toBe(false);
     expect(items.some((t) => t.includes('수정해서 다시 만들기'))).toBe(true);
-    expect(items.some((t) => t.includes('새로 만들기'))).toBe(true);
+    expect(items.some((t) => t.includes('공유 링크 복사'))).toBe(false);
+    expect(items.some((t) => t.includes('새로 만들기'))).toBe(false);
   });
 });
 
