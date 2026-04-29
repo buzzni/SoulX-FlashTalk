@@ -146,10 +146,15 @@ AUDIT_LOG_PATH = os.environ.get(
 # ========================================
 # Default Input Files
 # ========================================
-DEFAULT_HOST_IMAGE_MALE = os.path.join(PROJECT_ROOT, "examples", "man_default.png")
-DEFAULT_HOST_IMAGE_FEMALE = os.path.join(PROJECT_ROOT, "examples", "woman.png")
+# PR S3+ C12: defaults are storage_keys, not absolute paths. The
+# `_resolve_input_to_local` worker helper sees `examples/...` head
+# segment and downloads from media_store (LocalDisk same-file no-op,
+# S3 GET after sync). `scripts/upload_examples_to_s3.py` is the one-
+# shot that copies the seed files into the bucket before cutover.
+DEFAULT_HOST_IMAGE_MALE = "examples/man_default.png"
+DEFAULT_HOST_IMAGE_FEMALE = "examples/woman.png"
 DEFAULT_HOST_IMAGE = DEFAULT_HOST_IMAGE_FEMALE  # Single Host 기본: 호스트 A (여성)
-DEFAULT_AUDIO = os.path.join(PROJECT_ROOT, "examples", "cantonese_16k.wav")
+DEFAULT_AUDIO = "examples/cantonese_16k.wav"
 
 # Default ElevenLabs voice names per gender
 DEFAULT_VOICE_FEMALE = "JiYoung - professional"
