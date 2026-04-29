@@ -35,7 +35,6 @@ vi.mock('../../api/history', () => ({
 }));
 vi.mock('../../api/file', () => ({
   getVideoMeta: vi.fn().mockResolvedValue({}),
-  listServerFiles: vi.fn(),
 }));
 
 import { fetchQueue } from '../../api/queue';

@@ -29,15 +29,13 @@
  * form via setValue so the persisted shape reflects the server paths.
  */
 
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useMemo, useRef } from 'react';
 import { Image as ImageIcon } from 'lucide-react';
 import { FormProvider, useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { WizardBadge as Badge } from '@/components/wizard-badge';
 import { WizardButton as Button } from '@/components/wizard-button';
 import { WizardCard as Card } from '@/components/wizard-card';
-import ServerFilePicker from '../ServerFilePicker.jsx';
-import { applyPickedFileToProducts } from '../picker_handler.js';
 import { useCompositeGeneration, type CompositionVariant } from '../../hooks/useCompositeGeneration';
 import { useUploadReferenceImage } from '../../hooks/useUploadReferenceImage';
 import { uploadBackgroundImage, uploadReferenceImage } from '../../api/upload';
@@ -92,7 +90,6 @@ export default function Step2Composite({ state }: Step2CompositeProps) {
   const productUpload = useUploadReferenceImage(uploadReferenceImage);
   const backgroundUpload = useUploadReferenceImage(uploadBackgroundImage);
   const attemptsRef = useRef<number>(composition.generation.state === 'ready' ? 1 : 0);
-  const [pickerFor, setPickerFor] = useState<'products' | 'bg' | null>(null);
 
   // Form-shaped projection. Memo keys on the three sub-slice refs
   // (settings instead of composition) so streaming candidate events
@@ -233,21 +230,6 @@ export default function Step2Composite({ state }: Step2CompositeProps) {
     });
   };
 
-  const handlePickedServerFile = (f: unknown) => {
-    if (pickerFor === 'bg') {
-      const file = f as { filename?: string; path: string; url?: string };
-      form.setValue(
-        'background',
-        { kind: 'upload', asset: { path: file.path, url: file.url, name: file.filename } },
-        { shouldDirty: true, shouldValidate: true },
-      );
-    } else if (pickerFor === 'products') {
-      const next = applyPickedFileToProducts(form.getValues('products'), f);
-      form.setValue('products', next as Products, { shouldDirty: true, shouldValidate: true });
-    }
-    setPickerFor(null);
-  };
-
   const selectedImageId =
     composition.generation.state === 'ready' && composition.generation.selected
       ? composition.generation.selected.imageId
@@ -275,21 +257,16 @@ export default function Step2Composite({ state }: Step2CompositeProps) {
           <Card
             title="소개할 상품"
             action={
-              <div className="flex gap-1.5">
-                <Button icon="file" size="sm" onClick={() => setPickerFor('products')}>
-                  서버 파일 선택
-                </Button>
-                <Button icon="plus" size="sm" onClick={addEmptyProduct}>
-                  제품 추가
-                </Button>
-              </div>
+              <Button icon="plus" size="sm" onClick={addEmptyProduct}>
+                제품 추가
+              </Button>
             }
           >
             <ProductList />
           </Card>
 
           <Card title="배경">
-            <BackgroundPicker onPickServerFile={() => setPickerFor('bg')} />
+            <BackgroundPicker />
           </Card>
 
           <Card title="구도" subtitle="쇼호스트 자세·제품 위치를 적어주세요">
@@ -301,13 +278,6 @@ export default function Step2Composite({ state }: Step2CompositeProps) {
               onGenerate={submit}
             />
           </Card>
-
-          <ServerFilePicker
-            open={pickerFor !== null}
-            kind="image"
-            onClose={() => setPickerFor(null)}
-            onSelect={handlePickedServerFile}
-          />
         </div>
 
         <div className="step-page-canvas">

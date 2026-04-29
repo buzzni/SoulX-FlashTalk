@@ -63,10 +63,6 @@ const BG_PRESETS: { id: string; label: string; desc: string; icon: LucideIcon }[
   { id: 'solid_blue', label: '블루 단색', desc: '깔끔 강조', icon: Palette },
 ];
 
-export interface BackgroundPickerProps {
-  onPickServerFile: () => void;
-}
-
 type PickSubMode = 'preset' | 'upload';
 
 function pickSubModeFor(bg: Background): PickSubMode {
@@ -84,7 +80,7 @@ function pickSubModeFor(bg: Background): PickSubMode {
   }
 }
 
-export function BackgroundPicker({ onPickServerFile }: BackgroundPickerProps) {
+export function BackgroundPicker() {
   const { setValue, watch } = useFormContext<Step2FormValues>();
   const background = watch('background');
   const isAi = background.kind === 'prompt';
@@ -191,7 +187,6 @@ export function BackgroundPicker({ onPickServerFile }: BackgroundPickerProps) {
               <UploadView
                 asset={background.asset}
                 onChange={swap}
-                onPickServerFile={onPickServerFile}
               />
             )}
           </>
@@ -219,80 +214,58 @@ export function BackgroundPicker({ onPickServerFile }: BackgroundPickerProps) {
 interface UploadViewProps {
   asset: ServerAsset | LocalAsset | null;
   onChange: (next: Background) => void;
-  onPickServerFile: () => void;
 }
 
-function UploadView({ asset, onChange, onPickServerFile }: UploadViewProps) {
-  // Server-asset state shows the picked-file confirmation row (custom
-  // markup with rename + delete affordances). Local-file state hands
-  // the wrapper shape back to UploadTile via the shared bridge helper.
+function UploadView({ asset, onChange }: UploadViewProps) {
+  // Server-asset state shows the post-upload confirmation row (thumb +
+  // filename + delete). Reached after the user uploads a local file
+  // and the parent swaps the slot to a ServerAsset.
   if (isServerAsset(asset)) {
     return (
-      <div className="flex-col gap-2">
-        <div className={UPLOAD_TILE_HAS_FILE_CLASS}>
-          <div className={UPLOAD_TILE_THUMB_CLASS}>
-            {asset.url && (
-              <img
-                src={asset.url}
-                alt={asset.name ?? ''}
-                className="w-full h-full object-cover block"
-              />
-            )}
-          </div>
-          <div className="flex flex-col gap-0.5 min-w-0 text-[13px] text-foreground">
-            <span className="truncate font-semibold tracking-tight">
-              {asset.name || '(서버 파일)'}
-            </span>
-            <span className="font-mono text-[11px] text-muted-foreground">server</span>
-          </div>
-          <div className="flex gap-1 shrink-0">
-            <button className={UPLOAD_TILE_FILE_BTN_CLASS} onClick={onPickServerFile}>
-              <Icon name="swap" size={12} /> 다른 파일
-            </button>
-            <button
-              className={cn(UPLOAD_TILE_FILE_BTN_CLASS, UPLOAD_TILE_FILE_BTN_DANGER_CLASS)}
-              onClick={() => onChange({ kind: 'upload', asset: null })}
-            >
-              <Icon name="trash" size={12} /> 삭제
-            </button>
-          </div>
+      <div className={UPLOAD_TILE_HAS_FILE_CLASS}>
+        <div className={UPLOAD_TILE_THUMB_CLASS}>
+          {asset.url && (
+            <img
+              src={asset.url}
+              alt={asset.name ?? ''}
+              className="w-full h-full object-cover block"
+            />
+          )}
         </div>
-        <ServerPickerLink onPick={onPickServerFile} />
+        <div className="flex flex-col gap-0.5 min-w-0 text-[13px] text-foreground">
+          <span className="truncate font-semibold tracking-tight">
+            {asset.name || ''}
+          </span>
+          <span className="font-mono text-[11px] text-muted-foreground">server</span>
+        </div>
+        <div className="flex gap-1 shrink-0">
+          <button
+            className={cn(UPLOAD_TILE_FILE_BTN_CLASS, UPLOAD_TILE_FILE_BTN_DANGER_CLASS)}
+            onClick={() => onChange({ kind: 'upload', asset: null })}
+          >
+            <Icon name="trash" size={12} /> 삭제
+          </button>
+        </div>
       </div>
     );
   }
 
   return (
-    <div className="flex-col gap-2">
-      <UploadTile
-        file={uploadFileFromAsset(asset)}
-        onFile={(f) => {
-          // Revoke the prior blob: previewUrl on replace so the slot
-          // doesn't accumulate dead object URLs across pick/replace.
-          if (asset && isLocalAssetGuard(asset)) revokeLocalAssetIfBlob(asset);
-          const localAsset = localAssetFromUploadFile(f);
-          onChange({ kind: 'upload', asset: localAsset });
-        }}
-        onRemove={() => {
-          if (asset && isLocalAssetGuard(asset)) revokeLocalAssetIfBlob(asset);
-          onChange({ kind: 'upload', asset: null });
-        }}
-        label="배경 사진 올리기"
-        sub="촬영한 매장 사진 등"
-      />
-      <ServerPickerLink onPick={onPickServerFile} />
-    </div>
-  );
-}
-
-function ServerPickerLink({ onPick }: { onPick: () => void }) {
-  return (
-    <button
-      type="button"
-      onClick={onPick}
-      className="self-start inline-flex items-center gap-1.5 h-8 px-3 rounded-md text-xs font-medium text-muted-foreground hover:bg-secondary hover:text-foreground transition-colors"
-    >
-      <Icon name="file" size={12} /> 서버에 있는 파일에서 선택
-    </button>
+    <UploadTile
+      file={uploadFileFromAsset(asset)}
+      onFile={(f) => {
+        // Revoke the prior blob: previewUrl on replace so the slot
+        // doesn't accumulate dead object URLs across pick/replace.
+        if (asset && isLocalAssetGuard(asset)) revokeLocalAssetIfBlob(asset);
+        const localAsset = localAssetFromUploadFile(f);
+        onChange({ kind: 'upload', asset: localAsset });
+      }}
+      onRemove={() => {
+        if (asset && isLocalAssetGuard(asset)) revokeLocalAssetIfBlob(asset);
+        onChange({ kind: 'upload', asset: null });
+      }}
+      label="배경 사진 올리기"
+      sub="촬영한 매장 사진 등"
+    />
   );
 }

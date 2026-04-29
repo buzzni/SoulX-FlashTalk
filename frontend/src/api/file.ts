@@ -1,52 +1,15 @@
 /**
- * File-related helpers — server file picker + video metadata.
- *
- * `listServerFiles` exists for environments where browser file upload
- * is blocked (corporate DLP / VPN); the user `scp`s a file onto the
- * server once, then picks from this list in the UI.
+ * File-related helpers — video metadata HEAD probe.
  *
  * `getVideoMeta` is a HEAD request against the result video — used by
  * RenderDashboard's "파일 용량" display to show the *actual* Content-
  * Length rather than a rough resolution-based estimate.
  */
 
-import { z } from 'zod';
-import { API_BASE, getAuthHeaders, fetchJSON } from './http';
+import { API_BASE, getAuthHeaders } from './http';
 
 export interface CallOptions {
   signal?: AbortSignal;
-}
-
-export type ServerFileKind = 'image' | 'audio';
-
-export interface ServerFile {
-  filename: string;
-  path: string;
-  url: string;
-  size: number;
-  modified: number;
-}
-
-const ServerFileSchema = z.object({
-  filename: z.string(),
-  path: z.string(),
-  url: z.string(),
-  size: z.number(),
-  modified: z.number(),
-});
-
-const ListServerFilesResponseSchema = z.object({
-  files: z.array(ServerFileSchema),
-});
-
-export function listServerFiles(
-  kind: ServerFileKind = 'image',
-  { signal }: CallOptions = {},
-): Promise<{ files: ServerFile[] }> {
-  return fetchJSON(
-    `/api/upload/list?kind=${encodeURIComponent(kind)}`,
-    { label: '서버 파일 목록 조회', signal, schema: ListServerFilesResponseSchema },
-  );
 }
 
 export interface VideoMeta {

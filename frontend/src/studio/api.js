@@ -56,4 +56,4 @@ export { generateVideo } from '../api/video';
 export { cancelQueuedTask, fetchQueue } from '../api/queue';
 export { fetchHistory } from '../api/history';
 export { fetchResult } from '../api/result';
-export { getVideoMeta, listServerFiles } from '../api/file';
+export { getVideoMeta } from '../api/file';
