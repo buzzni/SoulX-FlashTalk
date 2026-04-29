@@ -37,20 +37,10 @@ ENV = "dev"
 PROJECT = "soulx-flashtalk"
 ROOT = f"{ENV}/{PROJECT}"
 
-
-@pytest.fixture
-def s3_setup():
-    """Fresh moto S3 + bucket + S3MediaStore, function-scoped."""
-    with mock_aws():
-        client = boto3.client("s3", region_name="us-east-1")
-        client.create_bucket(Bucket=BUCKET)
-        store = S3MediaStore(
-            bucket=BUCKET,
-            env_prefix=ENV,
-            project=PROJECT,
-            client=client,
-        )
-        yield client, store
+# `s3_setup` fixture lives in tests/conftest.py (PR S3+ C4) so future
+# S3-backed tests can share the same moto context. It yields
+# `(s3_client, s3_media_store)` — same shape this file used to define
+# locally.
 
 
 # ── Protocol satisfaction ─────────────────────────────────────────────
