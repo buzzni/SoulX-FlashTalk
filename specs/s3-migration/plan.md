@@ -85,6 +85,12 @@ class MediaStore(Protocol):
 | `app.py:3111` (delete) | `media_store.delete(key)` |
 | `key_from_path` 호출자 (`app.py:801, 2122`, `studio_host_repo:168`) | 제거. generator가 직접 key를 만듦 |
 
+C2부터 `local_path_for()`/`key_from_path()`가 `DeprecationWarning`을 발신 → 호출자는 pytest output / grep / IDE 어디서든 노란불을 본다. cutover 전까지 매트릭스의 모든 항목이 zero가 되어야 함.
+
+### 3.2 kind-based vs key-based 공존
+
+`save_bytes(kind=...)` / `save_path(kind=...)`은 영구 유지 (S3 backend도 동일 시그니처 구현). 신규 코드는 key-based (`upload(src, key)`) 권장 — `_KIND_PATH` 라우팅을 거치지 않고 호출자가 key 모양을 통제할 수 있어 마이그레이션 범위가 줄어든다.
+
 ### 3.2 boto3 client 설정
 
 ```python
@@ -185,7 +191,7 @@ finally:
 | # | 제목 | 검증 |
 |---|---|---|
 | **C1** | deps + config + .env.example | `import boto3` OK, 기존 테스트 통과, 동작 변경 0 |
-| **C2** | MediaStore Protocol 확장 + LocalDisk 동등 구현 | 새 메서드 (open_local/upload/head/exists/list_prefix/url_for download_filename) — LocalDisk가 모두 구현. 기존 테스트 + 새 테스트 통과 |
+| **C2** | MediaStore Protocol 확장 + LocalDisk 동등 구현 | open_local (race invariant docstring) / upload·download_to (atomic tempfile+os.replace) / head (weak ETag + tz-aware datetime) / exists (invalid key raises) / list_prefix (정렬·symlink 차단) / url_for(download_filename → query). `local_path_for`/`key_from_path` DeprecationWarning. Protocol 만족 테스트 포함 |
 | **C3** | S3MediaStore 구현 + moto 테스트 | 두 클래스 공존. media_store 싱글톤은 여전히 LocalDisk |
 | **C4** | conftest.py moto autouse fixture | mock_aws() activate + media_store monkeypatch helper. 기존 fixture는 LocalDisk 모드로 호환 |
 | **C5** | upload 핸들러 dual-compatible | 응답에 `storage_key` 추가, `path`는 호환용 유지. tempfile + media_store.upload |
@@ -193,7 +199,7 @@ finally:
 | **C7** | generate_*_task download/upload 패턴 | with open_local + ctx 자식 종료까지. retry 3회. ffprobe 검증. job_dir cleanup |
 | **C8** | repos: legacy invariant 강제 | `studio_result_repo.upsert`에 `video_storage_key` 강제 가드, `video_path=None`. studio_host_repo `_serialize`/`_public`에서 path 필드 제거 |
 | **C9** | frontend contract 전환 | api/{upload,video,voice,file}.ts + lib/format.ts. utils/security.py를 storage_key 검증으로 교체 |
-| **C10** | /api/files, /api/videos, /api/hosts → redirect + HEAD | 302 redirect, HEAD는 head_object. download=true는 ResponseContentDisposition |
+| **C10** | /api/files, /api/videos, /api/hosts → redirect + HEAD | 302 redirect (S3 presigned). HEAD는 head_object. `?download_filename=...` query를 핸들러가 받아: LocalDisk면 Content-Disposition 헤더 직접 박음, S3면 presigned URL의 ResponseContentDisposition으로 위임 |
 | **C11** | task_id 인덱스 + plan v2 close-out | `studio_results.create_index([("task_id", 1)])`. TODOS 정리 |
 | **C12** | examples/ S3 sync 스크립트 | scripts/upload_examples_to_s3.py + DEFAULT_HOST_IMAGE/AUDIO를 storage_key로 |
 | **C13** | **CUTOVER** + docs | `media_store = S3MediaStore(...)` 한 줄. `docs/s3-bucket-setup.md` 인프라팀 요청서 |
