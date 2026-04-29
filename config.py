@@ -187,7 +187,11 @@ S3_PRESIGN_TTL_VIDEO = int(os.environ.get("S3_PRESIGN_TTL_VIDEO", "21600"))
 # inference downloads; retries=5 + standard mode handles throttling.
 S3_MAX_POOL_CONNECTIONS = int(os.environ.get("S3_MAX_POOL_CONNECTIONS", "50"))
 S3_MULTIPART_THRESHOLD = int(os.environ.get("S3_MULTIPART_THRESHOLD", str(8 * 1024 * 1024)))
-S3_MAX_RETRY_ATTEMPTS = int(os.environ.get("S3_MAX_RETRY_ATTEMPTS", "5"))
+# Total attempts (not retries — boto3 'standard' mode counts the first
+# call). Plan §1 #6: caller adds an outer retry loop on top of this for
+# the S3 upload step specifically (so a bad ffmpeg result mp4 doesn't
+# get re-uploaded 15 times). 3 keeps us well under that budget.
+S3_MAX_RETRY_ATTEMPTS = int(os.environ.get("S3_MAX_RETRY_ATTEMPTS", "3"))
 S3_CONNECT_TIMEOUT = int(os.environ.get("S3_CONNECT_TIMEOUT", "10"))
 S3_READ_TIMEOUT = int(os.environ.get("S3_READ_TIMEOUT", "300"))
 

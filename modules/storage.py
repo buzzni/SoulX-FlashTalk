@@ -86,6 +86,46 @@ def _bucket_dirs() -> dict[str, str]:
     }
 
 
+# Module-level helpers shared by every backend.
+
+def validate_key(key: str) -> tuple[str, str]:
+    """Validate a bucket-prefixed storage_key and return (bucket, rest).
+
+    Raises ValueError on:
+    - empty key, or key without bucket prefix
+    - unknown bucket
+    - any segment equal to '..' (prevent traversal)
+
+    Both LocalDisk and S3 backends call this so they reject the same
+    set of keys — keeps backend swap behaviour-equivalent.
+    """
+    if not key or "/" not in key:
+        raise ValueError(f"key must be bucket-prefixed: got {key!r}")
+    bucket, _, rest = key.partition("/")
+    if bucket not in _bucket_dirs():
+        raise ValueError(f"unknown bucket: {bucket!r}")
+    if not rest:
+        raise ValueError(f"empty key inside bucket: {key!r}")
+    for seg in rest.split("/"):
+        if seg in ("..", "") or seg.strip() == "":
+            raise ValueError(f"invalid key segment: {key!r}")
+    return bucket, rest
+
+
+def route_kind(kind: str) -> tuple[str, str]:
+    """Resolve `kind` to its (bucket, sub-path). Raises ValueError for
+    unknown kinds. Used by both backends to build storage keys."""
+    if kind not in _KIND_PATH:
+        raise ValueError(f"unknown media kind: {kind!r}")
+    return _KIND_PATH[kind]
+
+
+def build_storage_key(bucket: str, sub: str, basename: str) -> str:
+    """Compose a storage_key from (bucket, sub, basename) — same shape
+    both backends produce."""
+    return "/".join(p for p in (bucket, sub, basename) if p)
+
+
 class MediaStore(Protocol):
     # PR3 (kind-based, legacy)
     def save_bytes(self, kind: str, data: bytes, *,
@@ -116,35 +156,21 @@ class LocalDiskMediaStore:
 
     # ── internal helpers ────────────────────────────────────────────
     def _route(self, kind: str) -> tuple[str, str, Path]:
-        if kind not in _KIND_PATH:
-            raise ValueError(f"unknown media kind: {kind!r}")
-        bucket, sub = _KIND_PATH[kind]
+        bucket, sub = route_kind(kind)
         target = Path(_bucket_dirs()[bucket])
         if sub:
             target = target / sub
         return bucket, sub, target
 
     def _build_key(self, bucket: str, sub: str, basename: str) -> str:
-        return "/".join(p for p in (bucket, sub, basename) if p)
+        return build_storage_key(bucket, sub, basename)
 
     def _validate_and_resolve(self, key: str) -> Path:
         """Validate `key` and return its absolute path. No deprecation
         warning — used by every internal method so they don't shout at
         themselves."""
-        if not key or "/" not in key:
-            raise ValueError(f"key must be bucket-prefixed: got {key!r}")
-        bucket, _, rest = key.partition("/")
-        dirs = _bucket_dirs()
-        if bucket not in dirs:
-            raise ValueError(f"unknown bucket: {bucket!r}")
-        if not rest:
-            raise ValueError(f"empty key inside bucket: {key!r}")
-        # Reject traversal segments (defense in depth even though resolve()
-        # would catch real escapes).
-        for seg in rest.split("/"):
-            if seg in ("..", "") or seg.strip() == "":
-                raise ValueError(f"invalid key segment: {key!r}")
-        return Path(dirs[bucket]) / rest
+        bucket, rest = validate_key(key)
+        return Path(_bucket_dirs()[bucket]) / rest
 
     def _atomic_copy(self, src: Path, dst: Path) -> None:
         """tempfile in dst.parent + os.replace — partial writes never

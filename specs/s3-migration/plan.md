@@ -26,7 +26,7 @@ v1 검토 결과 13 critical + 6 minor 함정 발견 (`specs/s3-migration/review
 | 3 | Legacy invariant | 새 row는 `video_path=None` 강제. `is_legacy` 필드 X. "path is not None == legacy" |
 | 4 | examples/ 처리 | S3에 한 번 sync (배포 스크립트). CompositeMediaStore X |
 | 5 | idle_cache | 로컬 ephemeral. S3 X |
-| 6 | upload retry | inference 결과 보존 + S3 upload만 3회 retry. ffprobe로 무결성 검증 |
+| 6 | upload retry | boto3 standard 모드 `S3_MAX_RETRY_ATTEMPTS=3` 총 시도 (1 + 2 retries) + caller가 `generate_video_task` 에서 outer 1회 wrap → 최악 6회. inference 결과는 job_dir에 보존, ffprobe 무결성 검증 후 upload |
 | 7 | feature flag | 없음. **마지막 단일 커밋에서 한 번에 cutover** (`media_store = S3MediaStore(...)`) |
 | 8 | rollback | 없음. dev라 fix-forward |
 | 9 | frontend | API contract 변경 (`storage_key` 필드 추가). 자동 redirect 따라감 |
@@ -91,7 +91,7 @@ C2부터 `local_path_for()`/`key_from_path()`가 `DeprecationWarning`을 발신 
 
 `save_bytes(kind=...)` / `save_path(kind=...)`은 영구 유지 (S3 backend도 동일 시그니처 구현). 신규 코드는 key-based (`upload(src, key)`) 권장 — `_KIND_PATH` 라우팅을 거치지 않고 호출자가 key 모양을 통제할 수 있어 마이그레이션 범위가 줄어든다.
 
-### 3.2 boto3 client 설정
+### 3.3 boto3 client 설정
 
 ```python
 boto3.client("s3",
@@ -99,6 +99,7 @@ boto3.client("s3",
     aws_access_key_id=config.S3_ACCESS_KEY,
     aws_secret_access_key=config.S3_SECRET_KEY,
     config=Config(
+        signature_version="s3v4",                    # ap-northeast-2 강제 + 모든 모던 region 안전
         retries={"max_attempts": config.S3_MAX_RETRY_ATTEMPTS, "mode": "standard"},
         max_pool_connections=config.S3_MAX_POOL_CONNECTIONS,
         connect_timeout=config.S3_CONNECT_TIMEOUT,
@@ -106,6 +107,8 @@ boto3.client("s3",
     ),
 )
 ```
+
+`make_default_s3_store()`는 `S3_ACCESS_KEY` / `S3_SECRET_KEY` 빈 문자열이면 즉시 raise — boto3가 기본 credential chain (env vars / `~/.aws/credentials` / IAM role) 으로 silent fallback하면 fail-fast 정책이 무력해지므로 명시 가드.
 
 ---
 
@@ -202,7 +205,7 @@ finally:
 | **C10** | /api/files, /api/videos, /api/hosts → redirect + HEAD | 302 redirect (S3 presigned). HEAD는 head_object. `?download_filename=...` query를 핸들러가 받아: LocalDisk면 Content-Disposition 헤더 직접 박음, S3면 presigned URL의 ResponseContentDisposition으로 위임 |
 | **C11** | task_id 인덱스 + plan v2 close-out | `studio_results.create_index([("task_id", 1)])`. TODOS 정리 |
 | **C12** | examples/ S3 sync 스크립트 | scripts/upload_examples_to_s3.py + DEFAULT_HOST_IMAGE/AUDIO를 storage_key로 |
-| **C13** | **CUTOVER** + docs | `media_store = S3MediaStore(...)` 한 줄. `docs/s3-bucket-setup.md` 인프라팀 요청서 |
+| **C13** | **CUTOVER** + docs | 사전 게이트 4개: ① `examples/` S3 sync 완료 (C12 산출물), ② `rg "local_path_for\(\|key_from_path\(" app.py modules` 결과 0 (C8/C9 산출물), ③ startup hook이 `media_store.s3.head_bucket(Bucket=...)` 으로 자격증명 + 버킷 가능여부 sanity 체크 (실패 시 fail-fast), ④ 위 모두 통과 후 `app.py` `@app.on_event("startup")` 안에서 `from modules.storage_s3 import make_default_s3_store; modules.storage.media_store = make_default_s3_store()` (모듈 top-level import는 circular import 위험). `docs/s3-bucket-setup.md` 인프라팀 요청서 |
 
 각 커밋 전:
 1. 변경 파일/줄 요약
